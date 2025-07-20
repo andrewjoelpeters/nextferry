@@ -13,8 +13,15 @@ let currentTab = 'routes';
 // Initialize the app
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Ferry Tracker starting...');
+    
+    // Initialize UI immediately
+    updateNextSailingsList(); // Show initial state
+    
+    // Fetch data
     fetchFerries();
     fetchNextSailings(); // Add initial next sailings fetch
+    
+    // Set up periodic updates
     setInterval(() => {
         fetchFerries();
         fetchNextSailings(); // Fetch next sailings on each interval
@@ -330,7 +337,10 @@ function updateNextSailingsList() {
                     
                     if (estimatedTime) {
                         const minutesUntil = Math.round((estimatedTime - currentTime) / (1000 * 60));
-                        if (minutesUntil > 0) {
+                        if (minutesUntil <= 2 && minutesUntil >= -5) {
+                            timeUntil = 'Now';
+                            statusClass = 'status-departing';
+                        } else if (minutesUntil > 2) {
                             if (minutesUntil < 60) {
                                 timeUntil = `${minutesUntil}m`;
                             } else {
@@ -338,9 +348,6 @@ function updateNextSailingsList() {
                                 const mins = minutesUntil % 60;
                                 timeUntil = `${hours}h ${mins}m`;
                             }
-                        } else if (minutesUntil >= -5) {
-                            timeUntil = 'Now';
-                            statusClass = 'status-departing';
                         } else {
                             timeUntil = 'Departed';
                             statusClass = 'status-departed';
@@ -348,10 +355,10 @@ function updateNextSailingsList() {
                     }
                     
                     if (sailing.estimated_delay > 0) {
-                        delayText = ` (+${sailing.estimated_delay}m)`;
+                        delayText = ` (+${Math.round(sailing.estimated_delay)}m)`;
                         statusClass = 'status-delayed';
                     } else if (sailing.estimated_delay < 0) {
-                        delayText = ` (${sailing.estimated_delay}m)`;
+                        delayText = ` (${Math.round(sailing.estimated_delay)}m)`;
                         statusClass = 'status-early';
                     } else {
                         statusClass = 'status-on-time';
@@ -393,7 +400,7 @@ function updateNextSailingsList() {
 function parseTimeString(timeStr) {
     if (!timeStr) return null;
     
-    const today = new Date();
+    const now = new Date();
     const [time, period] = timeStr.split(' ');
     const [hours, minutes] = time.split(':').map(Number);
     
@@ -404,10 +411,12 @@ function parseTimeString(timeStr) {
         hour24 = 0;
     }
     
-    const result = new Date(today.getFullYear(), today.getMonth(), today.getDate(), hour24, minutes);
+    const result = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour24, minutes);
     
-    // If the time is in the past, assume it's for tomorrow
-    if (result < today) {
+    // If the time is more than 12 hours in the past, assume it's for tomorrow
+    // This prevents showing departures as 24 hours away when they're actually soon
+    const timeDiff = result - now;
+    if (timeDiff < -12 * 60 * 60 * 1000) {
         result.setDate(result.getDate() + 1);
     }
     

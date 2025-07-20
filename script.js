@@ -224,40 +224,80 @@ async function fetchFerries() {
     }
 }
 
-// Fetch next sailings predictions
-async function fetchNextSailings() {
+// Fetch next sailings predictions with retry logic
+async function fetchNextSailings(retryCount = 0) {
+    const maxRetries = 2;
+    
     try {
-        console.log('Fetching next sailings...');
+        console.log(`Fetching next sailings... (attempt ${retryCount + 1}/${maxRetries + 1})`);
+        console.log('API endpoint:', `${API_ENDPOINT}?type=next-sailings`);
         
-        // Show loading state
-        const loadingElement = document.getElementById('next-sailings-loading');
-        const errorElement = document.getElementById('next-sailings-error');
-        if (loadingElement) loadingElement.classList.remove('hidden');
-        if (errorElement) errorElement.classList.add('hidden');
-        
-        const response = await fetch(`${API_ENDPOINT}?type=next-sailings`);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+        // Show loading state only on first attempt
+        if (retryCount === 0) {
+            const loadingElement = document.getElementById('next-sailings-loading');
+            const errorElement = document.getElementById('next-sailings-error');
+            if (loadingElement) loadingElement.classList.remove('hidden');
+            if (errorElement) errorElement.classList.add('hidden');
         }
         
-        const apiResponse = await response.json();
+        const startTime = Date.now();
+        const response = await fetch(`${API_ENDPOINT}?type=next-sailings`, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'Cache-Control': 'no-cache'
+            }
+        });
+        const fetchTime = Date.now() - startTime;
         
+        console.log(`Next sailings fetch took ${fetchTime}ms, status: ${response.status}`);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Next sailings API error response:', errorText);
+            throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
+        }
+        
+        const parseStart = Date.now();
+        const apiResponse = await response.json();
+        const parseTime = Date.now() - parseStart;
+        
+        console.log(`JSON parsing took ${parseTime}ms`);
         console.log('Next sailings data:', apiResponse);
         
         // Store the data
         nextSailingsData = apiResponse.data || {};
+        console.log('Stored next sailings data keys:', Object.keys(nextSailingsData));
         
         // Update the display
         updateNextSailingsList();
         
         // Hide loading state
+        const loadingElement = document.getElementById('next-sailings-loading');
         if (loadingElement) loadingElement.classList.add('hidden');
         
-    } catch (error) {
-        console.error('Error fetching next sailings:', error);
+        console.log('Next sailings fetch completed successfully');
         
-        // Show error state
+    } catch (error) {
+        console.error(`Error fetching next sailings (attempt ${retryCount + 1}):`, error);
+        
+        // Retry logic
+        if (retryCount < maxRetries) {
+            console.log(`Retrying next sailings fetch in 1 second...`);
+            setTimeout(() => {
+                fetchNextSailings(retryCount + 1);
+            }, 1000);
+            return;
+        }
+        
+        console.error('All retry attempts failed for next sailings');
+        console.error('Final error details:', {
+            message: error.message,
+            stack: error.stack,
+            name: error.name
+        });
+        
+        // Show error state only after all retries fail
         const loadingElement = document.getElementById('next-sailings-loading');
         const errorElement = document.getElementById('next-sailings-error');
         if (loadingElement) loadingElement.classList.add('hidden');
@@ -366,13 +406,13 @@ function updateNextSailingsList() {
                     
                     html += `
                         <div class="sailing-item ${statusClass}">
-                            <div class="sailing-time">
-                                <span class="scheduled-time">${sailing.scheduled_departure}</span>
+                            <div class="time-until-prominent">${timeUntil}</div>
+                            <div class="departure-times">
+                                <div class="scheduled-time">Scheduled: ${sailing.scheduled_departure}</div>
                                 ${sailing.estimated_departure !== sailing.scheduled_departure ? 
-                                    `<span class="estimated-time">→ ${sailing.estimated_departure}</span>` : ''}
-                                <span class="delay-text">${delayText}</span>
+                                    `<div class="estimated-time">Estimated: ${sailing.estimated_departure}${delayText}</div>` : 
+                                    delayText ? `<div class="delay-only">${delayText.trim()}</div>` : ''}
                             </div>
-                            <div class="time-until">${timeUntil}</div>
                             ${sailing.vessel_name ? `<div class="vessel-name">${sailing.vessel_name}</div>` : ''}
                         </div>
                     `;

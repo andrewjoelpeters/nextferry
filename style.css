@@ -184,46 +184,73 @@ header p {
     opacity: 0.7;
 }
 
-.sailing-time {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.25rem;
-}
-
-.scheduled-time {
-    font-weight: 600;
+.time-until-prominent {
+    font-size: 1.5rem;
+    font-weight: 700;
     color: #2c3e50;
-    font-size: 0.95rem;
+    text-align: center;
+    margin-bottom: 0.75rem;
+    line-height: 1.2;
 }
 
-.estimated-time {
-    color: #666;
-    font-size: 0.9rem;
+.sailing-item.status-departing .time-until-prominent {
+    color: #e67e22;
+    font-size: 1.6rem;
 }
 
-.delay-text {
-    font-size: 0.85rem;
-    font-weight: 500;
-}
-
-.sailing-item.status-delayed .delay-text {
+.sailing-item.status-delayed .time-until-prominent {
     color: #dc3545;
 }
 
-.sailing-item.status-early .delay-text {
+.sailing-item.status-early .time-until-prominent {
     color: #007bff;
 }
 
-.time-until {
-    font-size: 0.9rem;
+.sailing-item.status-departed .time-until-prominent {
+    color: #6c757d;
+}
+
+.departure-times {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-bottom: 0.5rem;
+}
+
+.scheduled-time {
+    font-size: 0.85rem;
+    color: #495057;
+    font-weight: 500;
+}
+
+.estimated-time {
+    font-size: 0.85rem;
+    color: #495057;
+    font-weight: 500;
+}
+
+.sailing-item.status-delayed .estimated-time {
+    color: #dc3545;
     font-weight: 600;
+}
+
+.sailing-item.status-early .estimated-time {
+    color: #007bff;
+    font-weight: 600;
+}
+
+.delay-only {
+    font-size: 0.85rem;
+    font-weight: 500;
     color: #495057;
 }
 
-.sailing-item.status-departing .time-until {
-    color: #e67e22;
-    font-weight: 700;
+.sailing-item.status-delayed .delay-only {
+    color: #dc3545;
+}
+
+.sailing-item.status-early .delay-only {
+    color: #007bff;
 }
 
 .vessel-name {

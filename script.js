@@ -232,11 +232,9 @@ async function fetchNextSailings(retryCount = 0) {
         console.log(`Fetching next sailings... (attempt ${retryCount + 1}/${maxRetries + 1})`);
         console.log('API endpoint:', `${API_ENDPOINT}?type=next-sailings`);
         
-        // Show loading state only on first attempt
+        // Hide error state on retry attempts
         if (retryCount === 0) {
-            const loadingElement = document.getElementById('next-sailings-loading');
             const errorElement = document.getElementById('next-sailings-error');
-            if (loadingElement) loadingElement.classList.remove('hidden');
             if (errorElement) errorElement.classList.add('hidden');
         }
         
@@ -269,12 +267,8 @@ async function fetchNextSailings(retryCount = 0) {
         nextSailingsData = apiResponse.data || {};
         console.log('Stored next sailings data keys:', Object.keys(nextSailingsData));
         
-        // Update the display
+        // Update the display (this will handle loading state)
         updateNextSailingsList();
-        
-        // Hide loading state
-        const loadingElement = document.getElementById('next-sailings-loading');
-        if (loadingElement) loadingElement.classList.add('hidden');
         
         console.log('Next sailings fetch completed successfully');
         
@@ -344,8 +338,18 @@ function updateNextSailingsList() {
     const container = document.getElementById('next-sailings-list');
     if (!container) return;
     
+    // Always hide loading state when this function is called
+    const loadingElement = document.getElementById('next-sailings-loading');
+    if (loadingElement) {
+        loadingElement.classList.add('hidden');
+    }
+    
     if (!nextSailingsData || Object.keys(nextSailingsData).length === 0) {
-        container.innerHTML = '<div class="no-data">No next sailings data available</div>';
+        // Show loading message only if we have no data at all
+        if (loadingElement) {
+            loadingElement.classList.remove('hidden');
+        }
+        container.innerHTML = '';
         return;
     }
     

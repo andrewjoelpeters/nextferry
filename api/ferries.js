@@ -58,18 +58,30 @@ async function fetchWithRetry(url, retries = 2) {
 }
 
 async function getCurrentVessels(apiKey) {
+    const start = Date.now();
     const url = `https://www.wsdot.wa.gov/ferries/api/vessels/rest/vessellocations?apiaccesscode=${apiKey}`;
+    console.log('🚢 Fetching vessel locations from WSDOT API...');
     const data = await fetchWithRetry(url);
-    return data.filter(ferry => ferry.InService && ferry.OpRouteAbbrev?.length > 0);
+    const filtered = data.filter(ferry => ferry.InService && ferry.OpRouteAbbrev?.length > 0);
+    const time = Date.now() - start;
+    console.log(`  ✅ Vessel locations: ${time}ms (${data.length} total, ${filtered.length} in service)`);
+    return filtered;
 }
 
 async function getRouteSchedule(apiKey, routeId) {
+    const start = Date.now();
     const url = `https://www.wsdot.wa.gov/ferries/api/schedule/rest/scheduletoday/${routeId}/false?apiaccesscode=${apiKey}`;
-    return await fetchWithRetry(url);
+    console.log(`    📅 Fetching schedule for route ID ${routeId}...`);
+    const result = await fetchWithRetry(url);
+    const time = Date.now() - start;
+    console.log(`    ✅ Schedule fetched: ${time}ms`);
+    return result;
 }
 
 async function getRoutes(apiKey) {
+    const start = Date.now();
     const url = `https://www.wsdot.wa.gov/ferries/api/schedule/rest/schedroutes?apiaccesscode=${apiKey}`;
+    console.log('🗺️  Fetching routes from WSDOT API...');
     const data = await fetchWithRetry(url);
     
     // Return simple mapping
@@ -80,42 +92,82 @@ async function getRoutes(apiKey) {
             name: route.Description
         };
     });
+    const time = Date.now() - start;
+    console.log(`  ✅ Routes fetched: ${time}ms (${data.length} routes)`);
     return mapping;
 }
 
 // Simplified prediction logic
 async function predictNextSailings(apiKey, routeAbbrev = null) {
     try {
+        console.log('🚢 Starting predictNextSailings...');
+        const overallStart = Date.now();
+        
+        console.log('📡 Fetching vessels and routes...');
+        const vesselsStart = Date.now();
+        const routesStart = Date.now();
+        
         const [vessels, routes] = await Promise.all([
             getCurrentVessels(apiKey),
             getRoutes(apiKey)
         ]);
         
+        const vesselsTime = Date.now() - vesselsStart;
+        const routesTime = Date.now() - routesStart;
+        console.log(`✅ Vessels fetched in ${vesselsTime}ms (${vessels.length} vessels)`);
+        console.log(`✅ Routes fetched in ${routesTime}ms (${Object.keys(routes).length} routes)`);
+        
         const routesToCheck = routeAbbrev ? [routeAbbrev] : Object.keys(routes);
+        console.log(`🔍 Processing ${routesToCheck.length} routes: ${routesToCheck.join(', ')}`);
+        
         const predictions = {};
+        let totalScheduleTime = 0;
+        let totalPredictionTime = 0;
         
         for (const route of routesToCheck) {
             if (!routes[route]) continue;
             
             try {
+                console.log(`\n🛳️  Processing route: ${route} (${routes[route].name})`);
                 const routeId = routes[route].id;
+                
+                const scheduleStart = Date.now();
                 const schedule = await getRouteSchedule(apiKey, routeId);
+                const scheduleTime = Date.now() - scheduleStart;
+                totalScheduleTime += scheduleTime;
+                console.log(`  📅 Schedule fetched in ${scheduleTime}ms`);
+                
+                const predictionStart = Date.now();
                 const routePredictions = await predictRouteNext(vessels, schedule, route);
+                const predictionTime = Date.now() - predictionStart;
+                totalPredictionTime += predictionTime;
+                console.log(`  🔮 Predictions calculated in ${predictionTime}ms`);
                 
                 if (Object.keys(routePredictions).length > 0) {
                     predictions[route] = {
                         name: routes[route].name,
                         terminals: routePredictions
                     };
+                    console.log(`  ✅ Added ${Object.keys(routePredictions).length} terminals for ${route}`);
+                } else {
+                    console.log(`  ⚠️  No predictions generated for ${route}`);
                 }
             } catch (error) {
-                console.warn(`Skipping route ${route}:`, error.message);
+                console.warn(`❌ Skipping route ${route}:`, error.message);
             }
         }
         
+        const overallTime = Date.now() - overallStart;
+        console.log(`\n📊 TIMING SUMMARY:`);
+        console.log(`  Total time: ${overallTime}ms`);
+        console.log(`  Schedule fetches: ${totalScheduleTime}ms (${routesToCheck.length} calls)`);
+        console.log(`  Prediction calculations: ${totalPredictionTime}ms`);
+        console.log(`  Average per route: ${Math.round(overallTime / routesToCheck.length)}ms`);
+        console.log(`  Routes with predictions: ${Object.keys(predictions).length}/${routesToCheck.length}`);
+        
         return predictions;
     } catch (error) {
-        console.error('Error predicting sailings:', error);
+        console.error('❌ Error predicting sailings:', error);
         throw error;
     }
 }

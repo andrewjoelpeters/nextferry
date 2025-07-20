@@ -1,0 +1,519 @@
+/* Reset and base styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.6;
+    color: #2c3e50;
+    background-color: #f8f9fa;
+    min-height: 100vh;
+}
+
+/* Header styling - cleaner and more modern */
+header {
+    background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+    color: white;
+    padding: 1.5rem 1rem;
+    text-align: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+header h1 {
+    font-size: 1.8rem;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+}
+
+header p {
+    opacity: 0.9;
+    font-size: 0.95rem;
+}
+
+/* Tab Navigation - allows switching between routes and map */
+.tab-nav {
+    display: flex;
+    background: white;
+    border-bottom: 1px solid #e0e0e0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.tab-button {
+    flex: 1;
+    padding: 1rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 500;
+    color: #666;
+    transition: all 0.3s ease;
+    border-bottom: 3px solid transparent;
+}
+
+.tab-button.active {
+    color: #3498db;
+    border-bottom-color: #3498db;
+    background: #f8f9fa;
+}
+
+.tab-button:hover {
+    background: #f8f9fa;
+}
+
+/* Tab Content Areas */
+.tab-content {
+    display: none;
+    min-height: calc(100vh - 200px);
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* Routes Tab Styling */
+.routes-container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 1.5rem;
+}
+
+/* Next Sailings Tab Styling */
+.next-sailings-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1.5rem;
+}
+
+.next-sailings-container h2 {
+    text-align: center;
+    margin-bottom: 0.5rem;
+    color: #2c3e50;
+}
+
+.subtitle {
+    text-align: center;
+    color: #666;
+    margin-bottom: 2rem;
+    font-size: 0.95rem;
+}
+
+.route-section {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.route-title {
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 1.5rem;
+    text-align: center;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid #e9ecef;
+}
+
+.terminals-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1.5rem;
+}
+
+.terminal-card {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 1.25rem;
+    border: 1px solid #e9ecef;
+}
+
+.terminal-name {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 1rem;
+    text-align: center;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.sailings-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.sailing-item {
+    background: white;
+    border-radius: 6px;
+    padding: 0.75rem;
+    border-left: 4px solid #e9ecef;
+    transition: all 0.2s ease;
+}
+
+.sailing-item:hover {
+    transform: translateX(2px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.sailing-item.status-on-time {
+    border-left-color: #28a745;
+}
+
+.sailing-item.status-delayed {
+    border-left-color: #dc3545;
+}
+
+.sailing-item.status-early {
+    border-left-color: #007bff;
+}
+
+.sailing-item.status-departing {
+    border-left-color: #ffc107;
+    background: #fff8e1;
+}
+
+.sailing-item.status-departed {
+    border-left-color: #6c757d;
+    background: #f8f9fa;
+    opacity: 0.7;
+}
+
+.sailing-time {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.scheduled-time {
+    font-weight: 600;
+    color: #2c3e50;
+    font-size: 0.95rem;
+}
+
+.estimated-time {
+    color: #666;
+    font-size: 0.9rem;
+}
+
+.delay-text {
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.sailing-item.status-delayed .delay-text {
+    color: #dc3545;
+}
+
+.sailing-item.status-early .delay-text {
+    color: #007bff;
+}
+
+.time-until {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #495057;
+}
+
+.sailing-item.status-departing .time-until {
+    color: #e67e22;
+    font-weight: 700;
+}
+
+.vessel-name {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-top: 0.25rem;
+}
+
+.no-sailings {
+    text-align: center;
+    color: #6c757d;
+    font-style: italic;
+    padding: 1rem;
+}
+
+.no-data {
+    text-align: center;
+    color: #6c757d;
+    font-size: 1.1rem;
+    padding: 2rem;
+    background: white;
+    border-radius: 8px;
+    margin: 1rem;
+}
+
+/* System Status Overview */
+.system-status {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    text-align: center;
+}
+
+.status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.status-item {
+    padding: 1rem;
+    border-radius: 8px;
+    background: #f8f9fa;
+}
+
+.status-number {
+    font-size: 1.8rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+}
+
+.status-label {
+    font-size: 0.85rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Route Cards - the main improvement */
+.route-card {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.route-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+}
+
+.route-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.route-name {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #2c3e50;
+}
+
+.route-status {
+    padding: 0.3rem 0.8rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.status-on-time {
+    background: #d4edda;
+    color: #155724;
+}
+
+.status-delayed {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.status-early {
+    background: #cce7ff;
+    color: #0056b3;
+}
+
+.status-unknown {
+    background: #e2e3e5;
+    color: #6c757d;
+}
+
+/* Ferry list within each route */
+.ferry-list {
+    list-style: none;
+}
+
+.ferry-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.ferry-item:last-child {
+    border-bottom: none;
+}
+
+.ferry-name {
+    font-weight: 500;
+    color: #2c3e50;
+}
+
+.ferry-route-info {
+    font-size: 0.9rem;
+    color: #666;
+    margin-top: 0.25rem;
+}
+
+.ferry-delay {
+    text-align: right;
+    font-weight: 500;
+    font-size: 0.9rem;
+}
+
+/* Map Tab Styling */
+.map-container {
+    height: calc(100vh - 200px);
+    position: relative;
+}
+
+#map {
+    height: 100%;
+    width: 100%;
+}
+
+/* Ferry info panel - improved styling */
+#ferry-info-panel {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    max-width: 320px;
+    z-index: 1000;
+}
+
+#close-panel {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: #666;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#close-panel:hover {
+    background: #f0f0f0;
+}
+
+/* Loading and error states */
+.loading-state {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 200px;
+    color: #666;
+}
+
+.error-state {
+    background: #f8d7da;
+    color: #721c24;
+    padding: 1rem;
+    border-radius: 8px;
+    text-align: center;
+    margin: 1rem;
+}
+
+/* Footer */
+footer {
+    background: white;
+    padding: 1rem;
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    border-top: 1px solid #e0e0e0;
+}
+
+/* Utility classes */
+.hidden {
+    display: none;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+    .routes-container {
+        padding: 1rem;
+    }
+
+    .route-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+
+    .status-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    #ferry-info-panel {
+        position: fixed;
+        top: auto;
+        bottom: 20px;
+        left: 20px;
+        right: 20px;
+        max-width: none;
+    }
+
+    header h1 {
+        font-size: 1.5rem;
+    }
+}
+
+/* Map legend styling */
+.map-legend {
+    background: white;
+    padding: 12px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    font-size: 0.9rem;
+}
+
+.map-legend h4 {
+    margin: 0 0 0.5rem 0;
+    color: #333;
+}
+
+.map-legend div {
+    display: flex;
+    align-items: center;
+    margin: 0.25rem 0;
+}
+
+.legend-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    margin-right: 0.5rem;
+}
+
+.ferry-marker {
+    background: transparent !important;
+    border: none !important;
+}

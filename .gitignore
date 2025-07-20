@@ -1,0 +1,7 @@
+.env.local
+.vercel
+.env*.local
+node_modules
+.mypy_cache
+*.py
+*.ipynb

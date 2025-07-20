@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WA Ferry Tracker - Map View</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⛴️</text></svg>">
+    <link rel="stylesheet" href="style.css">
+    <!-- Add Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+</head>
+<body>
+    <header>
+        <h1>⛴️ WA Ferry Tracker</h1>
+        <p>Real-time ferry status and departures</p>
+    </header>
+
+    <!-- Tab Navigation -->
+    <nav class="tab-nav">
+        <button class="tab-button active" onclick="showTab('routes')">Routes</button>
+        <button class="tab-button" onclick="showTab('next-sailings')">Next Sailings</button>
+        <button class="tab-button" onclick="showTab('map')">Map</button>
+    </nav>
+
+    <!-- Routes Tab Content -->
+    <div id="routes-tab" class="tab-content active">
+        <div class="routes-container">
+            <!-- System Status Overview -->
+            <div class="system-status">
+                <h2>System Status</h2>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <div class="status-number" id="total-ferries">-</div>
+                        <div class="status-label">Total Ferries</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-number" id="active-ferries">-</div>
+                        <div class="status-label">In Service</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-number" id="delayed-routes">-</div>
+                        <div class="status-label">Delayed Routes</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-number" id="avg-delay">-</div>
+                        <div class="status-label">Avg Delay</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Loading State -->
+            <div id="routes-loading" class="loading-state">
+                <div>Loading ferry data...</div>
+            </div>
+
+            <!-- Error State -->
+            <div id="routes-error" class="error-state hidden">
+                Error loading ferry data. Please try again.
+            </div>
+
+            <!-- Routes Container -->
+            <div id="routes-list"></div>
+        </div>
+    </div>
+
+    <!-- Next Sailings Tab Content -->
+    <div id="next-sailings-tab" class="tab-content">
+        <div class="next-sailings-container">
+            <h2>Next Ferry Departures</h2>
+            <p class="subtitle">Estimated times for the next three departures from each terminal</p>
+            
+            <!-- Loading State -->
+            <div id="next-sailings-loading" class="loading-state">
+                <div>Loading next sailings...</div>
+            </div>
+
+            <!-- Error State -->
+            <div id="next-sailings-error" class="error-state hidden">
+                Error loading next sailings data. Please try again.
+            </div>
+
+            <!-- Next Sailings Container -->
+            <div id="next-sailings-list"></div>
+        </div>
+    </div>
+
+    <!-- Map Tab Content -->
+    <div id="map-tab" class="tab-content">
+        <div class="map-container">
+            <div id="map"></div>
+            <div id="ferry-info-panel" class="hidden">
+                <button id="close-panel">&times;</button>
+                <div id="ferry-details"></div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>Last updated: <span id="last-updated">Never</span></p>
+        <p>Data updates every 30 seconds</p>
+    </footer>    
+    <!-- Add Leaflet JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

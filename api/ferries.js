@@ -465,6 +465,17 @@ async function predictRouteNext(vessels, schedule, routeAbbrev) {
         // Track running delays for each vessel position
         const vesselDelayTracker = new Map();
         
+        // CRITICAL: First, check if any ferry is currently at the dock for this terminal
+        // A ferry at the dock MUST be the next departure, regardless of schedule timing
+        let ferryAtDock = null;
+        for (const [vesselPos, vesselData] of vesselInfo) {
+            if (vesselData.atDock && vesselData.departingTerminalId === terminalId && !vesselData.hasLeftDock) {
+                ferryAtDock = { vesselPos, vesselData };
+                console.log(`🚢 Ferry at dock found: ${vesselData.name} at terminal ${terminalId}`);
+                break;
+            }
+        }
+        
         for (let i = 0; i < Math.min(upcomingSailings.length, 3); i++) {
             const sailing = upcomingSailings[i];
             const vesselPosition = sailing.VesselPositionNum;
@@ -479,36 +490,46 @@ async function predictRouteNext(vessels, schedule, routeAbbrev) {
             if (vessel) {
                 vesselName = vessel.name;
                 
-                // Check if this sailing matches the vessel's current scheduled departure
-                const timeDiff = Math.abs(scheduledTime.getTime() - vessel.scheduledDeparture.getTime());
-                
-                if (!vessel.hasLeftDock && timeDiff < 60000) {
-                    // Vessel is waiting at dock for this exact sailing
-                    estimatedDelay = vessel.currentDelay;
-                    vesselDelayTracker.set(vesselPosition, estimatedDelay);
-                } else if (vessel.hasLeftDock) {
-                    // Vessel has left dock - this sailing is its next return trip
-                    // Apply delay propagation based on turnaround time
-                    
-                    // Find previous sailing for this vessel (the one it just departed for)
-                    const previousSailingTime = vessel.scheduledDeparture;
-                    const turnaroundTime = calculateTurnaroundTimeFromTimes(previousSailingTime, scheduledTime);
-                    
-                    if (turnaroundTime < 25) {
-                        // Very tight turnaround - most delay carries over
-                        estimatedDelay = Math.max(0, vessel.currentDelay * .95);
-                    } else if (turnaroundTime < 45) {
-                        // Normal turnaround - some recovery possible
-                        estimatedDelay = Math.max(0, vessel.currentDelay * .9);
-                    } else {
-                        // Long turnaround - significant recovery possible
-                        estimatedDelay = Math.max(0, vessel.currentDelay * .8);
-                    }
-                    
-                    vesselDelayTracker.set(vesselPosition, estimatedDelay);
+                // PRIORITY LOGIC: If this is the first sailing and there's a ferry at dock,
+                // that ferry MUST be assigned to this sailing, regardless of vessel position matching
+                if (i === 0 && ferryAtDock && ferryAtDock.vesselData.departingTerminalId === terminalId) {
+                    // Override vessel assignment - the ferry at dock gets priority
+                    vesselName = ferryAtDock.vesselData.name;
+                    estimatedDelay = ferryAtDock.vesselData.currentDelay;
+                    vesselDelayTracker.set(ferryAtDock.vesselPos, estimatedDelay);
+                    console.log(`🚢 Assigning ferry at dock ${vesselName} to next sailing with ${estimatedDelay}min delay`);
                 } else {
-                    // Use tracked delay from previous iterations
-                    estimatedDelay = vesselDelayTracker.get(vesselPosition) || 0;
+                    // Normal logic for subsequent sailings or when no ferry at dock
+                    const timeDiff = Math.abs(scheduledTime.getTime() - vessel.scheduledDeparture.getTime());
+                    
+                    if (!vessel.hasLeftDock && timeDiff < 60000) {
+                        // Vessel is waiting at dock for this exact sailing
+                        estimatedDelay = vessel.currentDelay;
+                        vesselDelayTracker.set(vesselPosition, estimatedDelay);
+                    } else if (vessel.hasLeftDock) {
+                        // Vessel has left dock - this sailing is its next return trip
+                        // Apply delay propagation based on turnaround time
+                        
+                        // Find previous sailing for this vessel (the one it just departed for)
+                        const previousSailingTime = vessel.scheduledDeparture;
+                        const turnaroundTime = calculateTurnaroundTimeFromTimes(previousSailingTime, scheduledTime);
+                        
+                        if (turnaroundTime < 25) {
+                            // Very tight turnaround - most delay carries over
+                            estimatedDelay = Math.max(0, vessel.currentDelay * .95);
+                        } else if (turnaroundTime < 45) {
+                            // Normal turnaround - some recovery possible
+                            estimatedDelay = Math.max(0, vessel.currentDelay * .9);
+                        } else {
+                            // Long turnaround - significant recovery possible
+                            estimatedDelay = Math.max(0, vessel.currentDelay * .8);
+                        }
+                        
+                        vesselDelayTracker.set(vesselPosition, estimatedDelay);
+                    } else {
+                        // Use tracked delay from previous iterations
+                        estimatedDelay = vesselDelayTracker.get(vesselPosition) || 0;
+                    }
                 }
             } else {
                 // No vessel info - assume on time

@@ -1,3 +1,4 @@
+import { kv } from '@vercel/kv';
 import { cacheDelay, getCachedDelay } from './kv-helpers.js';
 
 // Simple utility functions
@@ -43,14 +44,25 @@ function calculateDelay(expectedTimeString, actualTimeString) {
     return { delayMinutes: diffMinutes, status, delayText };
 }
 
-// Simplified ferry API calls
-async function fetchWithRetry(url, retries = 2) {
+// Create a timeout wrapper for fetch requests
+function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
+    return Promise.race([
+        fetch(url, options),
+        new Promise((_, reject) => 
+            setTimeout(() => reject(new Error(`Request timeout after ${timeoutMs}ms`)), timeoutMs)
+        )
+    ]);
+}
+
+// Simplified ferry API calls with timeout and retry
+async function fetchWithRetry(url, retries = 2, timeoutMs = 10000) {
     for (let i = 0; i <= retries; i++) {
         try {
-            const response = await fetch(url);
+            const response = await fetchWithTimeout(url, {}, timeoutMs);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             return await response.json();
         } catch (error) {
+            console.warn(`API call attempt ${i + 1}/${retries + 1} failed:`, error.message);
             if (i === retries) throw error;
             await new Promise(resolve => setTimeout(resolve, 1000)); // 1s delay
         }
@@ -97,73 +109,281 @@ async function getRoutes(apiKey) {
     return mapping;
 }
 
-// Simplified prediction logic
-async function predictNextSailings(apiKey, routeAbbrev = null) {
+// KV cache keys
+const CACHE_FLUSH_DATE_KEY = 'ferry:cache_flush_date';
+const SCHEDULE_CACHE_PREFIX = 'ferry:schedule:';
+
+// Cache schedule data in KV store
+async function cacheSchedule(routeId, cacheFlushDate, scheduleData) {
+    try {
+        const cacheKey = `${SCHEDULE_CACHE_PREFIX}${routeId}-${cacheFlushDate}`;
+        // Cache for 24 hours (86400 seconds) - schedules don't change often
+        await kv.set(cacheKey, scheduleData, { ex: 86400 });
+        console.log(`💾 Cached schedule for route ${routeId}`);
+    } catch (error) {
+        console.warn('Error caching schedule:', error.message);
+    }
+}
+
+// Get cached schedule data from KV store
+async function getCachedSchedule(routeId, cacheFlushDate) {
+    try {
+        const cacheKey = `${SCHEDULE_CACHE_PREFIX}${routeId}-${cacheFlushDate}`;
+        const cachedData = await kv.get(cacheKey);
+        return cachedData;
+    } catch (error) {
+        console.warn('Error getting cached schedule:', error.message);
+        return null;
+    }
+}
+
+// Cache the flush date in KV store
+async function cacheFlushDate(flushDate) {
+    try {
+        await kv.set(CACHE_FLUSH_DATE_KEY, flushDate, { ex: 3600 }); // Cache for 1 hour
+    } catch (error) {
+        console.warn('Error caching flush date:', error.message);
+    }
+}
+
+// Get cached flush date from KV store
+async function getCachedFlushDate() {
+    try {
+        return await kv.get(CACHE_FLUSH_DATE_KEY);
+    } catch (error) {
+        console.warn('Error getting cached flush date:', error.message);
+        return null;
+    }
+}
+
+// Parse .NET JSON date format like /Date(1753069201237-0700)/
+function parseDotNetDate(dateString) {
+    if (typeof dateString !== 'string') return dateString;
+    const match = dateString.match(/\/Date\((\d+)([+-]\d{4})?\)\//); 
+    if (match) {
+        const timestamp = parseInt(match[1]);
+        return new Date(timestamp).toISOString();
+    }
+    return dateString;
+}
+
+// Unified vessel processing - fetches vessels and processes delays consistently
+async function getVesselsWithDelays(apiKey) {
+    console.log('📡 Fetching vessel positions and processing delays...');
+    const start = Date.now();
+    
+    const ferries = await getCurrentVessels(apiKey);
+    
+    const processedFerries = await Promise.allSettled(
+        ferries.map(async (ferry) => {
+            const tripId = `${ferry.OpRouteAbbrev?.join(',')}-${ferry.VesselPositionNum}`;
+            
+            try {
+                // Cache delay if ferry has departed
+                if (ferry.ScheduledDeparture && ferry.LeftDock) {
+                    const delayInfo = calculateDelay(ferry.ScheduledDeparture, ferry.LeftDock);
+                    if (!delayInfo.error) {
+                        await cacheDelay(tripId, delayInfo.delayText);
+                        ferry.cachedDelay = delayInfo.delayText;
+                    }
+                }
+                // Get cached delay if available
+                else if (ferry.ScheduledDeparture) {
+                    const cachedDelay = await getCachedDelay(tripId);
+                    if (cachedDelay) {
+                        ferry.cachedDelay = cachedDelay;
+                    }
+                }
+            } catch (error) {
+                console.warn(`Error processing ferry ${ferry.VesselName}:`, error);
+            }
+            
+            return ferry;
+        })
+    );
+    
+    // Extract successful results
+    const results = processedFerries
+        .filter(result => result.status === 'fulfilled')
+        .map(result => result.value);
+    
+    const time = Date.now() - start;
+    console.log(`✅ Vessel positions: ${time}ms (${results.length} total, ${results.filter(f => f.InService).length} in service)`);
+    
+    return results;
+}
+
+// Check if WSDOT schedule data has been updated
+async function checkCacheFlushDate(apiKey) {
+    try {
+        const url = `https://www.wsdot.wa.gov/ferries/api/schedule/rest/cacheflushdate?apiaccesscode=${apiKey}`;
+        const response = await fetchWithTimeout(url, {
+            headers: {
+                'Accept': 'application/json'
+            }
+        }, 5000); // 5 second timeout for cache flush date
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        const rawDate = typeof data === 'string' ? data : String(data);
+        const cacheFlushDate = parseDotNetDate(rawDate);
+        console.log(`🕒 Cache flush date from WSDOT: ${rawDate} -> ${cacheFlushDate}`);
+        return cacheFlushDate;
+    } catch (error) {
+        console.warn('Could not fetch cache flush date:', error.message);
+        return null;
+    }
+}
+
+
+async function predictNextSailings(apiKey, vessels, routeAbbrev = null) {
+    // Add overall timeout to prevent Vercel function timeout
+    const PREDICTION_TIMEOUT = 25000; // 25 seconds, leaving 5s buffer for Vercel's 30s limit
+    
+    return Promise.race([
+        predictNextSailingsInternal(apiKey, vessels, routeAbbrev),
+        new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Prediction timeout - operation took too long')), PREDICTION_TIMEOUT)
+        )
+    ]);
+}
+
+// Internal prediction logic
+async function predictNextSailingsInternal(apiKey, vessels, routeAbbrev = null) {
     try {
         console.log('🚢 Starting predictNextSailings...');
         const overallStart = Date.now();
         
-        console.log('📡 Fetching vessels and routes...');
-        const vesselsStart = Date.now();
-        const routesStart = Date.now();
-        
-        const [vessels, routes] = await Promise.all([
-            getCurrentVessels(apiKey),
-            getRoutes(apiKey)
+        // Check if schedule data needs to be refreshed using KV store
+        const [currentCacheFlushDate, lastCachedFlushDate] = await Promise.all([
+            checkCacheFlushDate(apiKey),
+            getCachedFlushDate()
         ]);
         
-        const vesselsTime = Date.now() - vesselsStart;
-        const routesTime = Date.now() - routesStart;
-        console.log(`✅ Vessels fetched in ${vesselsTime}ms (${vessels.length} vessels)`);
-        console.log(`✅ Routes fetched in ${routesTime}ms (${Object.keys(routes).length} routes)`);
+        console.log(`🔍 Cache comparison (KV store):`);
+        console.log(`  Last cached flush date: ${lastCachedFlushDate}`);
+        console.log(`  Current cache flush date: ${currentCacheFlushDate}`);
+        
+        const shouldRefreshCache = !lastCachedFlushDate || 
+            currentCacheFlushDate !== lastCachedFlushDate;
+        
+        console.log(`  Should refresh cache: ${shouldRefreshCache}`);
+        console.log(`    - No cached date: ${!lastCachedFlushDate}`);
+        console.log(`    - Dates different: ${currentCacheFlushDate !== lastCachedFlushDate}`);
+        
+        if (shouldRefreshCache && currentCacheFlushDate) {
+            console.log('📅 Schedule cache needs refresh - updating KV store');
+            await cacheFlushDate(currentCacheFlushDate);
+        } else {
+            console.log('✅ Using cached schedule data from KV store');
+        }
+        
+        console.log('🗺️  Fetching routes...');
+        const routes = await getRoutes(apiKey);
+        
+        console.log(`✅ Using ${vessels.length} vessels (passed from handler), Routes: ${Object.keys(routes).length}`);
         
         const routesToCheck = routeAbbrev ? [routeAbbrev] : Object.keys(routes);
         console.log(`🔍 Processing ${routesToCheck.length} routes: ${routesToCheck.join(', ')}`);
         
-        const predictions = {};
-        let totalScheduleTime = 0;
-        let totalPredictionTime = 0;
+        // Parallel schedule fetching with KV store caching and aggressive timeout
+        const scheduleStart = Date.now();
+        const SCHEDULE_FETCH_TIMEOUT = 15000; // 15 seconds total for all schedule fetches
         
-        for (const route of routesToCheck) {
-            if (!routes[route]) continue;
-            
-            try {
-                console.log(`\n🛳️  Processing route: ${route} (${routes[route].name})`);
+        const schedulePromises = routesToCheck
+            .filter(route => routes[route]) // Only valid routes
+            .map(async (route) => {
                 const routeId = routes[route].id;
                 
-                const scheduleStart = Date.now();
-                const schedule = await getRouteSchedule(apiKey, routeId);
-                const scheduleTime = Date.now() - scheduleStart;
-                totalScheduleTime += scheduleTime;
-                console.log(`  📅 Schedule fetched in ${scheduleTime}ms`);
-                
-                const predictionStart = Date.now();
-                const routePredictions = await predictRouteNext(vessels, schedule, route);
-                const predictionTime = Date.now() - predictionStart;
-                totalPredictionTime += predictionTime;
-                console.log(`  🔮 Predictions calculated in ${predictionTime}ms`);
-                
-                if (Object.keys(routePredictions).length > 0) {
-                    predictions[route] = {
-                        name: routes[route].name,
-                        terminals: routePredictions
-                    };
-                    console.log(`  ✅ Added ${Object.keys(routePredictions).length} terminals for ${route}`);
-                } else {
-                    console.log(`  ⚠️  No predictions generated for ${route}`);
+                // Check KV cache first
+                const cachedSchedule = await getCachedSchedule(routeId, currentCacheFlushDate);
+                if (cachedSchedule) {
+                    return { route, schedule: cachedSchedule, fromCache: true };
                 }
-            } catch (error) {
-                console.warn(`❌ Skipping route ${route}:`, error.message);
-            }
+                
+                try {
+                    // Use shorter timeout for individual schedule fetches (6 seconds)
+                    const schedule = await fetchWithRetry(
+                        `https://www.wsdot.wa.gov/ferries/api/schedule/rest/scheduletoday/${routeId}/true?apiaccesscode=${apiKey}`,
+                        1, // Only 1 retry to save time
+                        6000 // 6 second timeout per attempt
+                    );
+                    // Cache the result in KV store (fire and forget)
+                    cacheSchedule(routeId, currentCacheFlushDate, schedule);
+                    return { route, schedule, fromCache: false };
+                } catch (error) {
+                    console.warn(`Failed to fetch schedule for ${route}:`, error.message);
+                    return { route, schedule: null, error: error.message };
+                }
+            });
+        
+        // Add timeout to the entire parallel schedule fetching operation
+        let scheduleResults;
+        try {
+            scheduleResults = await Promise.race([
+                Promise.all(schedulePromises),
+                new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Schedule fetching timeout')), SCHEDULE_FETCH_TIMEOUT)
+                )
+            ]);
+        } catch (error) {
+            console.warn('Schedule fetching timed out, proceeding with partial data:', error.message);
+            // Return partial results - only the ones that completed successfully
+            const settledPromises = await Promise.allSettled(schedulePromises);
+            scheduleResults = settledPromises.map(result => 
+                result.status === 'fulfilled' ? result.value : { route: 'unknown', schedule: null, error: 'timeout' }
+            );
         }
+        const scheduleTime = Date.now() - scheduleStart;
+        
+        const cachedCount = scheduleResults.filter(r => r.fromCache).length;
+        const fetchedCount = scheduleResults.filter(r => !r.fromCache && r.schedule).length;
+        const failedCount = scheduleResults.filter(r => r.error).length;
+        
+        console.log(`📊 Schedules: ${cachedCount} cached, ${fetchedCount} fetched, ${failedCount} failed in ${scheduleTime}ms`);
+        
+        // Process predictions in parallel too
+        const predictionStart = Date.now();
+        const predictionPromises = scheduleResults
+            .filter(result => result.schedule) // Only successful schedule fetches
+            .map(async ({ route, schedule }) => {
+                try {
+                    const routePredictions = await predictRouteNext(vessels, schedule, route);
+                    return {
+                        route,
+                        predictions: routePredictions,
+                        terminalCount: Object.keys(routePredictions).length
+                    };
+                } catch (error) {
+                    console.warn(`Prediction failed for ${route}:`, error.message);
+                    return { route, predictions: {}, terminalCount: 0 };
+                }
+            });
+        
+        const predictionResults = await Promise.all(predictionPromises);
+        const predictionTime = Date.now() - predictionStart;
+        
+        // Build final predictions object
+        const predictions = {};
+        predictionResults.forEach(({ route, predictions: routePredictions, terminalCount }) => {
+            if (terminalCount > 0) {
+                predictions[route] = {
+                    name: routes[route].name,
+                    terminals: routePredictions
+                };
+            }
+        });
         
         const overallTime = Date.now() - overallStart;
-        console.log(`\n📊 TIMING SUMMARY:`);
-        console.log(`  Total time: ${overallTime}ms`);
-        console.log(`  Schedule fetches: ${totalScheduleTime}ms (${routesToCheck.length} calls)`);
-        console.log(`  Prediction calculations: ${totalPredictionTime}ms`);
-        console.log(`  Average per route: ${Math.round(overallTime / routesToCheck.length)}ms`);
-        console.log(`  Routes with predictions: ${Object.keys(predictions).length}/${routesToCheck.length}`);
+        console.log(`\n📊 PERFORMANCE SUMMARY:`);
+        console.log(`  Total time: ${overallTime}ms (was ~54s, now ~${Math.round(overallTime/1000)}s)`);
+        console.log(`  Schedule fetching: ${scheduleTime}ms (parallel)`);
+        console.log(`  Prediction calculations: ${predictionTime}ms (parallel)`);
+        console.log(`  Cache efficiency: ${cachedCount}/${scheduleResults.length} cached`);
+        console.log(`  Success rate: ${Object.keys(predictions).length}/${routesToCheck.length} routes`);
         
         return predictions;
     } catch (error) {
@@ -361,55 +581,16 @@ export default async function handler(req, res) {
 
         const { route, type } = req.query;
         
-        // Next sailings prediction
-        if (type === 'next-sailings') {
-            const predictions = await predictNextSailings(apiKey, route);
-            return res.status(200).json({
-                type: 'next-sailings',
-                data: predictions,
-                timestamp: new Date().toISOString()
-            });
-        }
+        // Fetch vessels with delay processing once for all request types
+        const vessels = await getVesselsWithDelays(apiKey);
         
-        // Current positions (existing functionality)
-        const ferries = await getCurrentVessels(apiKey);
-        
-        const processedFerries = await Promise.allSettled(
-            ferries.map(async (ferry) => {
-                const tripId = `${ferry.OpRouteAbbrev?.join(',')}-${ferry.VesselPositionNum}`;
-                
-                try {
-                    // Cache delay if ferry has departed
-                    if (ferry.ScheduledDeparture && ferry.LeftDock) {
-                        const delayInfo = calculateDelay(ferry.ScheduledDeparture, ferry.LeftDock);
-                        if (!delayInfo.error) {
-                            await cacheDelay(tripId, delayInfo.delayText);
-                            ferry.cachedDelay = delayInfo.delayText;
-                        }
-                    }
-                    // Get cached delay if available
-                    else if (ferry.ScheduledDeparture) {
-                        const cachedDelay = await getCachedDelay(tripId);
-                        if (cachedDelay) {
-                            ferry.cachedDelay = cachedDelay;
-                        }
-                    }
-                } catch (error) {
-                    console.warn(`Error processing ferry ${ferry.VesselName}:`, error);
-                }
-                
-                return ferry;
-            })
-        );
-        
-        // Extract successful results
-        const results = processedFerries
-            .filter(result => result.status === 'fulfilled')
-            .map(result => result.value);
+        // Always return both vessel positions and next sailings in a single response
+        const predictions = await predictNextSailings(apiKey, vessels, route);
         
         res.status(200).json({
-            type: 'current-positions',
-            data: results,
+            type: 'combined',
+            vessels: vessels,
+            nextSailings: predictions,
             timestamp: new Date().toISOString()
         });
         

@@ -17,13 +17,13 @@
 
     <!-- Tab Navigation -->
     <nav class="tab-nav">
-        <button class="tab-button active" onclick="showTab('routes')">Routes</button>
-        <button class="tab-button" onclick="showTab('next-sailings')">Next Sailings</button>
+        <button class="tab-button" onclick="showTab('routes')">Routes</button>
+        <button class="tab-button active" onclick="showTab('next-sailings')">Next Sailings</button>
         <button class="tab-button" onclick="showTab('map')">Map</button>
     </nav>
 
     <!-- Routes Tab Content -->
-    <div id="routes-tab" class="tab-content active">
+    <div id="routes-tab" class="tab-content">
         <div class="routes-container">
             <!-- System Status Overview -->
             <div class="system-status">
@@ -64,7 +64,7 @@
     </div>
 
     <!-- Next Sailings Tab Content -->
-    <div id="next-sailings-tab" class="tab-content">
+    <div id="next-sailings-tab" class="tab-content active">
         <div class="next-sailings-container">
             <!-- Loading State -->
             <div id="next-sailings-loading" class="loading-state">

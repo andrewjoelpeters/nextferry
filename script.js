@@ -8,23 +8,19 @@ let ferries = [];
 let ferryMarkers = [];
 let nextSailingsData = {};
 let isLoading = false;
-let currentTab = 'routes';
+let currentTab = 'next-sailings'; // Default to next-sailings tab
 
 // Initialize the app
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Ferry Tracker starting...');
     
-    // Initialize UI immediately
-    updateNextSailingsList(); // Show initial state
-    
-    // Fetch data
-    fetchFerries();
-    fetchNextSailings(); // Add initial next sailings fetch
+    // Initialize UI and fetch data
+    updateNextSailingsList();
+    fetchCombinedData();
     
     // Set up periodic updates
     setInterval(() => {
-        fetchFerries();
-        fetchNextSailings(); // Fetch next sailings on each interval
+        fetchCombinedData();
     }, UPDATE_INTERVAL);
 });
 
@@ -178,120 +174,121 @@ document.addEventListener('click', function(e) {
     }
 });
 
-// Fetch ferry data from API (current positions)
-async function fetchFerries() {
+// Fetch combined ferry data (positions + next sailings) from API
+async function fetchCombinedData(retryCount = 0) {
     if (isLoading) return;
     
+    const maxRetries = 2;
     isLoading = true;
     
     try {
-        console.log('Fetching ferry data...');
+        console.log('Fetching combined ferry data...');
         
-        // Fetch current positions (default behavior, no query params needed)
-        const response = await fetch(API_ENDPOINT);
+        // Hide error states on first attempt
+        if (retryCount === 0) {
+            const nextSailingsError = document.getElementById('next-sailings-error');
+            if (nextSailingsError) nextSailingsError.classList.add('hidden');
+            document.getElementById('routes-error').classList.add('hidden');
+        }
+        
+        // Single API call for both vessel positions and next sailings
+        const response = await fetch(API_ENDPOINT, {
+            headers: {
+                'Accept': 'application/json',
+                'Cache-Control': 'no-cache'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log(data)
+        
+        if (data && data.type === 'combined') {
+            // Update vessel positions
+            if (data.vessels) {
+                ferries = data.vessels;
+                console.log(`Loaded ${ferries.length} ferries`);
+                updateSystemStatus();
+                updateRoutesList();
+                updateFerryMarkers();
+                updateLastUpdated();
+            }
+            
+            // Update next sailings
+            if (data.nextSailings) {
+                nextSailingsData = data.nextSailings;
+                console.log(`Loaded next sailings for ${Object.keys(nextSailingsData).length} routes`);
+                updateNextSailingsList();
+            }
+        }
+        
+        // Hide loading states
+        document.getElementById('routes-loading').classList.add('hidden');
+        document.getElementById('routes-error').classList.add('hidden');
+        const nextSailingsLoading = document.getElementById('next-sailings-loading');
+        if (nextSailingsLoading) nextSailingsLoading.classList.add('hidden');
+        
+    } catch (error) {
+        console.error('Error fetching combined data:', error);
+        
+        // Retry logic
+        if (retryCount < maxRetries) {
+            console.log(`Retrying... (${retryCount + 1}/${maxRetries})`);
+            setTimeout(() => fetchCombinedData(retryCount + 1), 1000);
+            return;
+        }
+        
+        // Show error states after all retries fail
+        document.getElementById('routes-loading').classList.add('hidden');
+        document.getElementById('routes-error').classList.remove('hidden');
+        const nextSailingsLoading = document.getElementById('next-sailings-loading');
+        const nextSailingsError = document.getElementById('next-sailings-error');
+        if (nextSailingsLoading) nextSailingsLoading.classList.add('hidden');
+        if (nextSailingsError) nextSailingsError.classList.remove('hidden');
+    } finally {
+        isLoading = false;
+    }
+}
+
+// Legacy function - kept for compatibility but no longer used
+async function fetchNextSailings(retryCount = 0) {
+    const maxRetries = 2;
+    
+    try {
+        // Hide error state on first attempt
+        if (retryCount === 0) {
+            const errorElement = document.getElementById('next-sailings-error');
+            if (errorElement) errorElement.classList.add('hidden');
+        }
+        
+        const response = await fetch(`${API_ENDPOINT}?type=next-sailings`, {
+            headers: {
+                'Accept': 'application/json',
+                'Cache-Control': 'no-cache'
+            }
+        });
         
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
         const apiResponse = await response.json();
-        
-        // Handle the new response format
-        if (apiResponse.type === 'current-positions') {
-            ferries = apiResponse.data;
-        } else {
-            ferries = apiResponse; // Fallback for old format
-        }
-        
-        console.log(`Loaded information on ${ferries.length} ferries`);
-        console.log('Ferry data:', ferries);
-        
-        updateSystemStatus();
-        updateRoutesList();
-        updateFerryMarkers();
-        updateLastUpdated();
-        
-        // Hide loading states
-        document.getElementById('routes-loading').classList.add('hidden');
-        document.getElementById('routes-error').classList.add('hidden');
-        
-    } catch (error) {
-        console.error('Error fetching ferries:', error);
-        document.getElementById('routes-loading').classList.add('hidden');
-        document.getElementById('routes-error').classList.remove('hidden');
-    } finally {
-        isLoading = false;
-    }
-}
-
-// Fetch next sailings predictions with retry logic
-async function fetchNextSailings(retryCount = 0) {
-    const maxRetries = 2;
-    
-    try {
-        console.log(`Fetching next sailings... (attempt ${retryCount + 1}/${maxRetries + 1})`);
-        console.log('API endpoint:', `${API_ENDPOINT}?type=next-sailings`);
-        
-        // Hide error state on retry attempts
-        if (retryCount === 0) {
-            const errorElement = document.getElementById('next-sailings-error');
-            if (errorElement) errorElement.classList.add('hidden');
-        }
-        
-        const startTime = Date.now();
-        const response = await fetch(`${API_ENDPOINT}?type=next-sailings`, {
-            method: 'GET',
-            headers: {
-                'Accept': 'application/json',
-                'Cache-Control': 'no-cache'
-            }
-        });
-        const fetchTime = Date.now() - startTime;
-        
-        console.log(`Next sailings fetch took ${fetchTime}ms, status: ${response.status}`);
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Next sailings API error response:', errorText);
-            throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
-        }
-        
-        const parseStart = Date.now();
-        const apiResponse = await response.json();
-        const parseTime = Date.now() - parseStart;
-        
-        console.log(`JSON parsing took ${parseTime}ms`);
-        console.log('Next sailings data:', apiResponse);
-        
-        // Store the data
         nextSailingsData = apiResponse.data || {};
-        console.log('Stored next sailings data keys:', Object.keys(nextSailingsData));
-        
-        // Update the display (this will handle loading state)
         updateNextSailingsList();
-        
-        console.log('Next sailings fetch completed successfully');
         
     } catch (error) {
         console.error(`Error fetching next sailings (attempt ${retryCount + 1}):`, error);
         
         // Retry logic
         if (retryCount < maxRetries) {
-            console.log(`Retrying next sailings fetch in 1 second...`);
-            setTimeout(() => {
-                fetchNextSailings(retryCount + 1);
-            }, 1000);
+            setTimeout(() => fetchNextSailings(retryCount + 1), 1000);
             return;
         }
         
-        console.error('All retry attempts failed for next sailings');
-        console.error('Final error details:', {
-            message: error.message,
-            stack: error.stack,
-            name: error.name
-        });
-        
-        // Show error state only after all retries fail
+        // Show error state after all retries fail
         const loadingElement = document.getElementById('next-sailings-loading');
         const errorElement = document.getElementById('next-sailings-error');
         if (loadingElement) loadingElement.classList.add('hidden');
@@ -336,22 +333,17 @@ function updateSystemStatus() {
 // Update next sailings list
 function updateNextSailingsList() {
     const container = document.getElementById('next-sailings-list');
+    const loadingElement = document.getElementById('next-sailings-loading');
     if (!container) return;
     
-    // Always hide loading state when this function is called
-    const loadingElement = document.getElementById('next-sailings-loading');
-    if (loadingElement) {
-        loadingElement.classList.add('hidden');
-    }
-    
+    // Show loading if no data, otherwise hide loading
     if (!nextSailingsData || Object.keys(nextSailingsData).length === 0) {
-        // Show loading message only if we have no data at all
-        if (loadingElement) {
-            loadingElement.classList.remove('hidden');
-        }
+        if (loadingElement) loadingElement.classList.remove('hidden');
         container.innerHTML = '';
         return;
     }
+    
+    if (loadingElement) loadingElement.classList.add('hidden');
     
     let html = '';
     

@@ -12,7 +12,8 @@ function formatTime(date) {
     return date.toLocaleTimeString('en-US', {
         hour: 'numeric',
         minute: '2-digit',
-        hour12: true
+        hour12: true,
+        timeZone: 'America/Los_Angeles' // Force Pacific Time for ferry schedules
     });
 }
 

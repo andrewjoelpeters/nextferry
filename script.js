@@ -316,7 +316,7 @@ function updateNextSailingsList() {
     Object.entries(nextSailingsData).forEach(([routeAbbrev, routeData]) => {
         html += `
             <div class="route-section">
-                <h3 class="route-title">${routeData.name})</h3>
+                <h3 class="route-title">${routeData.name}</h3>
                 <div class="terminals-grid">
         `;
         

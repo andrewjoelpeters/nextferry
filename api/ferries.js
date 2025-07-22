@@ -449,22 +449,79 @@ async function predictRouteNext(vessels, schedule, routeAbbrev) {
         console.log(`\n📍 Terminal: ${terminalName} (ID: ${terminalId})`);
         console.log(`   Available sailings: ${combo.Times?.length || 0}`);
         
-        // Get upcoming sailings for this terminal, sorted by time
-        const upcomingSailings = combo.Times
-            ?.filter(time => {
-                const departTime = parseFerryTime(time.DepartingTime);
-                const isUpcoming = departTime && departTime > now;
-                if (departTime) {
-                    console.log(`   ${departTime.toLocaleTimeString()} - ${isUpcoming ? 'UPCOMING' : 'PAST'} (Vessel ${time.VesselPositionNum})`);
-                }
-                return isUpcoming;
-            })
-            .sort((a, b) => {
-                const timeA = parseFerryTime(a.DepartingTime);
-                const timeB = parseFerryTime(b.DepartingTime);
-                return timeA - timeB;
-            })
-            .slice(0, 4);
+        // Get all sailings for this terminal, sorted by time
+        const allSailings = combo.Times
+            ?.map(time => ({
+                ...time,
+                departTime: parseFerryTime(time.DepartingTime)
+            }))
+            .filter(time => time.departTime) // Only valid times
+            .sort((a, b) => a.departTime - b.departTime);
+            
+        if (!allSailings?.length) {
+            console.log(`   ⚠️ No valid sailings for ${terminalName}`);
+            continue;
+        }
+        
+        // Log all sailings for debugging
+        allSailings.forEach(time => {
+            const isUpcoming = time.departTime > now;
+            console.log(`   ${time.departTime.toLocaleTimeString()} - ${isUpcoming ? 'UPCOMING' : 'PAST'} (Vessel ${time.VesselPositionNum})`);
+        });
+        
+        // Find the current sailing based on ferry positions, not time
+        let currentSailingIndex = -1;
+        let currentFerry = null;
+        
+        // Priority 1: Ferry at dock for this terminal
+        const ferryAtDock = Array.from(vesselInfo.values())
+            .find(vessel => vessel.atDock && vessel.departingTerminalId === terminalId && !vessel.hasLeftDock);
+            
+        if (ferryAtDock) {
+            currentFerry = ferryAtDock;
+            console.log(`   ⚓ Ferry at dock: ${ferryAtDock.name} - this is the current sailing`);
+        } else {
+            // Priority 2: Ferry en route to this terminal (find the closest one by ETA)
+            const ferriesEnRoute = Array.from(vesselInfo.values())
+                .filter(vessel => vessel.arrivingTerminalId === terminalId && !vessel.atDock)
+                .sort((a, b) => {
+                    // Sort by ETA (closest first)
+                    const etaA = a.eta || new Date(Date.now() + 60 * 60000); // Default 1 hour if no ETA
+                    const etaB = b.eta || new Date(Date.now() + 60 * 60000);
+                    return etaA - etaB;
+                });
+                
+            if (ferriesEnRoute.length > 0) {
+                currentFerry = ferriesEnRoute[0];
+                console.log(`   🚢 Ferry en route: ${currentFerry.name} (ETA: ${currentFerry.eta?.toLocaleTimeString() || 'unknown'}) - this is the current sailing`);
+            }
+        }
+        
+        if (currentFerry) {
+            // Find the sailing that matches this ferry's scheduled departure
+            currentSailingIndex = allSailings.findIndex(sailing => {
+                const timeDiff = Math.abs(sailing.departTime.getTime() - currentFerry.scheduledDeparture.getTime());
+                return timeDiff < 60000; // Within 1 minute
+            });
+            
+            if (currentSailingIndex >= 0) {
+                console.log(`   🎯 Found current ferry's scheduled sailing at index ${currentSailingIndex}`);
+            } else {
+                console.log(`   ⚠️ Current ferry's scheduled time doesn't match any sailing - using first sailing`);
+                currentSailingIndex = 0;
+            }
+        } else {
+            console.log(`   ⚠️ No ferry at dock or en route - using first sailing`);
+            currentSailingIndex = 0;
+        }
+        
+        if (currentSailingIndex < 0 || currentSailingIndex >= allSailings.length) {
+            console.log(`   ⚠️ Invalid sailing index`);
+            continue;
+        }
+        
+        // Get the current sailing and the next few sailings
+        const upcomingSailings = allSailings.slice(currentSailingIndex, currentSailingIndex + 4);
         
         console.log(`   ✅ Found ${upcomingSailings?.length || 0} upcoming sailings`);
         
@@ -480,17 +537,50 @@ async function predictRouteNext(vessels, schedule, routeAbbrev) {
         
         // CRITICAL: First, check if any ferry is currently at the dock for this terminal
         // A ferry at the dock MUST be the next departure, regardless of schedule timing
-        let ferryAtDock = null;
+        let ferryAtDockData = null;
         for (const [vesselPos, vesselData] of vesselInfo) {
             if (vesselData.atDock && vesselData.departingTerminalId === terminalId && !vesselData.hasLeftDock) {
-                ferryAtDock = { vesselPos, vesselData };
+                ferryAtDockData = { vesselPos, vesselData };
                 console.log(`   ⚓ Ferry at dock: ${vesselData.name} (ready to depart)`);
                 break;
             }
         }
         
-        if (!ferryAtDock) {
+        if (!ferryAtDockData) {
             console.log(`   🚢 No ferry currently at dock for ${terminalName}`);
+        }
+        
+        // If there's a ferry at dock, it IS the immediate next sailing
+        if (ferryAtDockData) {
+            const ferryScheduledTime = ferryAtDockData.vesselData.scheduledDeparture;
+            const currentTime = new Date();
+            
+            console.log(`   🚨 Ferry at dock scheduled departure: ${ferryScheduledTime.toLocaleTimeString()}`);
+            
+            // Use cached delay as baseline, but update if ferry has been waiting longer
+            const cachedDelay = ferryAtDockData.vesselData.currentDelay;
+            const timeSinceScheduled = (currentTime.getTime() - ferryScheduledTime.getTime()) / (60 * 1000);
+            const actualDelay = Math.max(0, timeSinceScheduled);
+            
+            // Use the greater of cached delay or actual time since scheduled
+            const estimatedDelay = Math.max(cachedDelay, actualDelay);
+            const estimatedTime = new Date(currentTime.getTime());
+            
+            console.log(`   🕰️ Cached delay: ${cachedDelay}min, Time since scheduled: ${Math.round(actualDelay)}min`);
+            console.log(`   📊 Using estimated delay: ${Math.round(estimatedDelay)}min`);
+            
+            sailingPredictions.push({
+                scheduled_departure: formatTime(ferryScheduledTime),
+                estimated_departure: formatTime(estimatedTime),
+                estimated_delay: Math.round(estimatedDelay),
+                vessel_position: ferryAtDockData.vesselPos,
+                vessel_name: ferryAtDockData.vesselData.name
+            });
+            
+            console.log(`   ✅ Added ferry-at-dock sailing: ${formatTime(ferryScheduledTime)} → ${formatTime(estimatedTime)} (${Math.round(estimatedDelay)}min delay)`);
+            
+            // Update the delay tracker for this vessel
+            vesselDelayTracker.set(ferryAtDockData.vesselPos, Math.round(estimatedDelay));
         }
         
         console.log(`\n   🕰️ Processing ${Math.min(upcomingSailings.length, 3)} upcoming sailings:`);
@@ -517,13 +607,17 @@ async function predictRouteNext(vessels, schedule, routeAbbrev) {
                 console.log(`     📍 Vessel status: ${vessel.atDock ? 'At dock' : 'In transit'}`);
                 console.log(`     ⏰ Vessel scheduled departure: ${vessel.scheduledDeparture.toLocaleTimeString()}`);
                 
+                // Check if we already handled this vessel's own scheduled departure
+                const ferryAtDockAlreadyHandled = ferryAtDockData && 
+                    sailingPredictions.some(p => p.vessel_position === ferryAtDockData.vesselPos);
+                
                 // PRIORITY LOGIC: If this is the first sailing and there's a ferry at dock,
-                // that ferry MUST be assigned to this sailing, regardless of vessel position matching
-                if (i === 0 && ferryAtDock && ferryAtDock.vesselData.departingTerminalId === terminalId) {
+                // that ferry MUST be assigned to this sailing, unless we already handled its own departure
+                if (i === 0 && ferryAtDockData && ferryAtDockData.vesselData.departingTerminalId === terminalId && !ferryAtDockAlreadyHandled) {
                     // Override vessel assignment - the ferry at dock gets priority
-                    vesselName = ferryAtDock.vesselData.name;
-                    estimatedDelay = ferryAtDock.vesselData.currentDelay;
-                    vesselDelayTracker.set(ferryAtDock.vesselPos, estimatedDelay);
+                    vesselName = ferryAtDockData.vesselData.name;
+                    estimatedDelay = ferryAtDockData.vesselData.currentDelay;
+                    vesselDelayTracker.set(ferryAtDockData.vesselPos, estimatedDelay);
                     console.log(`     ❗ OVERRIDE: Ferry at dock ${vesselName} takes priority (${estimatedDelay}min delay)`);
                 } else {
                     // Normal logic for subsequent sailings or when no ferry at dock

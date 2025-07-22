@@ -441,15 +441,23 @@ async function predictRouteNext(vessels, schedule, routeAbbrev) {
     });
     
     // Process each terminal combination
+    console.log(`\n🏢 Processing ${schedule.TerminalCombos?.length || 0} terminals for route ${routeAbbrev}...`);
     for (const combo of schedule.TerminalCombos || []) {
         const terminalId = combo.DepartingTerminalID;
         const terminalName = combo.DepartingTerminalName;
+        
+        console.log(`\n📍 Terminal: ${terminalName} (ID: ${terminalId})`);
+        console.log(`   Available sailings: ${combo.Times?.length || 0}`);
         
         // Get upcoming sailings for this terminal, sorted by time
         const upcomingSailings = combo.Times
             ?.filter(time => {
                 const departTime = parseFerryTime(time.DepartingTime);
-                return departTime && departTime > now;
+                const isUpcoming = departTime && departTime > now;
+                if (departTime) {
+                    console.log(`   ${departTime.toLocaleTimeString()} - ${isUpcoming ? 'UPCOMING' : 'PAST'} (Vessel ${time.VesselPositionNum})`);
+                }
+                return isUpcoming;
             })
             .sort((a, b) => {
                 const timeA = parseFerryTime(a.DepartingTime);
@@ -458,7 +466,12 @@ async function predictRouteNext(vessels, schedule, routeAbbrev) {
             })
             .slice(0, 4);
         
-        if (!upcomingSailings?.length) continue;
+        console.log(`   ✅ Found ${upcomingSailings?.length || 0} upcoming sailings`);
+        
+        if (!upcomingSailings?.length) {
+            console.log(`   ⚠️ No upcoming sailings for ${terminalName}`);
+            continue;
+        }
         
         const sailingPredictions = [];
         
@@ -471,17 +484,28 @@ async function predictRouteNext(vessels, schedule, routeAbbrev) {
         for (const [vesselPos, vesselData] of vesselInfo) {
             if (vesselData.atDock && vesselData.departingTerminalId === terminalId && !vesselData.hasLeftDock) {
                 ferryAtDock = { vesselPos, vesselData };
-                console.log(`🚢 Ferry at dock found: ${vesselData.name} at terminal ${terminalId}`);
+                console.log(`   ⚓ Ferry at dock: ${vesselData.name} (ready to depart)`);
                 break;
             }
         }
+        
+        if (!ferryAtDock) {
+            console.log(`   🚢 No ferry currently at dock for ${terminalName}`);
+        }
+        
+        console.log(`\n   🕰️ Processing ${Math.min(upcomingSailings.length, 3)} upcoming sailings:`);
         
         for (let i = 0; i < Math.min(upcomingSailings.length, 3); i++) {
             const sailing = upcomingSailings[i];
             const vesselPosition = sailing.VesselPositionNum;
             const scheduledTime = parseFerryTime(sailing.DepartingTime);
             
-            if (!scheduledTime || !vesselPosition) continue;
+            console.log(`\n   Sailing ${i + 1}: ${scheduledTime.toLocaleTimeString()} (Vessel Position ${vesselPosition})`);
+            
+            if (!scheduledTime || !vesselPosition) {
+                console.log(`     ❌ Invalid sailing data - skipping`);
+                continue;
+            }
             
             const vessel = vesselInfo.get(vesselPosition);
             let estimatedDelay = 0;
@@ -489,6 +513,9 @@ async function predictRouteNext(vessels, schedule, routeAbbrev) {
             
             if (vessel) {
                 vesselName = vessel.name;
+                console.log(`     🚢 Assigned vessel: ${vesselName}`);
+                console.log(`     📍 Vessel status: ${vessel.atDock ? 'At dock' : 'In transit'}`);
+                console.log(`     ⏰ Vessel scheduled departure: ${vessel.scheduledDeparture.toLocaleTimeString()}`);
                 
                 // PRIORITY LOGIC: If this is the first sailing and there's a ferry at dock,
                 // that ferry MUST be assigned to this sailing, regardless of vessel position matching
@@ -497,42 +524,38 @@ async function predictRouteNext(vessels, schedule, routeAbbrev) {
                     vesselName = ferryAtDock.vesselData.name;
                     estimatedDelay = ferryAtDock.vesselData.currentDelay;
                     vesselDelayTracker.set(ferryAtDock.vesselPos, estimatedDelay);
-                    console.log(`🚢 Assigning ferry at dock ${vesselName} to next sailing with ${estimatedDelay}min delay`);
+                    console.log(`     ❗ OVERRIDE: Ferry at dock ${vesselName} takes priority (${estimatedDelay}min delay)`);
                 } else {
                     // Normal logic for subsequent sailings or when no ferry at dock
                     const timeDiff = Math.abs(scheduledTime.getTime() - vessel.scheduledDeparture.getTime());
+                    console.log(`     🔄 Scheduled turnaround time (${vessel.scheduledDeparture.toLocaleTimeString()} → ${scheduledTime.toLocaleTimeString()}): ${Math.round(timeDiff / 60000)}min`);
                     
                     if (!vessel.hasLeftDock && timeDiff < 60000) {
                         // Vessel is waiting at dock for this exact sailing
                         estimatedDelay = vessel.currentDelay;
-                        vesselDelayTracker.set(vesselPosition, estimatedDelay);
-                    } else if (vessel.hasLeftDock) {
-                        // Vessel has left dock - this sailing is its next return trip
-                        // Apply delay propagation based on turnaround time
-                        
-                        // Find previous sailing for this vessel (the one it just departed for)
-                        const previousSailingTime = vessel.scheduledDeparture;
-                        const turnaroundTime = calculateTurnaroundTimeFromTimes(previousSailingTime, scheduledTime);
-                        
-                        if (turnaroundTime < 25) {
-                            // Very tight turnaround - most delay carries over
-                            estimatedDelay = Math.max(0, vessel.currentDelay * .95);
-                        } else if (turnaroundTime < 45) {
-                            // Normal turnaround - some recovery possible
-                            estimatedDelay = Math.max(0, vessel.currentDelay * .9);
-                        } else {
-                            // Long turnaround - significant recovery possible
-                            estimatedDelay = Math.max(0, vessel.currentDelay * .8);
-                        }
-                        
-                        vesselDelayTracker.set(vesselPosition, estimatedDelay);
+                        console.log(`     ⚓ Vessel waiting at dock - using current delay: ${estimatedDelay}min`);
                     } else {
-                        // Use tracked delay from previous iterations
-                        estimatedDelay = vesselDelayTracker.get(vesselPosition) || 0;
+                        // Calculate delay based on vessel's current status and turnaround time
+                        const baseDelay = vessel.currentDelay;
+                        const turnaroundTime = calculateTurnaroundTimeFromTimes(
+                            vessel.scheduledDeparture, 
+                            scheduledTime
+                        );
+                        
+                        console.log(`     🔄 Base delay: ${baseDelay}min, Turnaround time: ${turnaroundTime}min`);
+                        
+                        // Apply cascading delay logic
+                        const previousDelay = vesselDelayTracker.get(vesselPosition) || 0;
+                        estimatedDelay = Math.max(baseDelay, previousDelay) + Math.max(0, baseDelay - turnaroundTime);
+                        
+                        console.log(`     🔗 Previous delay: ${previousDelay}min, Calculated delay: ${estimatedDelay}min`);
                     }
+                    
+                    vesselDelayTracker.set(vesselPosition, estimatedDelay);
                 }
             } else {
-                // No vessel info - assume on time
+                console.log(`     ⚠️ No vessel info found for position ${vesselPosition}`);
+                vesselName = `Position ${vesselPosition}`;
                 estimatedDelay = 0;
             }
             

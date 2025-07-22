@@ -59,7 +59,6 @@ function initializeMap() {
         attribution: '© OpenStreetMap contributors'
     }).addTo(map);
     
-    addMapLegend();
     updateFerryMarkers();
     
     console.log('Map initialized');
@@ -143,19 +142,6 @@ function showFerryDetails(ferry) {
 
     const formatTime = (date) => date ? parseMicrosoftJsonDateToTime(date) : 'N/A';
 
-    let delayText = 'N/A';
-    if (ferry.ScheduledDeparture) {
-        // If ferry has departed, calculate current delay
-        if (ferry.LeftDock) {
-            const delayMeta = calculateDelay(ferry.ScheduledDeparture, ferry.LeftDock);
-            delayText = delayMeta.delayText;
-        }
-        // If ferry hasn't departed, use cached delay from server
-        else if (ferry.cachedDelay) {
-            delayText = ferry.cachedDelay;
-        }
-    }
-
     document.getElementById('ferry-details').innerHTML = `
         <h3>${ferry.VesselName}</h3>
         <div class="route-status ${statusClass}">${status}</div>
@@ -163,7 +149,7 @@ function showFerryDetails(ferry) {
         <p><strong>To:</strong> ${ferry.ArrivingTerminalName || 'Unknown'}</p>
         <p><strong>Scheduled:</strong> ${formatTime(ferry.ScheduledDeparture)}</p>
         <p><strong>Departed:</strong> ${formatTime(ferry.LeftDock)}</p>
-        <p><strong>Delay:</strong> ${delayText}</p>
+        <p><strong>Delay:</strong> ${ferry.cachedDelay}</p>
         <p><strong>ETA:</strong> ${formatTime(ferry.Eta)}</p>
         <p><strong>Speed:</strong> ${ferry.Speed.toFixed(1)} knots</p>
         <p><strong>Route:</strong> ${ferry.OpRouteAbbrev?.join(', ') || 'Unknown'}</p>
@@ -250,50 +236,6 @@ async function fetchCombinedData(retryCount = 0) {
     }
 }
 
-// Legacy function - kept for compatibility but no longer used
-async function fetchNextSailings(retryCount = 0) {
-    const maxRetries = 2;
-    
-    try {
-        // Hide error state on first attempt
-        if (retryCount === 0) {
-            const errorElement = document.getElementById('next-sailings-error');
-            if (errorElement) errorElement.classList.add('hidden');
-        }
-        
-        const response = await fetch(`${API_ENDPOINT}?type=next-sailings`, {
-            headers: {
-                'Accept': 'application/json',
-                'Cache-Control': 'no-cache'
-            }
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const apiResponse = await response.json();
-        nextSailingsData = apiResponse.data || {};
-        updateNextSailingsList();
-        
-    } catch (error) {
-        console.error(`Error fetching next sailings (attempt ${retryCount + 1}):`, error);
-        
-        // Retry logic
-        if (retryCount < maxRetries) {
-            setTimeout(() => fetchNextSailings(retryCount + 1), 1000);
-            return;
-        }
-        
-        // Show error state after all retries fail
-        const loadingElement = document.getElementById('next-sailings-loading');
-        const errorElement = document.getElementById('next-sailings-error');
-        if (loadingElement) loadingElement.classList.add('hidden');
-        if (errorElement) errorElement.classList.remove('hidden');
-    }
-}
-
-
 
 // Update next sailings list
 function updateNextSailingsList() {
@@ -312,7 +254,6 @@ function updateNextSailingsList() {
     
     let html = '';
     
-    // Routes are now filtered server-side, so display all returned routes
     Object.entries(nextSailingsData).forEach(([routeAbbrev, routeData]) => {
         html += `
             <div class="route-section">
@@ -431,73 +372,13 @@ function parseTimeString(timeStr) {
     return result;
 }
 
-
-
-// Calculate delay information for display
-function calculateFerryDelay(ferry) {
-    if (!ferry.ScheduledDeparture) {
-        return {
-            displayText: 'No data',
-            cssClass: 'status-unknown'
-        };
-    }
-    
-    let delayText = 'No data';
-    let cssClass = 'status-unknown';
-    
-    // If ferry has departed, calculate current delay
-    if (ferry.LeftDock) {
-        const delayData = calculateDelay(ferry.ScheduledDeparture, ferry.LeftDock);
-        if (!delayData.error) {
-            delayText = delayData.delayText;
-            cssClass = delayData.status === 'on-time' ? 'status-on-time' :
-                      delayData.status === 'early' ? 'status-early' : 'status-delayed';
-        }
-    }
-    // If ferry hasn't departed, use cached delay from server
-    else if (ferry.cachedDelay) {
-        delayText = ferry.cachedDelay;
-        // Determine CSS class from cached delay text
-        if (delayText.includes('late')) {
-            cssClass = 'status-delayed';
-        } else if (delayText.includes('early')) {
-            cssClass = 'status-early';
-        } else if (delayText.includes('on time')) {
-            cssClass = 'status-on-time';
-        }
-    }
-    
-    return {
-        displayText: delayText,
-        cssClass: cssClass
-    };
-}
-
-// Add map legend
-function addMapLegend() {
-    const legend = L.control({ position: 'bottomleft' });
-    
-    legend.onAdd = function(map) {
-        const div = L.DomUtil.create('div', 'map-legend');
-        div.innerHTML = `
-            <h4>Ferry Status</h4>
-            <div><span class="legend-color" style="background: #28a745;"></span> At Dock</div>
-            <div><span class="legend-color" style="background: #ffc107;"></span> In Transit</div>
-            <div><span class="legend-color" style="background: #dc3545;"></span> Out of Service</div>
-        `;
-        return div;
-    };
-    
-    legend.addTo(map);
-}
-
 // Update last updated timestamp
 function updateLastUpdated() {
     const now = new Date();
     document.getElementById('last-updated').textContent = now.toLocaleTimeString();
 }
 
-// Utility functions (keeping your existing ones)
+
 function parseMicrosoftJsonDateToTime(msDateString) {
     const match = /\/Date\((\d+)([+-]\d{4})\)\//.exec(msDateString);
     if (!match) return null;
@@ -506,45 +387,4 @@ function parseMicrosoftJsonDateToTime(msDateString) {
     const date = new Date(millis);
 
     return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-}
-
-function calculateDelay(expectedTimeString, actualTimeString) {
-    const expectedMatch = /\/Date\((\d+)([+-]\d{4})\)\//.exec(expectedTimeString);
-    const actualMatch = /\/Date\((\d+)([+-]\d{4})\)\//.exec(actualTimeString);
-    
-    if (!expectedMatch || !actualMatch) {
-        return { error: "Invalid timestamp format" };
-    }
-    
-    const expectedMillis = parseInt(expectedMatch[1], 10);
-    const actualMillis = parseInt(actualMatch[1], 10);
-    
-    const expectedDate = new Date(expectedMillis);
-    const actualDate = new Date(actualMillis);
-    
-    const diffMillis = actualDate.getTime() - expectedDate.getTime();
-    const diffMinutes = Math.round(diffMillis / (1000 * 60));
-    
-    const expectedTime = expectedDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    const actualTime = actualDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    
-    let status, delayText;
-    if (diffMinutes > 0) {
-        status = "delayed";
-        delayText = `${diffMinutes} min late`;
-    } else if (diffMinutes < 0) {
-        status = "early";
-        delayText = `${Math.abs(diffMinutes)} min early`;
-    } else {
-        status = "on-time";
-        delayText = "on time";
-    }
-    
-    return {
-        expectedTime,
-        actualTime,
-        delayMinutes: diffMinutes,
-        status,
-        delayText
-    };
 }

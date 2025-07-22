@@ -610,6 +610,9 @@ function calculateTurnaroundTimeFromTimes(previousDepartureTime, nextDepartureTi
     return Math.max(10, Math.round(turnaroundMs / (60 * 1000))); // Minimum 10 minutes
 }
 
+// Configuration - routes to display (can be overridden by query param)
+const DEFAULT_DISPLAYED_ROUTES = ['sea-bi', 'ed-king'];
+
 // Main handler
 export default async function handler(req, res) {
     try {
@@ -623,18 +626,47 @@ export default async function handler(req, res) {
             return res.status(500).json({ error: 'API key missing' });
         }
 
-        const { route, type } = req.query;
+        const { route, routes } = req.query;
+        
+        // Determine which routes to process
+        let routesToProcess;
+        if (route) {
+            // Single route specified
+            routesToProcess = [route];
+        } else if (routes) {
+            // Multiple routes specified (comma-separated)
+            routesToProcess = routes.split(',').map(r => r.trim());
+        } else {
+            // Use default routes
+            routesToProcess = DEFAULT_DISPLAYED_ROUTES;
+        }
+        
+        console.log(`🎯 Processing routes: ${routesToProcess.join(', ')}`);
         
         // Fetch vessels with delay processing once for all request types
         const vessels = await getVesselsWithDelays(apiKey);
         
-        // Always return both vessel positions and next sailings in a single response
-        const predictions = await predictNextSailings(apiKey, vessels, route);
+        // Filter vessels to only those operating on the routes we care about
+        const filteredVessels = vessels.filter(vessel => 
+            vessel.OpRouteAbbrev && routesToProcess.includes(vessel.OpRouteAbbrev)
+        );
+        
+        console.log(`🚢 Filtered vessels: ${filteredVessels.length}/${vessels.length} (${routesToProcess.join(', ')})`);
+        
+        // Process predictions for filtered routes only
+        const predictions = {};
+        for (const routeAbbrev of routesToProcess) {
+            const routePredictions = await predictNextSailings(apiKey, vessels, routeAbbrev);
+            if (routePredictions && Object.keys(routePredictions).length > 0) {
+                Object.assign(predictions, routePredictions);
+            }
+        }
         
         res.status(200).json({
             type: 'combined',
-            vessels: vessels,
+            vessels: filteredVessels, // Return only filtered vessels
             nextSailings: predictions,
+            routesProcessed: routesToProcess,
             timestamp: new Date().toISOString()
         });
         

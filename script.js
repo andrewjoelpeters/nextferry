@@ -1,6 +1,11 @@
 // Configuration
 const API_ENDPOINT = '/api/ferries';
 const UPDATE_INTERVAL = 30000; // 30 seconds
+const DISPLAYED_ROUTES = ['sea-bi', 'ed-king'];
+const TERMINAL_ORDER = {
+    'sea-bi': ['3', '7'], // Bainbridge (3) before Seattle (7)
+    'ed-king': ['12', '8']  // Kingston (12) before Edmonds (8)
+};
 
 // Application state
 let map = null;
@@ -347,6 +352,7 @@ function updateNextSailingsList() {
     
     let html = '';
     
+    // Routes are now filtered server-side, so display all returned routes
     Object.entries(nextSailingsData).forEach(([routeAbbrev, routeData]) => {
         html += `
             <div class="route-section">
@@ -354,7 +360,13 @@ function updateNextSailingsList() {
                 <div class="terminals-grid">
         `;
         
-        Object.entries(routeData.terminals).forEach(([terminalId, terminal]) => {
+        // Order terminals according to TERMINAL_ORDER (west to east)
+        const terminalOrder = TERMINAL_ORDER[routeAbbrev] || Object.keys(routeData.terminals);
+        const orderedTerminals = terminalOrder
+            .map(terminalId => [terminalId, routeData.terminals[terminalId]])
+            .filter(([terminalId, terminal]) => terminal); // Only include terminals that exist
+        
+        orderedTerminals.forEach(([terminalId, terminal]) => {
             html += `
                 <div class="terminal-card">
                     <h4 class="terminal-name">${terminal.terminal_name}</h4>
@@ -466,6 +478,7 @@ function updateRoutesList() {
     
     let html = '';
     
+    // Routes are now filtered server-side, so display all returned routes
     Object.entries(routeGroups).forEach(([route, routeFerries]) => {
         // Calculate route status
         const routeStatus = calculateRouteStatus(routeFerries);

@@ -193,7 +193,6 @@ async function fetchCombinedData(retryCount = 0) {
         if (retryCount === 0) {
             const nextSailingsError = document.getElementById('next-sailings-error');
             if (nextSailingsError) nextSailingsError.classList.add('hidden');
-            document.getElementById('routes-error').classList.add('hidden');
         }
         
         // Single API call for both vessel positions and next sailings
@@ -215,9 +214,6 @@ async function fetchCombinedData(retryCount = 0) {
             // Update vessel positions
             if (data.vessels) {
                 ferries = data.vessels;
-                console.log(`Loaded ${ferries.length} ferries`);
-                updateSystemStatus();
-                updateRoutesList();
                 updateFerryMarkers();
                 updateLastUpdated();
             }
@@ -231,8 +227,6 @@ async function fetchCombinedData(retryCount = 0) {
         }
         
         // Hide loading states
-        document.getElementById('routes-loading').classList.add('hidden');
-        document.getElementById('routes-error').classList.add('hidden');
         const nextSailingsLoading = document.getElementById('next-sailings-loading');
         if (nextSailingsLoading) nextSailingsLoading.classList.add('hidden');
         
@@ -247,8 +241,6 @@ async function fetchCombinedData(retryCount = 0) {
         }
         
         // Show error states after all retries fail
-        document.getElementById('routes-loading').classList.add('hidden');
-        document.getElementById('routes-error').classList.remove('hidden');
         const nextSailingsLoading = document.getElementById('next-sailings-loading');
         const nextSailingsError = document.getElementById('next-sailings-error');
         if (nextSailingsLoading) nextSailingsLoading.classList.add('hidden');
@@ -301,39 +293,7 @@ async function fetchNextSailings(retryCount = 0) {
     }
 }
 
-// Update system status overview
-function updateSystemStatus() {
-    const totalFerries = ferries.length;
-    const activeFerries = ferries.filter(f => f.InService).length;
-    
-    // Calculate delayed routes
-    const routeDelays = {};
-    ferries.forEach(ferry => {
-        const route = ferry.OpRouteAbbrev?.join(', ') || 'Unknown';
-        if (!routeDelays[route]) {
-            routeDelays[route] = [];
-        }
-        if (ferry.ScheduledDeparture && ferry.LeftDock) {
-            const delayInfo = calculateDelay(ferry.ScheduledDeparture, ferry.LeftDock);
-            routeDelays[route].push(delayInfo.delayMinutes);
-        }
-    });
-    
-    const delayedRoutes = Object.keys(routeDelays).filter(route => {
-        const avgDelay = routeDelays[route].reduce((a, b) => a + b, 0) / routeDelays[route].length;
-        return avgDelay > 0;
-    }).length;
-    
-    // Calculate average delay
-    const allDelays = Object.values(routeDelays).flat();
-    const avgDelay = allDelays.length > 0 ? 
-        Math.round(allDelays.reduce((a, b) => a + b, 0) / allDelays.length) : 0;
-    
-    document.getElementById('total-ferries').textContent = totalFerries;
-    document.getElementById('active-ferries').textContent = activeFerries;
-    document.getElementById('delayed-routes').textContent = delayedRoutes;
-    document.getElementById('avg-delay').textContent = avgDelay > 0 ? `${avgDelay}m` : '0m';
-}
+
 
 // Update next sailings list
 function updateNextSailingsList() {
@@ -356,7 +316,7 @@ function updateNextSailingsList() {
     Object.entries(nextSailingsData).forEach(([routeAbbrev, routeData]) => {
         html += `
             <div class="route-section">
-                <h3 class="route-title">${routeData.name} (${routeAbbrev})</h3>
+                <h3 class="route-title">${routeData.name})</h3>
                 <div class="terminals-grid">
         `;
         
@@ -369,7 +329,7 @@ function updateNextSailingsList() {
         orderedTerminals.forEach(([terminalId, terminal]) => {
             html += `
                 <div class="terminal-card">
-                    <h4 class="terminal-name">${terminal.terminal_name}</h4>
+                    <h4 class="terminal-name">Leaving  ${terminal.terminal_name}</h4>
                     <div class="sailings-list">
             `;
             
@@ -471,94 +431,7 @@ function parseTimeString(timeStr) {
     return result;
 }
 
-// Update routes list
-function updateRoutesList() {
-    const routesContainer = document.getElementById('routes-list');
-    const routeGroups = groupFerriesByRoute(ferries);
-    
-    let html = '';
-    
-    // Routes are now filtered server-side, so display all returned routes
-    Object.entries(routeGroups).forEach(([route, routeFerries]) => {
-        // Calculate route status
-        const routeStatus = calculateRouteStatus(routeFerries);
-        
-        // Create ferry items
-        let ferryItems = '';
-        routeFerries.forEach(ferry => {
-            const delayInfo = calculateFerryDelay(ferry);
-            ferryItems += `
-                <li class="ferry-item">
-                    <div>
-                        <div class="ferry-name">${ferry.VesselName}</div>
-                        <div class="ferry-route-info">${ferry.DepartingTerminalName} → ${ferry.ArrivingTerminalName || 'Unknown'}</div>
-                    </div>
-                    <div class="ferry-delay ${delayInfo.cssClass}">${delayInfo.displayText}</div>
-                </li>
-            `;
-        });
-        
-        html += `
-            <div class="route-card">
-                <div class="route-header">
-                    <div class="route-name">${route}</div>
-                    <div class="route-status ${routeStatus.cssClass}">${routeStatus.text}</div>
-                </div>
-                <ul class="ferry-list">
-                    ${ferryItems}
-                </ul>
-            </div>
-        `;
-    });
-    
-    routesContainer.innerHTML = html;
-}
 
-// Group ferries by route
-function groupFerriesByRoute(ferries) {
-    const groups = {};
-    
-    ferries.forEach(ferry => {
-        const route = ferry.OpRouteAbbrev?.join(', ') || 'Unknown Route';
-        if (!groups[route]) {
-            groups[route] = [];
-        }
-        groups[route].push(ferry);
-    });
-    
-    // Sort routes alphabetically
-    const sortedGroups = {};
-    Object.keys(groups).sort().forEach(key => {
-        sortedGroups[key] = groups[key].sort((a, b) => a.VesselName.localeCompare(b.VesselName));
-    });
-    
-    return sortedGroups;
-}
-
-// Calculate overall status for a route
-function calculateRouteStatus(routeFerries) {
-    const delays = routeFerries.map(ferry => {
-        if (!ferry.ScheduledDeparture || !ferry.LeftDock) return 0;
-        const delayInfo = calculateDelay(ferry.ScheduledDeparture, ferry.LeftDock);
-        return delayInfo.delayMinutes;
-    }).filter(delay => delay !== 0);
-    
-    if (delays.length === 0) {
-        return { text: 'No Data', cssClass: 'status-unknown' };
-    }
-    
-    const avgDelay = delays.reduce((a, b) => a + b, 0) / delays.length;
-    
-    if (avgDelay > 10) {
-        return { text: 'Major Delays', cssClass: 'status-delayed' };
-    } else if (avgDelay > 0) {
-        return { text: 'Minor Delays', cssClass: 'status-delayed' };
-    } else if (avgDelay < 0) {
-        return { text: 'Running Early', cssClass: 'status-early' };
-    } else {
-        return { text: 'On Time', cssClass: 'status-on-time' };
-    }
-}
 
 // Calculate delay information for display
 function calculateFerryDelay(ferry) {

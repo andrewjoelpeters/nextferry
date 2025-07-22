@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WA Ferry Tracker - Map View</title>
+    <title>Next Ferry</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⛴️</text></svg>">
     <link rel="stylesheet" href="style.css">
     <!-- Add Leaflet CSS -->
@@ -11,57 +11,16 @@
 </head>
 <body>
     <header>
-        <h1>⛴️ WA Ferry Tracker</h1>
-        <p>Real-time ferry status and departures</p>
+        <h1>When's the Next Ferry?</h1>
     </header>
 
     <!-- Tab Navigation -->
     <nav class="tab-nav">
-        <button class="tab-button" onclick="showTab('routes')">Routes</button>
         <button class="tab-button active" onclick="showTab('next-sailings')">Next Sailings</button>
         <button class="tab-button" onclick="showTab('map')">Map</button>
     </nav>
 
-    <!-- Routes Tab Content -->
-    <div id="routes-tab" class="tab-content">
-        <div class="routes-container">
-            <!-- System Status Overview -->
-            <div class="system-status">
-                <h2>System Status</h2>
-                <div class="status-grid">
-                    <div class="status-item">
-                        <div class="status-number" id="total-ferries">-</div>
-                        <div class="status-label">Total Ferries</div>
-                    </div>
-                    <div class="status-item">
-                        <div class="status-number" id="active-ferries">-</div>
-                        <div class="status-label">In Service</div>
-                    </div>
-                    <div class="status-item">
-                        <div class="status-number" id="delayed-routes">-</div>
-                        <div class="status-label">Delayed Routes</div>
-                    </div>
-                    <div class="status-item">
-                        <div class="status-number" id="avg-delay">-</div>
-                        <div class="status-label">Avg Delay</div>
-                    </div>
-                </div>
-            </div>
 
-            <!-- Loading State -->
-            <div id="routes-loading" class="loading-state">
-                <div>Loading ferry data...</div>
-            </div>
-
-            <!-- Error State -->
-            <div id="routes-error" class="error-state hidden">
-                Error loading ferry data. Please try again.
-            </div>
-
-            <!-- Routes Container -->
-            <div id="routes-list"></div>
-        </div>
-    </div>
 
     <!-- Next Sailings Tab Content -->
     <div id="next-sailings-tab" class="tab-content active">

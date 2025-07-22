@@ -646,13 +646,6 @@ export default async function handler(req, res) {
         // Fetch vessels with delay processing once for all request types
         const vessels = await getVesselsWithDelays(apiKey);
         
-        // Filter vessels to only those operating on the routes we care about
-        const filteredVessels = vessels.filter(vessel => 
-            vessel.OpRouteAbbrev && routesToProcess.includes(vessel.OpRouteAbbrev)
-        );
-        
-        console.log(`🚢 Filtered vessels: ${filteredVessels.length}/${vessels.length} (${routesToProcess.join(', ')})`);
-        
         // Process predictions for filtered routes only
         const predictions = {};
         for (const routeAbbrev of routesToProcess) {
@@ -664,7 +657,7 @@ export default async function handler(req, res) {
         
         res.status(200).json({
             type: 'combined',
-            vessels: filteredVessels, // Return only filtered vessels
+            vessels: vessels,
             nextSailings: predictions,
             routesProcessed: routesToProcess,
             timestamp: new Date().toISOString()

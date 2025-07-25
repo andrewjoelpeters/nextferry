@@ -1,4 +1,5 @@
 import { kv } from '@vercel/kv';
+import { cacheDelay, getCachedDelay } from './kv-helpers.js';
 
 // -------------------- Utility Functions --------------------
 
@@ -147,52 +148,6 @@ export async function checkCacheFlushDate(apiKey) {
     }
 }
 
-// -------------------- KV Cache Helpers --------------------
-
-const CACHE_FLUSH_DATE_KEY = 'ferry:cache_flush_date';
-const SCHEDULE_CACHE_PREFIX = 'ferry:schedule:';
-
-// Cache schedule data in KV store
-export async function cacheSchedule(routeId, cacheFlushDate, scheduleData) {
-    try {
-        const cacheKey = `${SCHEDULE_CACHE_PREFIX}${routeId}-${cacheFlushDate}`;
-        // Cache for 24 hours (86400 seconds) - schedules don't change often
-        await kv.set(cacheKey, scheduleData, { ex: 86400 });
-        console.log(`💾 Cached schedule for route ${routeId}`);
-    } catch (error) {
-        console.warn('Error caching schedule:', error.message);
-    }
-}
-
-// Get cached schedule data from KV store
-export async function getCachedSchedule(routeId, cacheFlushDate) {
-    try {
-        const cacheKey = `${SCHEDULE_CACHE_PREFIX}${routeId}-${cacheFlushDate}`;
-        const cachedData = await kv.get(cacheKey);
-        return cachedData;
-    } catch (error) {
-        console.warn('Error getting cached schedule:', error.message);
-        return null;
-    }
-}
-
-export async function cacheFlushDateInKV(flushDate) {
-    try {
-        await kv.set(CACHE_FLUSH_DATE_KEY, flushDate, { ex: 3600 }); // Cache for 1 hour
-    } catch (error) {
-        console.warn('Error caching flush date:', error.message);
-    }
-}
-
-// Get cached flush date from KV store
-export async function getCachedFlushDate() {
-    try {
-        return await kv.get(CACHE_FLUSH_DATE_KEY);
-    } catch (error) {
-        console.warn('Error getting cached flush date:', error.message);
-        return null;
-    }
-}
 
 // -------------------- Vessel Processor --------------------
 

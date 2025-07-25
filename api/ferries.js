@@ -1,5 +1,5 @@
 import { getVesselsWithDelays } from './lib/wsdot-api.js';
-import { predictNextSailings } from './lib/predict-sailings.js';
+import { predictNextSailings } from './lib/prediction-orchestrator.js';
 
 const DEFAULT_DISPLAYED_ROUTES = ['sea-bi', 'ed-king'];
 

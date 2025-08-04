@@ -1,588 +1,576 @@
-/* Reset and base styles */
+/* Revolutionary Ferry Tracker - Mobile-First Experience */
+
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
 }
 
+:root {
+    /* Ferry-inspired color system */
+    --ocean-midnight: #0a1628;
+    --ocean-deep: #1e3a8a;
+    --ocean-surface: #3b82f6;
+    --wave-foam: #e0f2fe;
+    --hull-white: #ffffff;
+    --deck-gray: #64748b;
+    --warning-orange: #f59e0b;
+    --danger-red: #ef4444;
+    --success-green: #10b981;
+    --departing-pulse: #8b5cf6;
+    
+    /* Spacing system - based on 4px grid */
+    --xs: 0.25rem;   /* 4px */
+    --sm: 0.5rem;    /* 8px */
+    --md: 0.75rem;   /* 12px */
+    --lg: 1rem;      /* 16px */
+    --xl: 1.5rem;    /* 24px */
+    --2xl: 2rem;     /* 32px */
+    --3xl: 3rem;     /* 48px */
+    --4xl: 4rem;     /* 64px */
+    
+    /* Typography scale */
+    --text-xs: 0.75rem;
+    --text-sm: 0.875rem;
+    --text-base: 1rem;
+    --text-lg: 1.125rem;
+    --text-xl: 1.25rem;
+    --text-2xl: 1.5rem;
+    --text-3xl: 2rem;
+    --text-4xl: 3rem;
+    
+    /* Shadows for depth */
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
+    --shadow-elevated: 0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06);
+    --shadow-floating: 0 10px 25px rgba(0, 0, 0, 0.15), 0 4px 10px rgba(0, 0, 0, 0.1);
+    
+    /* Animation timing */
+    --ease-out: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    line-height: 1.6;
-    color: #2c3e50;
-    background-color: #f8f9fa;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+    background: linear-gradient(to bottom, var(--wave-foam), #f8fafc);
+    color: var(--ocean-midnight);
+    line-height: 1.4;
+    -webkit-font-smoothing: antialiased;
     min-height: 100vh;
 }
 
-/* Header styling - minimized for mobile */
+/* REVOLUTIONARY HEADER - Floating Action Style */
 header {
-    background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
-    color: white;
-    padding: 0.75rem 1rem;
-    text-align: center;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    position: fixed;
+    top: var(--lg);
+    left: var(--lg);
+    right: var(--lg);
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(20px);
+    border-radius: var(--xl);
+    padding: var(--md) var(--xl);
+    box-shadow: var(--shadow-floating);
+    z-index: 100;
+    border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 header h1 {
-    font-size: 1.5rem;
-    margin: 0;
-    font-weight: 600;
+    font-size: var(--text-lg);
+    font-weight: 700;
+    text-align: center;
+    color: var(--ocean-deep);
+    letter-spacing: -0.02em;
 }
 
-/* Tab Navigation - allows switching between routes and map */
+/* REIMAGINED TAB SYSTEM - Floating Pills */
 .tab-nav {
+    position: fixed;
+    bottom: var(--lg);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--hull-white);
+    border-radius: 50px;
+    padding: var(--xs);
+    box-shadow: var(--shadow-floating);
     display: flex;
-    background: white;
-    border-bottom: 1px solid #e0e0e0;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    gap: var(--xs);
+    z-index: 100;
+    border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .tab-button {
-    flex: 1;
-    padding: 1rem;
-    background: none;
+    padding: var(--md) var(--xl);
     border: none;
+    background: transparent;
+    border-radius: 50px;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--deck-gray);
     cursor: pointer;
-    font-size: 1rem;
-    font-weight: 500;
-    color: #666;
-    transition: all 0.3s ease;
-    border-bottom: 3px solid transparent;
+    transition: all 0.3s var(--ease-out);
+    position: relative;
+    overflow: hidden;
 }
 
 .tab-button.active {
-    color: #3498db;
-    border-bottom-color: #3498db;
-    background: #f8f9fa;
+    background: var(--ocean-deep);
+    color: white;
+    transform: scale(1.05);
+    box-shadow: var(--shadow-elevated);
 }
 
-.tab-button:hover {
-    background: #f8f9fa;
+.tab-button:not(.active):hover {
+    background: var(--wave-foam);
+    color: var(--ocean-deep);
 }
 
-/* Tab Content Areas */
-.tab-content {
-    display: none;
-    min-height: calc(100vh - 200px);
-}
-
-.tab-content.active {
-    display: block;
-}
-
-/* Routes Tab Styling */
-.routes-container {
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 1.5rem;
-}
-
-/* Next Sailings Tab Styling */
+/* REVOLUTIONARY CONTENT LAYOUT - Card Stack */
 .next-sailings-container {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 1.5rem;
+    padding: calc(80px + var(--xl)) var(--lg) calc(80px + var(--xl));
+    max-width: 100%;
 }
 
-
-
+/* ROUTE CARDS - Completely Reimagined */
 .route-section {
-    background: white;
-    border-radius: 12px;
-    padding: 1.5rem;
-    margin-bottom: 2rem;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    background: var(--hull-white);
+    border-radius: var(--2xl);
+    margin-bottom: var(--xl);
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    transition: all 0.4s var(--ease-out);
+}
+
+.route-section:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-elevated);
 }
 
 .route-title {
-    font-size: 1.3rem;
-    font-weight: 600;
-    color: #2c3e50;
-    margin-bottom: 1.5rem;
+    background: linear-gradient(135deg, var(--ocean-deep), var(--ocean-surface));
+    color: white;
+    padding: var(--lg) var(--xl);
+    font-size: var(--text-lg);
+    font-weight: 700;
     text-align: center;
-    padding-bottom: 0.5rem;
-    border-bottom: 2px solid #e9ecef;
+    margin: 0;
+    position: relative;
+    letter-spacing: -0.02em;
 }
 
+.route-title::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+}
+
+/* TERMINAL CARDS - Now Full-Width Mobile-First */
 .terminals-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 1.5rem;
+    display: flex;
+    flex-direction: column;
 }
 
 .terminal-card {
-    background: #f8f9fa;
-    border-radius: 8px;
-    padding: 1.25rem;
-    border: 1px solid #e9ecef;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    background: var(--hull-white);
 }
 
-.terminal-name {
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: #2c3e50;
-    margin-bottom: 1rem;
-    text-align: center;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid #dee2e6;
-}
-
-.sailings-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-}
-
-.sailing-item {
-    background: white;
-    border-radius: 6px;
-    padding: 0.75rem;
-    border-left: 4px solid #e9ecef;
-    transition: all 0.2s ease;
-}
-
-.sailing-item:hover {
-    transform: translateX(2px);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-}
-
-.sailing-item.status-on-time {
-    border-left-color: #28a745;
-}
-
-.sailing-item.status-delayed {
-    border-left-color: #dc3545;
-}
-
-.sailing-item.status-early {
-    border-left-color: #007bff;
-}
-
-.sailing-item.status-departing {
-    border-left-color: #ffc107;
-    background: #fff8e1;
-}
-
-.sailing-item.status-departed {
-    border-left-color: #6c757d;
-    background: #f8f9fa;
-    opacity: 0.7;
-}
-
-.time-until-prominent {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: #2c3e50;
-    text-align: center;
-    margin-bottom: 0.75rem;
-    line-height: 1.2;
-}
-
-.sailing-item.status-departing .time-until-prominent {
-    color: #e67e22;
-    font-size: 1.6rem;
-}
-
-.sailing-item.status-delayed .time-until-prominent {
-    color: #dc3545;
-}
-
-.sailing-item.status-early .time-until-prominent {
-    color: #007bff;
-}
-
-.sailing-item.status-departed .time-until-prominent {
-    color: #6c757d;
-}
-
-.departure-times {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    margin-bottom: 0.5rem;
-}
-
-.scheduled-time {
-    font-size: 0.85rem;
-    color: #495057;
-    font-weight: 500;
-}
-
-.estimated-time {
-    font-size: 0.85rem;
-    color: #495057;
-    font-weight: 500;
-}
-
-.sailing-item.status-delayed .estimated-time {
-    color: #dc3545;
-    font-weight: 600;
-}
-
-.sailing-item.status-early .estimated-time {
-    color: #007bff;
-    font-weight: 600;
-}
-
-.delay-only {
-    font-size: 0.85rem;
-    font-weight: 500;
-    color: #495057;
-}
-
-.sailing-item.status-delayed .delay-only {
-    color: #dc3545;
-}
-
-.sailing-item.status-early .delay-only {
-    color: #007bff;
-}
-
-.vessel-name {
-    font-size: 0.8rem;
-    color: #6c757d;
-    margin-top: 0.25rem;
-}
-
-.no-sailings {
-    text-align: center;
-    color: #6c757d;
-    font-style: italic;
-    padding: 1rem;
-}
-
-.no-data {
-    text-align: center;
-    color: #6c757d;
-    font-size: 1.1rem;
-    padding: 2rem;
-    background: white;
-    border-radius: 8px;
-    margin: 1rem;
-}
-
-/* System Status Overview */
-.system-status {
-    background: white;
-    border-radius: 12px;
-    padding: 1.5rem;
-    margin-bottom: 2rem;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-    text-align: center;
-}
-
-.status-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 1rem;
-    margin-top: 1rem;
-}
-
-.status-item {
-    padding: 1rem;
-    border-radius: 8px;
-    background: #f8f9fa;
-}
-
-.status-number {
-    font-size: 1.8rem;
-    font-weight: 700;
-    margin-bottom: 0.25rem;
-}
-
-.status-label {
-    font-size: 0.85rem;
-    color: #666;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-/* Route Cards - the main improvement */
-.route-card {
-    background: white;
-    border-radius: 12px;
-    padding: 1.5rem;
-    margin-bottom: 1rem;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.route-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-}
-
-.route-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1rem;
-}
-
-.route-name {
-    font-size: 1.2rem;
-    font-weight: 600;
-    color: #2c3e50;
-}
-
-.route-status {
-    padding: 0.3rem 0.8rem;
-    border-radius: 20px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.status-on-time {
-    background: #d4edda;
-    color: #155724;
-}
-
-.status-delayed {
-    background: #f8d7da;
-    color: #721c24;
-}
-
-.status-early {
-    background: #cce7ff;
-    color: #0056b3;
-}
-
-.status-unknown {
-    background: #e2e3e5;
-    color: #6c757d;
-}
-
-/* Ferry list within each route */
-.ferry-list {
-    list-style: none;
-}
-
-.ferry-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.75rem 0;
-    border-bottom: 1px solid #f0f0f0;
-}
-
-.ferry-item:last-child {
+.terminal-card:last-child {
     border-bottom: none;
 }
 
-.ferry-name {
-    font-weight: 500;
-    color: #2c3e50;
+.terminal-name {
+    background: var(--wave-foam);
+    padding: var(--md) var(--xl);
+    font-size: var(--text-base);
+    font-weight: 600;
+    color: var(--ocean-deep);
+    margin: 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    position: sticky;
+    top: 0;
+    z-index: 10;
 }
 
-.ferry-route-info {
-    font-size: 0.9rem;
-    color: #666;
-    margin-top: 0.25rem;
+/* SAILING ITEMS */
+.sailings-list {
+    padding: var(--sm);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sm);
 }
 
-.ferry-delay {
-    text-align: right;
-    font-weight: 500;
-    font-size: 0.9rem;
+.sailing-item {
+    display: grid;
+    grid-template-areas: 
+        "time time"
+        "schedule vessel";
+    grid-template-columns: 1fr auto;
+    gap: var(--sm) var(--md);
+    background: var(--hull-white);
+    border-radius: var(--lg);
+    padding: var(--lg);
+    border-left: 4px solid var(--deck-gray);
+    transition: all 0.3s var(--ease-out);
+    position: relative;
+    align-items: center;
 }
 
-/* Map Tab Styling */
-.map-container {
-    height: calc(100vh - 200px);
+/* THE HERO ELEMENT - Time Until */
+.time-until-prominent {
+    grid-area: time;
+    font-size: var(--text-2xl);
+    font-weight: 800;
+    color: var(--ocean-deep);
+    text-align: center;
+    letter-spacing: -0.04em;
+    margin: 0;
     position: relative;
 }
 
-#map {
-    height: 100%;
-    width: 100%;
+/* Schedule Information - Compact */
+.departure-times {
+    grid-area: schedule;
+    display: flex;
+    flex-direction: column;
+    gap: var(--xs);
 }
 
-/* Ferry info panel - improved styling */
-#ferry-info-panel {
+.scheduled-time, .estimated-time {
+    font-size: var(--text-xs);
+    font-weight: 500;
+    margin: 0;
+}
+
+.scheduled-time {
+    color: var(--deck-gray);
+}
+
+.estimated-time {
+    color: var(--ocean-deep);
+    font-weight: 600;
+}
+
+.vessel-name {
+    grid-area: vessel;
+    font-size: var(--text-xs);
+    color: var(--deck-gray);
+    font-weight: 500;
+    text-align: right;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0;
+}
+
+/* STATUS SYSTEM - Visual Priority */
+.sailing-item.status-on-time {
+    border-left-color: var(--success-green);
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.03), var(--hull-white));
+}
+
+.sailing-item.status-delayed {
+    border-left-color: var(--danger-red);
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.05), var(--hull-white));
+}
+
+.sailing-item.status-delayed .time-until-prominent {
+    color: var(--danger-red);
+}
+
+.sailing-item.status-delayed .estimated-time {
+    color: var(--danger-red);
+}
+
+.sailing-item.status-early {
+    border-left-color: var(--ocean-surface);
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.03), var(--hull-white));
+}
+
+.sailing-item.status-early .time-until-prominent {
+    color: var(--ocean-surface);
+}
+
+.sailing-item.status-early .estimated-time {
+    color: var(--ocean-surface);
+}
+
+/* DEPARTING STATUS - The Most Important */
+.sailing-item.status-departing {
+    border-left-color: var(--departing-pulse);
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.08), var(--hull-white));
+    animation: departingPulse 2s ease-in-out infinite;
+    position: relative;
+    overflow: hidden;
+}
+
+.sailing-item.status-departing::before {
+    content: '';
     position: absolute;
-    top: 20px;
-    right: 20px;
-    background: white;
-    border-radius: 12px;
-    padding: 1.5rem;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-    max-width: 320px;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(139, 92, 246, 0.1), transparent);
+    animation: shimmer 3s ease-in-out infinite;
+}
+
+.sailing-item.status-departing .time-until-prominent {
+    color: var(--departing-pulse);
+    font-size: var(--text-3xl);
+    animation: urgentPulse 1.5s ease-in-out infinite;
+}
+
+.sailing-item.status-departed {
+    border-left-color: var(--deck-gray);
+    background: rgba(100, 116, 139, 0.05);
+    opacity: 0.6;
+}
+
+.sailing-item.status-departed .time-until-prominent {
+    color: var(--deck-gray);
+    font-size: var(--text-lg);
+}
+
+/* ANIMATIONS */
+@keyframes departingPulse {
+    0%, 100% { 
+        transform: translateX(0) scale(1); 
+        box-shadow: var(--shadow-card);
+    }
+    50% { 
+        transform: translateX(2px) scale(1.01); 
+        box-shadow: var(--shadow-elevated);
+    }
+}
+
+@keyframes shimmer {
+    0% { left: -100%; }
+    100% { left: 100%; }
+}
+
+@keyframes urgentPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+/* NO SAILINGS STATE */
+.no-sailings {
+    text-align: center;
+    color: var(--deck-gray);
+    font-style: italic;
+    padding: var(--2xl);
+    font-size: var(--text-sm);
+    background: rgba(100, 116, 139, 0.03);
+    border-radius: var(--lg);
+    margin: var(--md);
+}
+
+/* MAP CONTAINER - Immersive Full Screen */
+.map-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1;
+}
+
+.ferry-map {
+    width: 100%;
+    height: 100%;
+}
+
+/* FLOATING INFO PANEL - Redesigned */
+.ferry-info-panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(255, 255, 255, 0.98);
+    backdrop-filter: blur(20px);
+    border-radius: var(--2xl) var(--2xl) 0 0;
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.15);
+    transform: translateY(0);
+    transition: transform 0.4s var(--ease-out);
+    max-height: 60vh;
+    overflow-y: auto;
     z-index: 1000;
 }
 
-#close-panel {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    background: none;
-    border: none;
-    font-size: 1.5rem;
-    cursor: pointer;
-    color: #666;
-    width: 30px;
-    height: 30px;
+.ferry-info-panel.hidden {
+    transform: translateY(100%);
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--lg) var(--xl);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    background: rgba(248, 250, 252, 0.8);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.panel-header h3 {
+    font-size: var(--text-lg);
+    font-weight: 700;
+    color: var(--ocean-deep);
+    margin: 0;
+    letter-spacing: -0.02em;
+}
+
+.close-button {
+    width: 36px;
+    height: 36px;
     border-radius: 50%;
+    border: none;
+    background: rgba(100, 116, 139, 0.1);
+    color: var(--deck-gray);
+    font-size: var(--text-lg);
+    cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
+    transition: all 0.2s var(--ease-out);
 }
 
-#close-panel:hover {
-    background: #f0f0f0;
+.close-button:hover {
+    background: rgba(100, 116, 139, 0.2);
+    transform: scale(1.1);
 }
 
-/* Loading and error states */
-.loading-state {
+.panel-content {
+    padding: var(--xl);
+}
+
+.detail-row {
     display: flex;
-    justify-content: center;
+    justify-content: space-between;
     align-items: center;
+    padding: var(--md) 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.detail-row:last-child {
+    border-bottom: none;
+}
+
+.detail-label {
+    font-weight: 600;
+    color: var(--deck-gray);
+    font-size: var(--text-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.last-updated {
+    position: static;
+    text-align: center;
+    background: transparent;
+    box-shadow: none;
+    margin-top: var(--2xl);
+    font-size: var(--text-xs);
+}
+
+/* LOADING & ERROR STATES */
+.loading-state, .error-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     min-height: 200px;
-    color: #666;
-}
-
-.error-state {
-    background: #f8d7da;
-    color: #721c24;
-    padding: 1rem;
-    border-radius: 8px;
+    padding: var(--2xl);
     text-align: center;
-    margin: 1rem;
 }
 
-/* Footer */
-footer {
-    background: white;
-    padding: 1rem;
-    text-align: center;
-    color: #666;
-    font-size: 0.9rem;
-    border-top: 1px solid #e0e0e0;
-}
-
-/* Utility classes */
-.hidden {
-    display: none;
-}
-
-/* Mobile responsive */
-@media (max-width: 768px) {
-    .routes-container {
-        padding: 1rem;
-    }
-
-    .route-header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 0.5rem;
-    }
-
-    .status-grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
-
-    #ferry-info-panel {
-        position: fixed;
-        top: auto;
-        bottom: 20px;
-        left: 20px;
-        right: 20px;
-        max-width: none;
-    }
-
-    header h1 {
-        font-size: 1.5rem;
-    }
-}
-
-/* Map legend styling */
-.map-legend {
-    background: white;
-    padding: 12px;
-    border-radius: 8px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    font-size: 0.9rem;
-}
-
-.map-legend h4 {
-    margin: 0 0 0.5rem 0;
-    color: #333;
-}
-
-.map-legend div {
-    display: flex;
-    align-items: center;
-    margin: 0.25rem 0;
-}
-
-.legend-color {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    border: 2px solid white;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-    margin-right: 0.5rem;
-}
-
-.ferry-marker {
-    background: transparent !important;
-    border: none !important;
-}
-
-.htmx-indicator {
-    opacity: 0;
-    transition: opacity 200ms ease-in;
-}
-
-.htmx-request .htmx-indicator {
-    opacity: 1;
-}
-
-/* Smooth transitions when HTMX swaps content */
-.htmx-swapping {
-    opacity: 0;
-    transition: opacity 150ms ease-out;
-}
-
-/* Style for manual retry button */
-.retry-button {
-    background: #007bff;
-    color: white;
-    border: none;
-    padding: 10px 20px;
-    border-radius: 5px;
-    cursor: pointer;
-    margin-top: 10px;
-}
-
-.retry-button:hover {
-    background: #0056b3;
-}
-
-/* Loading state styling */
 .loading-state {
-    text-align: center;
-    padding: 40px;
-    color: #666;
+    color: var(--deck-gray);
     font-style: italic;
 }
 
-/* Error state styling */
 .error-state {
-    text-align: center;
-    padding: 40px;
-    background: #f8d7da;
-    color: #721c24;
-    border: 1px solid #f5c6cb;
-    border-radius: 5px;
-    margin: 20px;
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.05), var(--hull-white));
+    color: var(--danger-red);
+    border-radius: var(--lg);
+    margin: var(--lg);
+    border: 1px solid rgba(239, 68, 68, 0.1);
 }
 
-/* Last updated timestamp */
-.last-updated {
-    text-align: center;
-    color: #666;
-    font-size: 0.9em;
-    margin-top: 20px;
-    padding: 10px;
+.retry-button {
+    background: var(--ocean-deep);
+    color: white;
+    border: none;
+    padding: var(--md) var(--xl);
+    border-radius: var(--lg);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s var(--ease-out);
+    margin-top: var(--lg);
+}
+
+.retry-button:hover {
+    background: var(--ocean-midnight);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-elevated);
+}
+
+/* RESPONSIVE BREAKPOINTS */
+@media (min-width: 768px) {
+    .next-sailings-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: calc(80px + var(--2xl)) var(--2xl) calc(80px + var(--2xl));
+    }
+    
+    .terminals-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+        gap: var(--xl);
+    }
+    
+    .terminal-card {
+        border: 1px solid rgba(0, 0, 0, 0.05);
+        border-radius: var(--xl);
+        overflow: hidden;
+    }
+    
+    .sailing-item {
+        grid-template-areas: 
+            "time schedule vessel";
+        grid-template-columns: 1fr auto auto;
+    }
+    
+    .time-until-prominent {
+        text-align: left;
+    }
+    
+    .last-updated {
+        position: static;
+        text-align: center;
+        background: transparent;
+        box-shadow: none;
+        margin-top: var(--2xl);
+    }
+}
+
+/* UTILITY CLASSES */
+.hidden {
+    display: none !important;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
 }

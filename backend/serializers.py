@@ -23,13 +23,16 @@ class Vessel(BaseModel):
     speed: Optional[float] = Field(alias="Speed")
     heading: Optional[int] = Field(alias="Heading")
 
-    # InService: bool
+    in_service: bool = Field(alias="InService")
     at_dock: bool = Field(alias="AtDock")
     
     left_dock: Optional[datetime] = Field(alias="LeftDock")
     eta: Optional[datetime] = Field(alias="Eta")
     scheduled_departure: Optional[datetime] = Field(alias="ScheduledDeparture")
     timestamp: Optional[datetime] = Field(alias="TimeStamp")
+    
+    # delay in minutes, added in next_sailings.py (not provided by WSDOT)
+    delay: Optional[datetime] = None
 
     # EtaBasis: Optional[str]
     route_name: List[str] = Field(alias="OpRouteAbbrev")

@@ -1,14 +1,13 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 from .serializers import RawDirectionalSchedule, RouteSchedule, Vessel, DirectionalSailing, DirectionalSchedule
 from .wsdot_client import get_schedule_today, get_vessel_positions
 from collections import defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import logging
 
 
 #TODO: IMPLEMENT SCHEDULE CACHING
-
-CACHED_DELAYS = {}
 
 ROUTES = [{
     "name": "Seattle - Bainbridge",
@@ -17,13 +16,31 @@ ROUTES = [{
     "route_name": "sea-bi"
 }]
 
-def update_cached_delays(vessel_positions: List[Vessel]):
+CACHED_DELAYS = {}
+
+def update_cached_delay(vessel: Vessel, delay: datetime):
+    for route in vessel.route_name:
+        if route not in CACHED_DELAYS:
+            CACHED_DELAYS[route] = {}
+        CACHED_DELAYS[route][vessel.vessel_position_num] = delay
+        
+        
+def get_cached_delay(vessel: Vessel) -> Optional[datetime]:
+    route = vessel.route_name[0]
+    if route in CACHED_DELAYS:
+        return CACHED_DELAYS[route].get(vessel.vessel_position_num, None)
+    
+
+def get_vessels_with_delays():
+    vessel_positions = get_vessel_positions()
     for v in vessel_positions:
         vessel_delay = v.left_dock - v.scheduled_departure if v.scheduled_departure and v.left_dock else None
-        for route in v.route_name:
-            if route not in CACHED_DELAYS:
-                CACHED_DELAYS[route] = {}
-            CACHED_DELAYS[route][v.vessel_position_num] = vessel_delay
+        if vessel_delay:
+            update_cached_delay(v, vessel_delay)
+        else:
+            vessel_delay = get_cached_delay(v)
+        v.delay = vessel_delay
+    return vessel_positions
             
 
 def get_route_vessels(vessel_positions: List[Vessel], route_config):
@@ -103,8 +120,7 @@ def get_next_sailings_for_route(vessel_positions, route_config):
     
 
 def get_next_sailings():
-    vessel_positions = get_vessel_positions()
-    update_cached_delays(vessel_positions)
+    vessel_positions = get_vessels_with_delays()
     all_next_sailings = []
     for route in ROUTES:
         next_sailings = get_next_sailings_for_route(vessel_positions, route)

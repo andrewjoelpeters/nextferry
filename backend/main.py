@@ -2,11 +2,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from .wsdot_client import get_vessel_positions
 from .next_sailings import get_next_sailings
-from .serializers import RouteSchedule
-from .utils import format_time_until, format_delay_text
+from .display_processing import process_routes_for_display
 from typing import List
 from datetime import datetime
+import logging
 
 
 app = FastAPI()
@@ -26,45 +27,10 @@ async def get_next_sailings_html(request: Request):
     """Return HTML fragment for next sailings - this is what HTMX will call"""
     try:
         routes_data = get_next_sailings()
-        
-        # Process the data for display
-        processed_routes = []
-        for route in routes_data:
-            processed_schedules = []
-            
-            for schedule in route.schedules:
-                processed_sailings = []
-                
-                # Only show next 3 sailings
-                for sailing in schedule.times[:3]:
-                    time_until, base_status = format_time_until(sailing.scheduled_departure)
-                    delay_text, delay_status = format_delay_text(sailing.delay_in_minutes)
-                    
-                    # Delay status overrides base status if there's a delay
-                    final_status = delay_status if sailing.delay_in_minutes else base_status
-                    
-                    processed_sailings.append({
-                        'time_until': time_until,
-                        'scheduled_time': sailing.scheduled_departure.strftime('%I:%M %p').lstrip('0') if sailing.scheduled_departure else 'N/A',
-                        'delay_text': delay_text,
-                        'vessel_name': sailing.vessel_name,
-                        'status_class': final_status,
-                        'has_delay': sailing.delay_in_minutes is not None and sailing.delay_in_minutes != 0
-                    })
-                
-                processed_schedules.append({
-                    'departing_terminal_name': schedule.departing_terminal_name,
-                    'arriving_terminal_name': schedule.arriving_terminal_name,
-                    'sailings': processed_sailings
-                })
-            
-            processed_routes.append({
-                'route_name': ' - '.join(route.route_name),
-                'schedules': processed_schedules
-            })
+        processed_routes = process_routes_for_display(routes_data)
         
         return templates.TemplateResponse(
-            "next_sailings_fragment.html", 
+            "next_sailings_fragment.html",
             {
                 "request": request, 
                 "routes": processed_routes,
@@ -78,3 +44,22 @@ async def get_next_sailings_html(request: Request):
             "error_fragment.html", 
             {"request": request, "error": str(e)}
         )
+        
+@app.get("/map-tab", response_class=HTMLResponse)
+async def get_map_tab(request: Request):
+    """Return the map tab content"""
+    return templates.TemplateResponse("map_fragment.html", {"request": request})
+
+@app.get("/ferry-data")
+async def get_ferry_positions():
+    """Return ferry position data as JSON for the map"""
+    try:
+        ferry_data = get_vessel_positions()
+        return ferry_data
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/sailings-tab", response_class=HTMLResponse)
+async def get_sailings_tab(request: Request):
+    """Return the sailings tab content"""
+    return templates.TemplateResponse("sailings_tab_fragment.html", {"request": request})

@@ -1,7 +1,4 @@
-.env.local
-.vercel
-.env*.local
-node_modules
-.mypy_cache
-*.py
+.env
 *.ipynb
+.mypy_cache
+/*.egg-info

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Next Ferry</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⛴️</text></svg>">
+    <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+</head>
+<body>
+    <header>
+        <h1>When's the Next Ferry?</h1>
+    </header>
+    <div class="next-sailings-container">
+        <!-- This div will be populated by HTMX -->
+        <div id="sailings-content" 
+             hx-get="/next-sailings" 
+             hx-trigger="load, every 30s">
+            <!-- Loading state - HTMX will replace this -->
+            <div class="loading-state">
+                <div>Loading next sailings...</div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>Data updates every 30 seconds automatically</p>
+    </footer>
+</body>
+</html>

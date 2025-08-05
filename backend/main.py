@@ -6,6 +6,7 @@ from .wsdot_client import get_vessel_positions
 from .next_sailings import get_next_sailings, CACHED_DELAYS
 from .display_processing import process_routes_for_display
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import logging
 import asyncio
 from contextlib import asynccontextmanager
@@ -30,8 +31,8 @@ async def update_sailings_cache():
             
             _sailings_cache = {
                 "routes": processed_routes,
-                "last_updated": datetime.now().strftime("%I:%M:%S %p").lstrip("0"),
-                "cached_at": datetime.now()
+                "last_updated": datetime.now(tz=ZoneInfo("America/Los_Angeles")).strftime("%I:%M:%S %p").lstrip("0"),
+                "cached_at": datetime.now(tz=ZoneInfo("America/Los_Angeles"))
             }
             logger.info(f"Cache updated with {len(processed_routes)} routes")
             

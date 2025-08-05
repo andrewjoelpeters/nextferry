@@ -1,5 +1,5 @@
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import re
 
@@ -11,12 +11,14 @@ def parse_ms_date(value: Optional[str]) -> Optional[datetime]:
     if match:
         timestamp = int(match.group(1)) / 1000  # milliseconds to seconds
         # Convert from UTC to Pacific Time
-        return datetime.fromtimestamp(timestamp, tz=timezone.utc).astimezone(ZoneInfo("America/Los_Angeles"))
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc).astimezone(
+            ZoneInfo("America/Los_Angeles")
+        )
     return value
 
 
 def string_format_time(dt: datetime):
-    return dt.strftime('%-I:%M %p')
+    return dt.strftime("%-I:%M %p")
 
 
 def format_time_until(scheduled_time: datetime) -> tuple[str, str]:
@@ -53,3 +55,8 @@ def format_delay_text(delay_minutes: int) -> tuple[str, str]:
         return f" (+{delay_minutes}m)", "status-delayed"
     else:
         return f" ({delay_minutes}m)", "status-early"
+
+
+def datetime_to_minutes(dt: timedelta) -> int:
+    # get the floor of the total minutes,
+    return int(dt.total_seconds() // 60)

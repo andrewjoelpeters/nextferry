@@ -17,7 +17,7 @@ class Vessel(BaseModel):
     arriving_terminal_id: Optional[int] = Field(alias="ArrivingTerminalID")
     arriving_terminal_name: Optional[str] = Field(alias="ArrivingTerminalName")
     arriving_terminal_abbrev: Optional[str] = Field(alias="ArrivingTerminalAbbrev")
-    
+
     latitude: Optional[float] = Field(alias="Latitude")
     longitude: Optional[float] = Field(alias="Longitude")
     speed: Optional[float] = Field(alias="Speed")
@@ -25,12 +25,12 @@ class Vessel(BaseModel):
 
     in_service: bool = Field(alias="InService")
     at_dock: bool = Field(alias="AtDock")
-    
+
     left_dock: Optional[datetime] = Field(alias="LeftDock")
     eta: Optional[datetime] = Field(alias="Eta")
     scheduled_departure: Optional[datetime] = Field(alias="ScheduledDeparture")
     timestamp: Optional[datetime] = Field(alias="TimeStamp")
-    
+
     # delay in minutes, added in next_sailings.py (not provided by WSDOT)
     delay: Optional[datetime] = None
 
@@ -48,13 +48,16 @@ class Vessel(BaseModel):
     # VesselWatchStatus: Optional[str]
     # VesselWatchMsg: Optional[str]
 
-    @field_validator("left_dock", "eta", "scheduled_departure", "timestamp", mode="before")
+    @field_validator(
+        "left_dock", "eta", "scheduled_departure", "timestamp", mode="before"
+    )
     @classmethod
     def parse_schedule_dates(cls, value):
         return parse_ms_date(value)
-    
-    
+
+
 # --- ScheduleToday Endpoint ----
+
 
 class RawDeparture(BaseModel):
     scheduled_departure: Optional[datetime] = Field(alias="DepartingTime")
@@ -97,27 +100,40 @@ class RawRouteSchedule(BaseModel):
 
 # --- My Serializers -----
 
+
 class RouteSailing(BaseModel):
     scheduled_departure: Optional[datetime]
     delay_in_minutes: Optional[int] = None
     vessel_name: str
     vessel_position_num: int
-    
+
+
 class DirectionalSailing(RouteSailing):
     departing_terminal_id: int
     arriving_terminal_id: int
     departing_terminal_name: str
     arriving_terminal_name: str
-    
+
     def to_route_sailing(self) -> RouteSailing:
-        return RouteSailing(**self.model_dump(include={'scheduled_departure', 'delay_in_minutes', 'vessel_name', 'vessel_position_num'}))
-    
+        return RouteSailing(
+            **self.model_dump(
+                include={
+                    "scheduled_departure",
+                    "delay_in_minutes",
+                    "vessel_name",
+                    "vessel_position_num",
+                }
+            )
+        )
+
+
 class DirectionalSchedule(BaseModel):
     departing_terminal_id: int
     departing_terminal_name: str
     arriving_terminal_id: int
     arriving_terminal_name: str
     times: List[RouteSailing]
+
 
 class RouteSchedule(BaseModel):
     route_name: List[str]

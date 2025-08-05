@@ -15,7 +15,7 @@
                         <div class="departure-times">
                             <div class="scheduled-time">Scheduled: {{ sailing.scheduled_time }}</div>
                             {% if sailing.has_delay %}
-                            <div class="estimated-time">{{ sailing.delay_text }}</div>
+                            <div class="estimated-time">Estimated: {{ sailing.estimated_departure }} {{ sailing.delay_text }}</div>
                             {% endif %}
                         </div>
                         {% if sailing.vessel_name %}

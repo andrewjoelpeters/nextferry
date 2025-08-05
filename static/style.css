@@ -136,13 +136,8 @@ header h1 {
     margin-bottom: var(--xl);
     overflow: hidden;
     box-shadow: var(--shadow-card);
-    border: 1px solid rgba(0, 0, 0, 0.05);
+    border: 2px solid rgba(0, 0, 0, 0.05);
     transition: all 0.4s var(--ease-out);
-}
-
-.route-section:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-elevated);
 }
 
 .route-title {

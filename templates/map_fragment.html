@@ -192,18 +192,6 @@ function showFerryDetails(ferry) {
         }
     };
 
-    // Format date and time
-    const formatDateTime = (dateStr) => {
-        if (!dateStr) return 'N/A';
-        try {
-            const date = new Date(dateStr);
-            return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + 
-                   date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-        } catch {
-            return 'N/A';
-        }
-    };
-
     // Update ferry details panel
     document.getElementById('ferry-name').textContent = ferry.VesselName;
     document.getElementById('ferry-details').innerHTML = `
@@ -233,11 +221,11 @@ function showFerryDetails(ferry) {
         </div>
         <div class="detail-row">
             <span class="detail-label">Scheduled Departure:</span>
-            <span>${formatDateTime(ferry.ScheduledDeparture)}</span>
+            <span>${formatTime(ferry.ScheduledDeparture)}</span>
         </div>
         <div class="detail-row">
             <span class="detail-label">Left Dock:</span>
-            <span>${formatDateTime(ferry.LeftDock)}</span>
+            <span>${formatTime(ferry.LeftDock)}</span>
         </div>
     `;
 

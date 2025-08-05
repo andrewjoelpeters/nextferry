@@ -13,15 +13,26 @@ APIAccessCode = os.getenv("WSDOT_API_KEY")
 
 
 def get_vessel_positions() -> List[Vessel]:
+    if not APIAccessCode:
+        raise Exception("WSDOT_API_KEY environment variable is not set")
+
     url = f"https://www.wsdot.wa.gov/ferries/api/vessels/rest/vessellocations?apiaccesscode={APIAccessCode}"
-    response = requests.get(url)
 
-    if not response.ok:
-        raise Exception(f"HTTP error! status: {response.status_code}")
+    try:
+        response = requests.get(url)
 
-    data = response.json()
-    logging.debug(f"GOT VESSEL POSITIONS: \n\n{data}")
-    return [Vessel(**ferry) for ferry in data if ferry.get("InService")]
+        if not response.ok:
+            # Include more details about the error
+            raise Exception(
+                f"HTTP error! status: {response.status_code}, response: {response.text}, url: {url}"
+            )
+
+        data = response.json()
+        logging.info(f"Successfully got {len(data)} vessels from WSDOT API")
+        return [Vessel(**ferry) for ferry in data if ferry.get("InService")]
+
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Request failed: {str(e)}")
 
 
 def get_schedule_today(route_id) -> List[RawDirectionalSchedule]:

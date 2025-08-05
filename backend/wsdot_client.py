@@ -5,8 +5,7 @@ import os
 from .serializers import Vessel, RawRouteSchedule, RawDirectionalSchedule
 import logging
 
-
-logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 APIAccessCode = os.getenv("WSDOT_API_KEY")
@@ -28,7 +27,7 @@ def get_vessel_positions() -> List[Vessel]:
             )
 
         data = response.json()
-        logging.info(f"Successfully got {len(data)} vessels from WSDOT API")
+        logger.info(f"Successfully got {len(data)} vessels from WSDOT API")
         return [Vessel(**ferry) for ferry in data if ferry.get("InService")]
 
     except requests.exceptions.RequestException as e:
@@ -43,10 +42,6 @@ def get_schedule_today(route_id) -> List[RawDirectionalSchedule]:
         raise Exception(f"HTTP error! status: {response.status_code}")
 
     data = response.json()
-    logging.debug(f"GOT SCHEDULE: \n\n{data}")
+    logger.debug(f"Got Schedule from WSDOT with length {len(data)}")
     schedule = RawRouteSchedule(**data)
     return schedule.terminal_combos
-
-
-def get_routes(departing_terminal_id, arriving_terminal_id):
-    url = f"https://www.wsdot.wa.gov/ferries/api/schedule/rest/routes/%7BTripDate%7D/%7BDepartingTerminalID%7D/%7BArrivingTerminalID%7D?apiaccesscode={APIAccessCode}"

@@ -14,10 +14,8 @@ from zoneinfo import ZoneInfo
 import logging
 
 
-logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
-
-# TODO: IMPLEMENT SCHEDULE CACHING
 
 ROUTES = [
     {
@@ -182,12 +180,19 @@ def get_directional_schedules(
     return direction_schedules
 
 
-def get_next_sailings_for_route(vessel_positions, route_config) -> DirectionalSailing:
+def get_next_sailings_for_route(
+    vessel_positions, route_config
+) -> List[DirectionalSailing]:
     route_schedule = get_schedule_today(route_config["route_id"])
     route_vessels = get_route_vessels(vessel_positions, route_config)
     schedule_by_boat = get_route_schedule_by_boat(route_schedule)
     next_sailings_by_boat = get_next_sailings_by_boat(schedule_by_boat, route_vessels)
-    return get_directional_schedules(next_sailings_by_boat)
+    directional_sailings = get_directional_schedules(next_sailings_by_boat)
+    for direction in directional_sailings:
+        logger.info(
+            f"Got {len(direction.times)} upcoming sailings for {direction.departing_terminal_name} to {direction.arriving_terminal_name}"
+        )
+    return directional_sailings
 
 
 def get_next_sailings() -> List[RouteSchedule]:

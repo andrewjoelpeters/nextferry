@@ -5,10 +5,11 @@ from fastapi.staticfiles import StaticFiles
 from .wsdot_client import get_vessel_positions
 from .next_sailings import get_next_sailings, CACHED_DELAYS
 from .display_processing import process_routes_for_display
-from typing import List
 from datetime import datetime
 import logging
 
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -25,9 +26,12 @@ async def home(request: Request):
 @app.get("/next-sailings", response_class=HTMLResponse)
 async def get_next_sailings_html(request: Request):
     """Return HTML fragment for next sailings - this is what HTMX will call"""
+    logger.info("Attempting to get next sailings")
     try:
         routes_data = get_next_sailings()
+        logger.info(f"Got Next Sailings for {len(routes_data)} routes")
         processed_routes = process_routes_for_display(routes_data)
+        logger.info(f"Processed Routes for display for {len(routes_data)} routes")
 
         return templates.TemplateResponse(
             "next_sailings_fragment.html",

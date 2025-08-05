@@ -1,0 +1,254 @@
+/* Reset & Base */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    /* Colors */
+    --ocean-midnight: #0a1628;
+    --ocean-deep: #1e3a8a;
+    --ocean-surface: #3b82f6;
+    --wave-foam: #e0f2fe;
+    --hull-white: #ffffff;
+    --deck-gray: #64748b;
+    --warning-orange: #f59e0b;
+    --danger-red: #ef4444;
+    --success-green: #10b981;
+    --departing-pulse: #8b5cf6;
+
+    /* Spacing (4px grid) */
+    --xs: 0.25rem;
+    --sm: 0.5rem;
+    --md: 0.75rem;
+    --lg: 1rem;
+    --xl: 1.5rem;
+    --2xl: 2rem;
+
+    /* Type scale */
+    --text-xs: 0.75rem;
+    --text-sm: 0.875rem;
+    --text-base: 1rem;
+    --text-lg: 1.125rem;
+    --text-xl: 1.25rem;
+    --text-2xl: 1.5rem;
+
+    /* Shadows */
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.12);
+    --shadow-floating: 0 4px 12px rgba(0, 0, 0, 0.08);
+
+    /* Animation timing */
+    --ease-out: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+    background: linear-gradient(to bottom, var(--wave-foam), #f8fafc);
+    color: var(--ocean-midnight);
+    line-height: 1.4;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    padding-bottom: 80px; /* space for bottom nav */
+}
+
+/* Header (hidden after scroll) */
+header {
+    position: fixed;
+    top: var(--sm);
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(10px);
+    border-radius: 12px;
+    padding: var(--sm) var(--lg);
+    box-shadow: var(--shadow-floating);
+    z-index: 100;
+    transition: opacity 0.3s ease;
+    max-width: 320px;
+}
+
+header.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+header h1 {
+    font-size: var(--text-base);
+    font-weight: 600;
+    text-align: center;
+    color: var(--ocean-deep);
+}
+
+/* Bottom navigation */
+.tab-nav {
+    position: fixed;
+    bottom: var(--lg);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--hull-white);
+    border-radius: 50px;
+    padding: var(--xs);
+    box-shadow: var(--shadow-floating);
+    display: flex;
+    gap: var(--xs);
+    z-index: 100;
+}
+
+.tab-button {
+    padding: var(--md) var(--xl);
+    border: none;
+    background: transparent;
+    border-radius: 50px;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--deck-gray);
+    cursor: pointer;
+    transition: all 0.3s var(--ease-out);
+}
+
+.tab-button.active {
+    background: var(--ocean-deep);
+    color: white;
+}
+
+/* Main container */
+.next-sailings-container {
+    padding: calc(60px + var(--xl)) var(--lg) calc(80px + var(--xl));
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+/* Route section */
+.route-section {
+    background: var(--hull-white);
+    border-radius: var(--lg);
+    margin-bottom: var(--xl);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    overflow: hidden;
+}
+
+.route-title {
+    background: var(--ocean-deep);
+    color: white;
+    padding: var(--md) var(--lg);
+    font-size: var(--text-base);
+    font-weight: 600;
+    text-align: center;
+}
+
+/* Terminal cards */
+.terminals-grid {
+    display: grid;
+    gap: var(--lg);
+}
+
+.terminal-card {
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    border-radius: var(--lg);
+    background: white;
+    overflow: hidden;
+}
+
+.terminal-name {
+    background: var(--wave-foam);
+    padding: var(--sm) var(--md);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--ocean-deep);
+}
+
+/* Sailing list */
+.sailings-list {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Sailing item: clean grid for alignment */
+.sailing-item {
+    display: grid;
+    grid-template-columns: 80px 1fr auto; /* fixed width for first column */
+    align-items: center;
+    padding: var(--md) var(--lg);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    border-left: 4px solid transparent;
+    gap: var(--md);
+}
+
+.time-until-prominent {
+    font-size: var(--text-xl);
+    font-weight: 700;
+    color: var(--ocean-deep);
+}
+
+.departure-times {
+    display: flex;
+    flex-direction: column;
+    min-width: 80px;
+}
+
+.scheduled-time,
+.estimated-time {
+    font-size: var(--text-xs);
+    line-height: 1.2;
+}
+
+.scheduled-time {
+    color: var(--deck-gray);
+}
+
+.estimated-time {
+    color: var(--ocean-deep);
+    font-weight: 600;
+}
+
+.vessel-name {
+    font-size: var(--text-xs);
+    color: var(--deck-gray);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Status indicators: color bars only */
+.status-on-time { border-left-color: var(--success-green); }
+.status-delayed { border-left-color: var(--danger-red); }
+.status-early   { border-left-color: var(--ocean-surface); }
+.status-departing {
+    border-left-color: var(--departing-pulse);
+    background: rgba(246, 228, 92, 0.04);
+}
+.status-departed {
+    opacity: 0.6;
+}
+
+/* Last updated */
+.last-updated {
+    text-align: center;
+    font-size: var(--text-xs);
+    color: var(--deck-gray);
+    margin-top: var(--xl);
+}
+
+/* Responsive adjustments */
+@media (min-width: 768px) {
+    .terminals-grid {
+        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    }
+    .time-until-prominent {
+        text-align: left;
+    }
+}
+
+.map-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1;
+}
+
+.ferry-map {
+    width: 100%;
+    height: 100%;
+}

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Next Ferry</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⛴️</text></svg>">
+    <link rel="stylesheet" href="/static/style.css">
+    <!-- Leaflet CSS for mapping -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- HTMX - this is the magic! -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+</head>
+<body>
+    <header>
+        <h1>When's the Next Ferry?</h1>
+    </header>
+
+    <!-- Tab Navigation using HTMX -->
+    <nav class="tab-nav">
+        <button class="tab-button active" 
+                hx-get="/sailings-tab" 
+                hx-target="#tab-content"
+                onclick="setActiveTab(this)">
+            Next Sailings
+        </button>
+        <button class="tab-button" 
+                hx-get="/map-tab" 
+                hx-target="#tab-content"
+                onclick="setActiveTab(this)">
+            Map
+        </button>
+    </nav>
+
+    <!-- Main content area where tabs will be loaded -->
+    <div id="tab-content" 
+         hx-get="/sailings-tab" 
+         hx-trigger="load">
+        <!-- Loading state - HTMX will replace this -->
+        <div class="loading-state">
+            <div>Loading...</div>
+        </div>
+    </div>
+
+    <!-- <footer>
+        <p>By <a href="https://github.com/andrewjoelpeters">A.J. Strong Peters</a></p>
+    </footer> -->
+
+    <!-- Leaflet JavaScript for mapping -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        // Simple tab switching function
+        function setActiveTab(clickedButton) {
+            // Remove active class from all tab buttons
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            // Add active class to clicked button
+            clickedButton.classList.add('active');
+        }
+    </script>
+</body>
+</html>

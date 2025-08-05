@@ -1,0 +1,260 @@
+<!-- Map Tab Content -->
+<div class="map-container">
+    <!-- The map div -->
+    <div id="map" class="ferry-map"></div>
+    
+    <!-- Mobile-friendly ferry info panel -->
+    <div id="ferry-info-panel" class="ferry-info-panel hidden">
+        <div class="panel-header">
+            <h3 id="ferry-name">Ferry Details</h3>
+            <button id="close-panel" class="close-button">&times;</button>
+        </div>
+        <div id="ferry-details" class="panel-content">
+            <!-- Ferry details will be populated here -->
+        </div>
+    </div>
+    
+    <!-- Loading overlay for map -->
+    <div id="map-loading" class="map-loading">
+        <div>Loading ferry positions...</div>
+    </div>
+</div>
+
+<script>
+// Declare variables first to avoid hoisting issues
+var map = null;
+var ferryMarkers = [];
+var mapInitialized = false;
+
+function initializeFerryMap() {
+    // Prevent multiple initializations
+    if (mapInitialized || !document.getElementById('map')) {
+        return;
+    }
+    
+    console.log('Initializing ferry map...');
+    
+    // Initialize Leaflet map centered on Puget Sound
+    map = L.map('map', {
+        zoomControl: true,
+        attributionControl: true
+    }).setView([47.6062, -122.3321], 10);
+    
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '© OpenStreetMap contributors © CARTO',
+        maxZoom: 19
+    }).addTo(map);
+    
+    mapInitialized = true;
+    
+    // Load initial ferry data
+    loadFerryPositions();
+    
+    // Update ferry positions every 30 seconds
+    setInterval(loadFerryPositions, 30000);
+    
+    // Handle panel close button
+    document.getElementById('close-panel').addEventListener('click', function() {
+        document.getElementById('ferry-info-panel').classList.add('hidden');
+    });
+}
+
+async function loadFerryPositions() {
+    if (!map) return;
+    
+    try {
+        console.log('Loading ferry positions...');
+        document.getElementById('map-loading').style.display = 'flex';
+        
+        const response = await fetch('/ferry-data');
+        const ferries = await response.json();
+        console.log(ferries)
+        
+        if (ferries.error) {
+            console.error('Error loading ferry data:', ferries.error);
+            return;
+        }
+        
+        updateFerryMarkers(ferries);
+        document.getElementById('map-loading').style.display = 'none';
+        
+    } catch (error) {
+        console.error('Error fetching ferry positions:', error);
+        document.getElementById('map-loading').style.display = 'none';
+    }
+}
+
+function updateFerryMarkers(ferries) {
+    // Clear existing markers
+    ferryMarkers.forEach(marker => map.removeLayer(marker));
+    ferryMarkers = [];
+    
+    // Add new markers
+    ferries.forEach(ferry => {
+        if (ferry.Latitude && ferry.Longitude) {
+            const marker = createFerryMarker(ferry);
+            marker.addTo(map);
+            ferryMarkers.push(marker);
+        }
+    });
+    
+    console.log(`Updated ${ferryMarkers.length} ferry markers`);
+}
+
+function createFerryMarker(ferry) {
+    // Determine marker color based on ferry status
+    let markerColor = '#666';
+    
+    if (!ferry.InService) {
+        markerColor = '#dc3545'; // Red for out of service
+    } else if (ferry.AtDock) {
+        markerColor = '#ffc107'; // Yellow for at dock
+    } else {
+        markerColor = '#28a745'; // Green for underway
+    }
+    
+    // Get heading for directional arrow (default to 0 if not available)
+    const heading = ferry.Heading || 0;
+    
+    const markerIcon = L.divIcon({
+        html: `
+            <div class="ferry-marker-icon" style="
+                width: 24px;
+                height: 24px;
+                position: relative;
+                transform: rotate(${heading}deg);
+                transform-origin: center;
+            ">
+                <!-- Pointed bow -->
+                <div style="
+                    width: 0;
+                    height: 0;
+                    border-left: 4px solid transparent;
+                    border-right: 4px solid transparent;
+                    border-bottom: 12px solid ${markerColor};
+                    position: absolute;
+                    top: 2px;
+                    left: 8px;
+                    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+                "></div>
+                <!-- Rectangular body -->
+                <div style="
+                    width: 8px;
+                    height: 8px;
+                    background-color: ${markerColor};
+                    position: absolute;
+                    top: 12px;
+                    left: 8px;
+                "></div>
+            </div>
+        `,
+        className: 'ferry-marker',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+    });
+    
+    const marker = L.marker([ferry.Latitude, ferry.Longitude], {
+        icon: markerIcon,
+        title: ferry.VesselName
+    });
+    
+    // Show ferry details when clicked
+    marker.on('click', function() {
+        showFerryDetails(ferry);
+    });
+    
+    return marker;
+}
+
+function showFerryDetails(ferry) {
+    // Determine status
+    let status = 'Unknown';
+    let statusClass = 'status-unknown';
+
+    if (!ferry.InService) {
+        status = 'Out of Service';
+        statusClass = 'status-delayed';
+    } else if (ferry.AtDock) {
+        status = 'At Dock';
+        statusClass = 'status-on-time';
+    } else {
+        status = 'Underway';
+        statusClass = 'status-early';
+    }
+
+    const formatTime = (dateStr) => {
+        if (!dateStr) return 'N/A';
+        try {
+            const date = new Date(dateStr);
+            return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        } catch {
+            return 'N/A';
+        }
+    };
+
+    // Format date and time
+    const formatDateTime = (dateStr) => {
+        if (!dateStr) return 'N/A';
+        try {
+            const date = new Date(dateStr);
+            return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + 
+                   date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        } catch {
+            return 'N/A';
+        }
+    };
+
+    // Update ferry details panel
+    document.getElementById('ferry-name').textContent = ferry.VesselName;
+    document.getElementById('ferry-details').innerHTML = `
+        <div class="detail-row">
+            <span class="detail-label">Status:</span>
+            <span class="route-status ${statusClass}">${status}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">From:</span>
+            <span>${ferry.DepartingTerminalName || 'Unknown'}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">To:</span>
+            <span>${ferry.ArrivingTerminalName || 'Unknown'}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Speed:</span>
+            <span>${ferry.Speed ? ferry.Speed.toFixed(1) : '0'} knots</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Heading:</span>
+            <span>${ferry.Heading ? ferry.Heading.toFixed(0) : '0'}°</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Route:</span>
+            <span>${ferry.OpRouteAbbrev?.join(', ') || 'Unknown'}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Scheduled Departure:</span>
+            <span>${formatDateTime(ferry.ScheduledDeparture)}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Left Dock:</span>
+            <span>${formatDateTime(ferry.LeftDock)}</span>
+        </div>
+    `;
+
+    // Show the panel
+    document.getElementById('ferry-info-panel').classList.remove('hidden');
+}
+
+// Initialize map when this fragment loads
+function initMap() {
+    // Use a small delay to ensure DOM is ready
+    setTimeout(function() {
+        if (document.getElementById('map')) {
+            initializeFerryMap();
+        }
+    }, 100);
+}
+
+// Call initialization
+initMap();
+</script>

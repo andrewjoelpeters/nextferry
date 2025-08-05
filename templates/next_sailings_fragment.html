@@ -1,0 +1,41 @@
+{% for route in routes %}
+<div class="route-section">
+    <h3 class="route-title">{{ route.route_name }}</h3>
+    <div class="terminals-grid">
+        
+        {% for schedule in route.schedules %}
+        <div class="terminal-card">
+            <h4 class="terminal-name">Departing {{ schedule.departing_terminal_name }} in:</h4>
+            <div class="sailings-list">
+                
+                {% if schedule.sailings %}
+                    {% for sailing in schedule.sailings %}
+                    <div class="sailing-item {{ sailing.status_class }}">
+                        <div class="time-until-prominent">{{ sailing.time_until }}</div>
+                        <div class="departure-times">
+                            <div class="scheduled-time">Scheduled: {{ sailing.scheduled_time }}</div>
+                            {% if sailing.has_delay %}
+                            <div class="estimated-time">Estimated: {{ sailing.estimated_departure }} {{ sailing.delay_text }}</div>
+                            {% endif %}
+                        </div>
+                        {% if sailing.vessel_name %}
+                        <div class="vessel-name">{{ sailing.vessel_name }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="no-sailings">No upcoming sailings</div>
+                {% endif %}
+                
+            </div>
+        </div>
+        {% endfor %}
+        
+    </div>
+</div>
+{% endfor %}
+
+<!-- Footer with last updated time -->
+<div class="last-updated">
+    Last updated: {{ last_updated }}
+</div>

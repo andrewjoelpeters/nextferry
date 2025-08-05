@@ -1,0 +1,14 @@
+<!-- Sailings Tab Content -->
+<div class="next-sailings-container">
+    <!-- This div will be populated by HTMX with sailing data -->
+    <div id="sailings-content" 
+         hx-get="/next-sailings" 
+         hx-trigger="load, every 30s"
+         hx-target="#sailings-content">
+        
+        <!-- Loading state - HTMX will replace this -->
+        <div class="loading-state">
+            <div>Loading next sailings...</div>
+        </div>
+    </div>
+</div>

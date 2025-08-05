@@ -5,7 +5,7 @@
         
         {% for schedule in route.schedules %}
         <div class="terminal-card">
-            <h4 class="terminal-name">Leaving {{ schedule.departing_terminal_name }}</h4>
+            <h4 class="terminal-name">Departing {{ schedule.departing_terminal_name }} in:</h4>
             <div class="sailings-list">
                 
                 {% if schedule.sailings %}

@@ -2,7 +2,7 @@ import requests
 from typing import List
 from dotenv import load_dotenv
 import os
-from .serializers import Vessel, RawRouteSchedule, RawDirectionalSchedule
+from .serializers import Vessel, RawRouteSchedule, RawDirectionalSchedule, TerminalSpace
 import logging
 
 logger = logging.getLogger(__name__)
@@ -45,3 +45,14 @@ def get_schedule_today(route_id) -> List[RawDirectionalSchedule]:
     logger.debug(f"Got Schedule from WSDOT with length {len(data)}")
     schedule = RawRouteSchedule(**data)
     return schedule.terminal_combos
+
+
+def get_sailing_space():
+    url = f'https://www.wsdot.wa.gov/ferries/api/terminals/rest/terminalsailingspace?apiaccesscode={APIAccessCode}'
+    response = requests.get(url)
+
+    if not response.ok:
+        raise Exception(f"HTTP error! status: {response.status_code}")
+
+    data = response.json()
+    return [TerminalSpace(**terminal) for terminal in data]

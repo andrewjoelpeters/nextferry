@@ -3,6 +3,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from .wsdot_client import get_vessel_positions
+from .data_collector import collect_vessel_data
 from .next_sailings import get_next_sailings, CACHED_DELAYS
 from .display_processing import process_routes_for_display
 from datetime import datetime
@@ -22,23 +23,25 @@ _sailings_cache: Optional[Dict[str, Any]] = None
 async def update_sailings_cache():
     """Background task to update sailings cache every 30 seconds"""
     global _sailings_cache
-    
+
     while True:
         try:
             logger.info("Updating shared sailings cache")
             routes_data = get_next_sailings()
             processed_routes = process_routes_for_display(routes_data)
-            
+
             _sailings_cache = {
                 "routes": processed_routes,
-                "last_updated": datetime.now(tz=ZoneInfo("America/Los_Angeles")).strftime("%I:%M:%S %p").lstrip("0"),
-                "cached_at": datetime.now(tz=ZoneInfo("America/Los_Angeles"))
+                "last_updated": datetime.now(tz=ZoneInfo("America/Los_Angeles"))
+                .strftime("%I:%M:%S %p")
+                .lstrip("0"),
+                "cached_at": datetime.now(tz=ZoneInfo("America/Los_Angeles")),
             }
             logger.info(f"Cache updated with {len(processed_routes)} routes")
-            
+
         except Exception as e:
             logger.error(f"Error updating sailings cache: {e}")
-        
+
         await asyncio.sleep(30)
 
 
@@ -46,15 +49,21 @@ async def update_sailings_cache():
 async def lifespan(app: FastAPI):
     # Start background task on startup
     logger.info("Starting sailings cache background task")
-    task = asyncio.create_task(update_sailings_cache())
+    sailings_cache_task = asyncio.create_task(update_sailings_cache())
+
+    logger.info("Starting vessels data collector backround tasks")
+    collector_task = asyncio.create_task(collect_vessel_data())
+
     yield
+
     # Clean shutdown
-    logger.info("Shutting down sailings cache background task")
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    logger.info("Shutting down background tasks")
+    for task in [sailings_cache_task, collector_task]:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(lifespan=lifespan)
@@ -73,7 +82,7 @@ async def home(request: Request):
 async def get_next_sailings_html(request: Request):
     """Return cached sailings data - same for all users"""
     logger.info("Serving shared sailings cache")
-    
+
     # If cache isn't ready yet (app just started), do one sync fetch
     if _sailings_cache is None:
         logger.info("Cache not ready, doing initial fetch")
@@ -92,7 +101,7 @@ async def get_next_sailings_html(request: Request):
             return templates.TemplateResponse(
                 "error_fragment.html", {"request": request, "error": str(e)}
             )
-    
+
     # Serve from shared cache
     return templates.TemplateResponse(
         "next_sailings_fragment.html",
@@ -138,11 +147,11 @@ async def debug_cache_status():
     """Debug endpoint to check cache status"""
     if _sailings_cache is None:
         return {"status": "Cache not initialized"}
-    
+
     cache_age_seconds = (datetime.now() - _sailings_cache["cached_at"]).total_seconds()
     return {
         "status": "Cache active",
         "last_updated": _sailings_cache["last_updated"],
         "cache_age_seconds": cache_age_seconds,
-        "routes_count": len(_sailings_cache["routes"])
+        "routes_count": len(_sailings_cache["routes"]),
     }

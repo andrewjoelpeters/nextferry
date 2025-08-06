@@ -29,7 +29,7 @@ def save_vessel_data(vessels: List[Dict], data_dir: Path) -> None:
 
     with open(filepath, "w") as f:
         for v in vessels:
-            json.dump(v.model_dump(mode='json', by_alias=True), f)
+            json.dump(v.model_dump(mode="json", by_alias=True), f)
             f.write("\n")
 
     logger.info(f"Saved {len(vessels)} vessels to {filename}")

@@ -98,7 +98,8 @@ class RawRouteSchedule(BaseModel):
     terminal_combos: List[RawDirectionalSchedule] = Field(..., alias="TerminalCombos")
 
 
-# -- Sailing Space Endpoint -- 
+# -- Sailing Space Endpoint --
+
 
 class ArrivalTerminal(BaseModel):
     terminal_id: int = Field(alias="TerminalID")
@@ -121,7 +122,9 @@ class SailingSpace(BaseModel):
     vessel_id: int = Field(alias="VesselID")
     vessel_name: str = Field(alias="VesselName")
     max_space_count: int = Field(alias="MaxSpaceCount")
-    space_for_arrival_terminals: List[ArrivalTerminal] = Field(alias="SpaceForArrivalTerminals")
+    space_for_arrival_terminals: List[ArrivalTerminal] = Field(
+        alias="SpaceForArrivalTerminals"
+    )
 
     @field_validator("departure", mode="before")
     @classmethod
@@ -146,6 +149,8 @@ class TerminalSpace(BaseModel):
         if isinstance(value, list):
             return value[:5]
         return value
+
+
 # --- My Serializers -----
 
 

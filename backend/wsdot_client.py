@@ -48,7 +48,7 @@ def get_schedule_today(route_id) -> List[RawDirectionalSchedule]:
 
 
 def get_sailing_space():
-    url = f'https://www.wsdot.wa.gov/ferries/api/terminals/rest/terminalsailingspace?apiaccesscode={APIAccessCode}'
+    url = f"https://www.wsdot.wa.gov/ferries/api/terminals/rest/terminalsailingspace?apiaccesscode={APIAccessCode}"
     response = requests.get(url)
 
     if not response.ok:

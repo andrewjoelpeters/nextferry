@@ -1,4 +1,6 @@
 from typing import List, Dict, Optional
+
+from backend.config import ROUTES
 from .serializers import (
     RawDirectionalSchedule,
     RouteSchedule,
@@ -16,21 +18,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
-ROUTES = [
-    {
-        "name": "Seattle - Bainbridge",
-        "terminals": [3, 7],
-        "route_id": 5,
-        "route_name": "sea-bi",
-    },
-    {
-        "name": "Kingston - Edmonds",
-        "terminals": [12, 8],
-        "route_id": 6,
-        "route_name": "ed-king",
-    },
-]
 
 CACHED_DELAYS = {}
 

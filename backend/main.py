@@ -1,22 +1,23 @@
-from fastapi import FastAPI, Request, HTTPException, Query, Response
-from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
-from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
-from .wsdot_client import get_vessel_positions
-from .data_collector import collect_data
-from .next_sailings import get_next_sailings, CACHED_DELAYS
-from .display_processing import process_routes_for_display
-from datetime import datetime
-from zoneinfo import ZoneInfo
-import logging
 import asyncio
-from contextlib import asynccontextmanager
-from typing import Optional, Dict, Any
+import logging
 import os
-import zipfile
 import tempfile
+import zipfile
+from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, Optional
+from zoneinfo import ZoneInfo
 
+from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+from .data_collector import collect_data
+from .display_processing import process_routes_for_display
+from .next_sailings import CACHED_DELAYS, get_next_sailings
+from .wsdot_client import get_vessel_positions
 
 logger = logging.getLogger(__name__)
 

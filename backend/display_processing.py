@@ -1,7 +1,8 @@
-from typing import List
-from .serializers import RouteSchedule
-from .utils import format_time_until, format_delay_text
 from datetime import timedelta
+from typing import List
+
+from .serializers import RouteSchedule
+from .utils import format_delay_text, format_time_until
 
 
 def process_routes_for_display(routes_data: List[RouteSchedule]):

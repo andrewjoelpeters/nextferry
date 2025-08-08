@@ -1,6 +1,8 @@
-from pydantic import BaseModel, field_validator, Field
-from typing import Optional, List
 from datetime import datetime
+from typing import List, Optional
+
+from pydantic import BaseModel, Field, field_validator
+
 from .utils import parse_ms_date
 
 

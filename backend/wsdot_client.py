@@ -1,9 +1,12 @@
-import requests
-from typing import List
-from dotenv import load_dotenv
-import os
-from .serializers import Vessel, RawRouteSchedule, RawDirectionalSchedule, TerminalSpace
 import logging
+import os
+from typing import List
+
+import requests
+from dotenv import load_dotenv
+
+from .serializers import (RawDirectionalSchedule, RawRouteSchedule,
+                          TerminalSpace, Vessel)
 
 logger = logging.getLogger(__name__)
 

@@ -1,17 +1,17 @@
 # A script to create a historical dataset of WSDOT vessel positions for better delay prediction
 
-import os
-import json
 import asyncio
+import json
 import logging
-from datetime import datetime
-from zoneinfo import ZoneInfo
-from pathlib import Path
-from typing import Dict, List, Any
-from .wsdot_client import get_vessel_positions, get_sailing_space
-from .serializers import SailingSpace, FlatSailingSpace, Vessel
+import os
 from collections import defaultdict
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List
+from zoneinfo import ZoneInfo
 
+from .serializers import FlatSailingSpace, SailingSpace, Vessel
+from .wsdot_client import get_sailing_space, get_vessel_positions
 
 logger = logging.getLogger(__name__)
 

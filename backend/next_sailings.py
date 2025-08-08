@@ -1,20 +1,15 @@
-from typing import List, Dict, Optional
-
-from backend.config import ROUTES
-from .serializers import (
-    RawDirectionalSchedule,
-    RouteSchedule,
-    Vessel,
-    DirectionalSailing,
-    DirectionalSchedule,
-)
-from .wsdot_client import get_schedule_today, get_vessel_positions
-from .utils import datetime_to_minutes
+import logging
 from collections import defaultdict
 from datetime import datetime
+from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
-import logging
 
+from backend.config import ROUTES
+
+from .serializers import (DirectionalSailing, DirectionalSchedule,
+                          RawDirectionalSchedule, RouteSchedule, Vessel)
+from .utils import datetime_to_minutes
+from .wsdot_client import get_schedule_today, get_vessel_positions
 
 logger = logging.getLogger(__name__)
 

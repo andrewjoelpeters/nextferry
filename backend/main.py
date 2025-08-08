@@ -1,9 +1,9 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request, HTTPException, Query, Response
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from .wsdot_client import get_vessel_positions
-from .data_collector import collect_vessel_data
+from .data_collector import collect_data
 from .next_sailings import get_next_sailings, CACHED_DELAYS
 from .display_processing import process_routes_for_display
 from datetime import datetime
@@ -12,6 +12,10 @@ import logging
 import asyncio
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any
+import os
+import zipfile
+import tempfile
+from pathlib import Path
 
 
 logger = logging.getLogger(__name__)
@@ -52,7 +56,7 @@ async def lifespan(app: FastAPI):
     sailings_cache_task = asyncio.create_task(update_sailings_cache())
 
     logger.info("Starting vessels data collector backround tasks")
-    collector_task = asyncio.create_task(collect_vessel_data())
+    collector_task = asyncio.create_task(collect_data())
 
     yield
 
@@ -137,11 +141,6 @@ async def get_sailings_tab(request: Request):
     )
 
 
-@app.get("/debug/cached-delays")
-async def debug_cached_delays():
-    return CACHED_DELAYS
-
-
 @app.get("/debug/cache-status")
 async def debug_cache_status():
     """Debug endpoint to check cache status"""
@@ -154,4 +153,63 @@ async def debug_cache_status():
         "last_updated": _sailings_cache["last_updated"],
         "cache_age_seconds": cache_age_seconds,
         "routes_count": len(_sailings_cache["routes"]),
+        "cached_delays": CACHED_DELAYS,
     }
+
+
+# --- DATA DOWNLOAD ENDPOINTS ---
+
+# @app.get("/data/download/latest")
+# async def download_latest_vessel_data():
+#     """Download the most recent vessel data file"""
+#     volume_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "./data")
+#     data_dir = Path(volume_path)
+
+#     if not data_dir.exists():
+#         raise HTTPException(status_code=404, detail="Data directory not found")
+
+#     # Find latest file
+#     json_files = list(data_dir.glob("vessels_*.json"))
+#     if not json_files:
+#         raise HTTPException(status_code=404, detail="No vessel data files found")
+
+#     latest_file = max(json_files, key=lambda f: f.stat().st_mtime)
+
+#     return FileResponse(
+#         path=str(latest_file), filename=latest_file.name, media_type="application/json"
+#     )
+
+
+# @app.get("/data/download/all")
+# async def download_all_vessel_data():
+#     """Download all vessel data files as a ZIP archive"""
+#     volume_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "./data")
+#     data_dir = Path(volume_path)
+
+#     if not data_dir.exists():
+#         raise HTTPException(status_code=404, detail="Data directory not found")
+
+#     json_files = list(data_dir.glob("vessels_*.json"))
+#     if not json_files:
+#         raise HTTPException(status_code=404, detail="No vessel data files found")
+
+#     # Create ZIP file in memory
+#     with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as temp_zip:
+#         with zipfile.ZipFile(temp_zip.name, "w", zipfile.ZIP_DEFLATED) as zipf:
+#             for file_path in json_files:
+#                 zipf.write(file_path, file_path.name)
+
+#         # Return the ZIP file
+#         def iterfile():
+#             with open(temp_zip.name, "rb") as f:
+#                 yield from f
+#             os.unlink(temp_zip.name)  # Clean up temp file
+
+#         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+#         return StreamingResponse(
+#             iterfile(),
+#             media_type="application/zip",
+#             headers={
+#                 "Content-Disposition": f"attachment; filename=vessel_data_{timestamp}.zip"
+#             },
+#         )

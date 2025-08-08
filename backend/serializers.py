@@ -107,7 +107,7 @@ class ArrivalTerminal(BaseModel):
     # vessel_id: int = Field(alias="VesselID")
     # vessel_name: str = Field(alias="VesselName")
     # display_reservable_space: bool = Field(alias="DisplayReservableSpace")
-    # reservable_space_count: Optional[int] = Field(alias="ReservableSpaceCount")
+    reservable_space_count: Optional[int] = Field(alias="ReservableSpaceCount")
     # reservable_space_hex_color: Optional[str] = Field(alias="ReservableSpaceHexColor")
     # display_drive_up_space: bool = Field(alias="DisplayDriveUpSpace")
     drive_up_space_count: int = Field(alias="DriveUpSpaceCount")
@@ -136,19 +136,12 @@ class TerminalSpace(BaseModel):
     terminal_id: int = Field(alias="TerminalID")
     # terminal_subject_id: int = Field(alias="TerminalSubjectID")
     # region_id: int = Field(alias="RegionID")
-    # terminal_name: str = Field(alias="TerminalName")
-    terminal_abbrev: str = Field(alias="TerminalAbbrev")
+    terminal_name: str = Field(alias="TerminalName")
+    # terminal_abbrev: str = Field(alias="TerminalAbbrev")
     # sort_seq: int = Field(alias="SortSeq")
     departing_spaces: List[SailingSpace] = Field(alias="DepartingSpaces")
     # is_no_fare_collected: Optional[bool] = Field(alias="IsNoFareCollected")
     # no_fare_collected_msg: Optional[str] = Field(alias="NoFareCollectedMsg")
-
-    @field_validator("departing_spaces", mode="before")
-    @classmethod
-    def limit_departing_spaces(cls, value):
-        if isinstance(value, list):
-            return value[:5]
-        return value
 
 
 # --- My Serializers -----
@@ -192,3 +185,19 @@ class RouteSchedule(BaseModel):
     route_name: List[str]
     route_id: int
     schedules: List[DirectionalSchedule]
+
+
+class FlatSailingSpace(BaseModel):
+    departing_terminal_id: int = Field(alias="DepartingTerminalID")
+    departing_terminal_name: str = Field(alias="DepartingTerminalName")
+    departure_time: datetime = Field(alias="DepartureTime")
+    vessel_name: str = Field(alias="VesselName")
+    vessel_id: int = Field(alias="VesselID")
+    arriving_terminal_id: int = Field(alias="ArrivingTerminalID")
+    arriving_terminal_name: str = Field(alias="ArrivingTerminalName")
+    max_space_count: int = Field(None, alias="MaxSpaceCount")
+    drive_up_space_count: int = Field(None, alias="DriveUpSpaceCount")
+    reservable_space_count: Optional[int] = Field(None, alias="ReservableSpaceCount")
+
+    class Config:
+        populate_by_name = True

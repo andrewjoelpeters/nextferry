@@ -85,11 +85,14 @@ async def collect_data():
 
     while True:
         try:
-            # get vessels data
+            logger.info("Starting data collection cycle")
+
+            logger.info("Fetching vessel positions")
             vessels = get_vessel_positions()
             save_data_to_jsonl("vessels", vessels, data_dir)
 
             # get sailing space data
+            logger.info("Fetching sailing space data")
             sailing_spaces = get_sailing_space()
             flattened = [
                 flat
@@ -102,4 +105,4 @@ async def collect_data():
         except Exception as e:
             logger.error(f"Data collection failed: {e}")
 
-        await asyncio.sleep(60 * 1)  # run every 5 minutes
+        await asyncio.sleep(60 * 5)  # run every 5 minutes

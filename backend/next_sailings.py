@@ -25,6 +25,10 @@ def update_cached_delay(vessel: Vessel, delay: datetime):
 
 
 def get_cached_delay(vessel: Vessel) -> Optional[datetime]:
+    # some vessels don't have routes assigned
+    if not vessel.route_name:
+        return None
+
     route = vessel.route_name[0]
     if route in CACHED_DELAYS:
         return CACHED_DELAYS[route].get(vessel.vessel_position_num, None)

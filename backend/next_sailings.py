@@ -104,7 +104,7 @@ def get_next_sailings_by_boat(
         # next sailings are all sailings with this vessel position num and a scheduled
         # departure greater than right now
         current_vessel = route_vessels_by_position.get(vessel_position_num)
-        if not current_vessel:
+        if not current_vessel or not current_vessel.scheduled_departure:
             next_sailings = [
                 sailing
                 for sailing in sailings

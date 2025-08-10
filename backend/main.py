@@ -161,79 +161,79 @@ async def debug_cache_status():
 # --- DATA DOWNLOAD ENDPOINTS ---
 
 
-@app.get("/data/download/latest")
-async def download_latest_vessel_data(
-    file_type: str = Query(
-        description="Filter by file type: 'vessels' or 'sailing_space'"
-    ),
-):
-    """Download the most recent data file (vessels or sailing space)"""
-    volume_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "./data")
-    data_dir = Path(volume_path)
+# @app.get("/data/download/latest")
+# async def download_latest_vessel_data(
+#     file_type: str = Query(
+#         description="Filter by file type: 'vessels' or 'sailing_space'"
+#     ),
+# ):
+#     """Download the most recent data file (vessels or sailing space)"""
+#     volume_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "./data")
+#     data_dir = Path(volume_path)
 
-    if not data_dir.exists():
-        raise HTTPException(status_code=404, detail="Data directory not found")
+#     if not data_dir.exists():
+#         raise HTTPException(status_code=404, detail="Data directory not found")
 
-    # Find files with either vessels_ or sailing_space_ prefix
-    if file_type == "vessels":
-        data_files = list(data_dir.glob("vessels_*.jsonl"))
-    elif file_type == "sailing_space":
-        data_files = list(data_dir.glob("sailing_space_*.jsonl"))
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid file_type. Must be 'vessels' or 'sailing_space'",
-        )
+#     # Find files with either vessels_ or sailing_space_ prefix
+#     if file_type == "vessels":
+#         data_files = list(data_dir.glob("vessels_*.jsonl"))
+#     elif file_type == "sailing_space":
+#         data_files = list(data_dir.glob("sailing_space_*.jsonl"))
+#     else:
+#         raise HTTPException(
+#             status_code=400,
+#             detail="Invalid file_type. Must be 'vessels' or 'sailing_space'",
+#         )
 
-    if not data_files:
-        file_type_msg = f" {file_type}" if file_type else ""
-        raise HTTPException(
-            status_code=404, detail=f"No{file_type_msg} data files found"
-        )
+#     if not data_files:
+#         file_type_msg = f" {file_type}" if file_type else ""
+#         raise HTTPException(
+#             status_code=404, detail=f"No{file_type_msg} data files found"
+#         )
 
-    # Get the most recent file
-    latest_file = max(data_files, key=lambda f: f.stat().st_mtime)
+#     # Get the most recent file
+#     latest_file = max(data_files, key=lambda f: f.stat().st_mtime)
 
-    # Determine appropriate media type based on file extension
-    media_type = (
-        "application/jsonl" if latest_file.suffix == ".jsonl" else "application/json"
-    )
+#     # Determine appropriate media type based on file extension
+#     media_type = (
+#         "application/jsonl" if latest_file.suffix == ".jsonl" else "application/json"
+#     )
 
-    return FileResponse(
-        path=str(latest_file), filename=latest_file.name, media_type=media_type
-    )
+#     return FileResponse(
+#         path=str(latest_file), filename=latest_file.name, media_type=media_type
+#     )
 
 
-@app.get("/data/download/all")
-async def download_all_vessel_data():
-    """Download all vessel data files as a ZIP archive"""
-    volume_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "./data")
-    data_dir = Path(volume_path)
+# @app.get("/data/download/all")
+# async def download_all_vessel_data():
+#     """Download all vessel data files as a ZIP archive"""
+#     volume_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "./data")
+#     data_dir = Path(volume_path)
 
-    if not data_dir.exists():
-        raise HTTPException(status_code=404, detail="Data directory not found")
+#     if not data_dir.exists():
+#         raise HTTPException(status_code=404, detail="Data directory not found")
 
-    json_files = list(data_dir.glob("vessels_*.json"))
-    if not json_files:
-        raise HTTPException(status_code=404, detail="No vessel data files found")
+#     json_files = list(data_dir.glob("vessels_*.json"))
+#     if not json_files:
+#         raise HTTPException(status_code=404, detail="No vessel data files found")
 
-    # Create ZIP file in memory
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as temp_zip:
-        with zipfile.ZipFile(temp_zip.name, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for file_path in json_files:
-                zipf.write(file_path, file_path.name)
+#     # Create ZIP file in memory
+#     with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as temp_zip:
+#         with zipfile.ZipFile(temp_zip.name, "w", zipfile.ZIP_DEFLATED) as zipf:
+#             for file_path in json_files:
+#                 zipf.write(file_path, file_path.name)
 
-        # Return the ZIP file
-        def iterfile():
-            with open(temp_zip.name, "rb") as f:
-                yield from f
-            os.unlink(temp_zip.name)  # Clean up temp file
+#         # Return the ZIP file
+#         def iterfile():
+#             with open(temp_zip.name, "rb") as f:
+#                 yield from f
+#             os.unlink(temp_zip.name)  # Clean up temp file
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return StreamingResponse(
-            iterfile(),
-            media_type="application/zip",
-            headers={
-                "Content-Disposition": f"attachment; filename=vessel_data_{timestamp}.zip"
-            },
-        )
+#         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+#         return StreamingResponse(
+#             iterfile(),
+#             media_type="application/zip",
+#             headers={
+#                 "Content-Disposition": f"attachment; filename=vessel_data_{timestamp}.zip"
+#             },
+#         )

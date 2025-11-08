@@ -5,3 +5,6 @@
 */__pycache__/*
 .DS_Store
 data/*
+ferry_data.db
+ferry_delay_model.pkl
+evaluation_results.md

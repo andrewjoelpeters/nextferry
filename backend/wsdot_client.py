@@ -11,10 +11,10 @@ from .serializers import (RawDirectionalSchedule, RawRouteSchedule,
 logger = logging.getLogger(__name__)
 
 load_dotenv()
-APIAccessCode = os.getenv("WSDOT_API_KEY")
 
 
 def get_vessel_positions() -> List[Vessel]:
+    APIAccessCode = os.getenv("WSDOT_API_KEY")
     if not APIAccessCode:
         raise Exception("WSDOT_API_KEY environment variable is not set")
 
@@ -38,6 +38,10 @@ def get_vessel_positions() -> List[Vessel]:
 
 
 def get_schedule_today(route_id) -> List[RawDirectionalSchedule]:
+    APIAccessCode = os.getenv("WSDOT_API_KEY")
+    if not APIAccessCode:
+        raise Exception("WSDOT_API_KEY environment variable is not set")
+
     url = f"https://www.wsdot.wa.gov/ferries/api/schedule/rest/scheduletoday/{route_id}/false?apiaccesscode={APIAccessCode}"
     response = requests.get(url)
 
@@ -51,6 +55,10 @@ def get_schedule_today(route_id) -> List[RawDirectionalSchedule]:
 
 
 def get_sailing_space():
+    APIAccessCode = os.getenv("WSDOT_API_KEY")
+    if not APIAccessCode:
+        raise Exception("WSDOT_API_KEY environment variable is not set")
+
     url = f"https://www.wsdot.wa.gov/ferries/api/terminals/rest/terminalsailingspace?apiaccesscode={APIAccessCode}"
     response = requests.get(url)
 

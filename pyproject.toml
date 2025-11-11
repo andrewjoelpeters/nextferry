@@ -19,5 +19,13 @@ dependencies = [
     "requests>=2.32.4",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+    "respx"
+]
+
 [tool.setuptools.packages.find]
 where = ["."]

@@ -1,6 +1,6 @@
 # VesselWatch
 
-VesselWatch is a FastAPI application that provides real-time information about the Washington State Ferries.
+VesselWatch is a simple web app that provides real-time information and delay prediction for Washington State Ferries. It's mostly written in Python and uses a FastAPI backend, and HTMX for the front-end. Check it out at [here]([url](https://whens-the-ferry-production.up.railway.app/)).
 
 ## Features
 

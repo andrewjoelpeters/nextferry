@@ -4,16 +4,17 @@ This document provides an overview of the machine learning model used to predict
 
 ## Model Function Signature
 
-The prediction model is a simple linear regression model. The function signature for making predictions is:
+The prediction model uses a scikit-learn Pipeline. The function signature for making predictions is:
 
 ```python
-def predict_delay(features):
+def predict_delay(features: List[PredictionFeatures]):
     """
     Predicts the delay in minutes for a given set of features.
 
     Args:
-        features (pandas.DataFrame): A DataFrame containing the features for prediction.
-            The required columns are 'speed', 'heading', and 'at_dock'.
+        features (List[PredictionFeatures]): A list of PredictionFeatures objects.
+            Required fields: speed, heading, at_dock, scheduled_departure,
+            departing_terminal_id, arriving_terminal_id.
 
     Returns:
         numpy.ndarray: An array of predicted delays in minutes.
@@ -25,9 +26,13 @@ def predict_delay(features):
 The model is trained on historical vessel data collected from the WSDOT API. The training process involves the following steps:
 
 1.  **Data Loading:** The historical data is loaded from a SQLite database (`ferry_data.db`).
-2.  **Feature Engineering:** The `delay` is calculated by subtracting the `scheduled_departure` from the `left_dock` time.
-3.  **Model Training:** A linear regression model is trained on the data using the `speed`, `heading`, and `at_dock` features to predict the `delay`.
-4.  **Model Saving:** The trained model is saved to a file named `ferry_delay_model.pkl`.
+2.  **Feature Engineering:**
+    - `delay` is calculated as the target variable (difference between `left_dock` and `scheduled_departure`).
+    - `hour_of_day` and `day_of_week` are extracted from `scheduled_departure`.
+3.  **Model Training:** A `Pipeline` is used, consisting of:
+    - **Preprocessing:** `ColumnTransformer` that applies `StandardScaler` to numeric features (`speed`, `heading`, `hour_of_day`) and `OneHotEncoder` to categorical features (`at_dock`, `day_of_week`, `departing_terminal_id`, `arriving_terminal_id`).
+    - **Regressor:** A `LinearRegression` model.
+4.  **Model Saving:** The trained pipeline is saved to `ferry_delay_model.pkl`.
 
 ### Daily Re-training
 
@@ -39,11 +44,13 @@ The historical vessel data is stored in a SQLite database named `ferry_data.db`.
 
 ## Evaluation
 
-The ML model was evaluated against the existing rule-based logic using the root mean squared error (RMSE) of the predicted departure time vs. the actual departure time. The results are as follows:
+The ML model is evaluated against a simple rule-based model (which assumes the next sailing's delay will be the same as the previous one for that vessel).
 
-| Model              | RMSE |
-| ------------------ | ---- |
-| ML Model           | 1.58 |
-| Rule-based Model   | 2.43 |
+Latest evaluation results:
 
-As the results show, the ML model provides a significant improvement in prediction accuracy over the rule-based logic.
+| Model | RMSE |
+|---|---|
+| ML Model | 5.41 |
+| Rule-based Model | 5.47 |
+
+*Note: Results are based on generated mock data for demonstration purposes.*

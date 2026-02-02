@@ -10,6 +10,7 @@ from .serializers import (DirectionalSailing, DirectionalSchedule,
                           RawDirectionalSchedule, RouteSchedule, Vessel)
 from .utils import datetime_to_minutes
 from .wsdot_client import get_schedule_today, get_vessel_positions
+from .ml_model import predict_delay, PredictionFeatures
 
 logger = logging.getLogger(__name__)
 
@@ -81,14 +82,45 @@ def get_route_schedule_by_boat(
     return schedule_by_boat
 
 
-def propigate_delays(
-    delay: Optional[datetime], sailings: List[DirectionalSailing]
+def predict_future_delays(
+    vessel: Optional[Vessel], sailings: List[DirectionalSailing]
 ) -> List[DirectionalSailing]:
-    if not delay:
+    if not vessel or not sailings:
+        # Fallback to rule-based or zero if no vessel info
         return sailings
-    else:
+
+    try:
+        features = [
+            PredictionFeatures(
+                speed=vessel.speed or 0.0,
+                heading=float(vessel.heading) if vessel.heading is not None else 0.0,
+                at_dock=vessel.at_dock,
+                scheduled_departure=sailing.scheduled_departure,
+                departing_terminal_id=sailing.departing_terminal_id,
+                arriving_terminal_id=sailing.arriving_terminal_id
+            )
+            for sailing in sailings if sailing.scheduled_departure
+        ]
+
+        if not features:
+            return sailings
+
+        predictions = predict_delay(features)
+
+        # Map predictions back to sailings
+        feat_idx = 0
         for sailing in sailings:
-            sailing.delay_in_minutes = datetime_to_minutes(delay)
+            if sailing.scheduled_departure:
+                sailing.delay_in_minutes = int(max(0, predictions[feat_idx]))
+                feat_idx += 1
+
+        return sailings
+    except Exception as e:
+        logger.error(f"Error predicting delays with ML model: {e}")
+        # Fallback to old behavior if ML fails
+        if vessel.delay:
+            for sailing in sailings:
+                sailing.delay_in_minutes = datetime_to_minutes(vessel.delay)
         return sailings
 
 
@@ -100,9 +132,6 @@ def get_next_sailings_by_boat(
     }
     next_sailings_by_boat = {}
     for vessel_position_num, sailings in schedule_by_boat.items():
-        # if this vessel_position_num isn't in route_vessels:
-        # next sailings are all sailings with this vessel position num and a scheduled
-        # departure greater than right now
         current_vessel = route_vessels_by_position.get(vessel_position_num)
         if not current_vessel or not current_vessel.scheduled_departure:
             next_sailings = [
@@ -124,7 +153,7 @@ def get_next_sailings_by_boat(
                 if sailing.scheduled_departure > current_vessel.scheduled_departure
             ]
 
-        next_sailings = propigate_delays(current_vessel.delay, next_sailings)
+        next_sailings = predict_future_delays(current_vessel, next_sailings)
         next_sailings_by_boat[vessel_position_num] = next_sailings
 
     return next_sailings_by_boat
@@ -138,7 +167,6 @@ def get_directional_schedules(
     # Flatten all sailings from all vessels and group by direction
     for vessel_sailings in next_sailings_by_boat.values():
         for sailing in vessel_sailings:
-            # direction_key = (sailing.departing_terminal_id, sailing.arriving_terminal_id)
             direction_meta = (
                 sailing.departing_terminal_id,
                 sailing.departing_terminal_name,

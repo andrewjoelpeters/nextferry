@@ -12,14 +12,9 @@ from zoneinfo import ZoneInfo
 
 from .serializers import FlatSailingSpace, SailingSpace, Vessel
 from .wsdot_client import get_sailing_space, get_vessel_positions
+from .database import get_data_directory, save_vessel_data
 
 logger = logging.getLogger(__name__)
-
-
-def get_data_directory() -> Path:
-    """Get data directory from Railway volume or fallback to local"""
-    volume_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
-    return Path(volume_path) if volume_path else Path("./data")
 
 
 def save_data_to_jsonl(
@@ -89,6 +84,12 @@ async def collect_data():
 
             logger.info("Fetching vessel positions")
             vessels = get_vessel_positions()
+
+            # Save to Database directly
+            logger.info("Saving vessel data to database")
+            save_vessel_data(vessels)
+
+            # Keep JSONL as secondary backup
             save_data_to_jsonl("vessels", vessels, data_dir)
 
             # get sailing space data

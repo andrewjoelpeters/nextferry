@@ -49,10 +49,27 @@ async def update_sailings_cache():
 
 
 async def retrain_model_daily():
-    """Background task to retrain the ML model daily at 2 AM Pacific."""
-    # On startup, try to load saved model
+    """Background task to load/train the ML model, then retrain daily at 2 AM Pacific."""
+    # On startup, try to load saved model (volume first, then bundled)
     logger.info("Attempting to load saved ML model...")
-    ml_predictor.load()
+    loaded = ml_predictor.load()
+
+    # If no model found anywhere, try an immediate background train
+    if not loaded:
+        logger.info("No saved model found, attempting background train...")
+        try:
+            success = ml_predictor.train()
+            if success:
+                ml_predictor.save()
+                logger.info(
+                    f"Initial model trained on {ml_predictor.training_data_size} rows"
+                )
+            else:
+                logger.info(
+                    "Initial training skipped (insufficient data), using heuristics"
+                )
+        except Exception as e:
+            logger.error(f"Initial model training failed: {e}")
 
     while True:
         try:

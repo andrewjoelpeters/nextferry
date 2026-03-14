@@ -1,0 +1,27 @@
+{
+  "name": "Next Ferry - WA Ferry Tracker",
+  "short_name": "Next Ferry",
+  "description": "Real-time Washington State Ferry schedules and vessel tracking",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#e8f5e9",
+  "theme_color": "#00643c",
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

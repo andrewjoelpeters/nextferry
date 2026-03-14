@@ -56,34 +56,41 @@ def evaluate_predictions(test_df: pd.DataFrame) -> dict:
 
     # Fine-grained: mean error by 2-minute time-to-departure bins
     minutes_col = test_df["minutes_until_scheduled_departure"]
+    has_bounds = "lower_bound" in test_df.columns and "upper_bound" in test_df.columns
     error_by_horizon = []
+
+    def _horizon_stats(mask):
+        subset_errors = errors[mask]
+        if len(subset_errors) == 0:
+            return None
+        row = {
+            "minutes_out": None,
+            "mean_error": round(float(subset_errors.mean()), 2),
+            "mae": round(float(np.abs(subset_errors).mean()), 2),
+            "n": int(len(subset_errors)),
+        }
+        if has_bounds:
+            subset_predicted = test_df.loc[mask, "predicted_delay"]
+            subset_lower = test_df.loc[mask, "lower_bound"]
+            subset_upper = test_df.loc[mask, "upper_bound"]
+            row["ci_lower"] = round(float((subset_predicted - subset_lower).mean()), 2)
+            row["ci_upper"] = round(float((subset_upper - subset_predicted).mean()), 2)
+        return row
 
     for i in range(len(FINE_BINS) - 1):
         lo, hi = FINE_BINS[i], FINE_BINS[i + 1]
         mask = (minutes_col >= lo) & (minutes_col < hi)
-        subset_errors = errors[mask]
-        if len(subset_errors) > 0:
-            error_by_horizon.append(
-                {
-                    "minutes_out": lo,
-                    "mean_error": round(float(subset_errors.mean()), 2),
-                    "mae": round(float(np.abs(subset_errors).mean()), 2),
-                    "n": int(len(subset_errors)),
-                }
-            )
+        row = _horizon_stats(mask)
+        if row:
+            row["minutes_out"] = lo
+            error_by_horizon.append(row)
 
     # 120+ bucket
     mask = minutes_col >= 120
-    subset_errors = errors[mask]
-    if len(subset_errors) > 0:
-        error_by_horizon.append(
-            {
-                "minutes_out": 120,
-                "mean_error": round(float(subset_errors.mean()), 2),
-                "mae": round(float(np.abs(subset_errors).mean()), 2),
-                "n": int(len(subset_errors)),
-            }
-        )
+    row = _horizon_stats(mask)
+    if row:
+        row["minutes_out"] = 120
+        error_by_horizon.append(row)
 
     results["error_by_horizon"] = error_by_horizon
     results["n_test_samples"] = int(len(test_df))

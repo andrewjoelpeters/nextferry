@@ -15,6 +15,8 @@
     <link rel="stylesheet" href="/static/style.css">
     <!-- Leaflet CSS for mapping -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Chart.js for predictions dashboard -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <!-- HTMX - this is the magic! -->
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
 </head>
@@ -31,11 +33,17 @@
                 onclick="setActiveTab(this)">
             Next Sailings
         </button>
-        <button class="tab-button" 
-                hx-get="/map-tab" 
+        <button class="tab-button"
+                hx-get="/map-tab"
                 hx-target="#tab-content"
                 onclick="setActiveTab(this)">
             Map
+        </button>
+        <button class="tab-button"
+                hx-get="/predictions-tab"
+                hx-target="#tab-content"
+                onclick="setActiveTab(this)">
+            Predictions
         </button>
     </nav>
 

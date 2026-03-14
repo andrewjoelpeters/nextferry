@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .data_collector import collect_data
-from .database import get_sailing_event_count, get_snapshot_count, init_db
+from .database import get_dashboard_data, get_sailing_event_count, get_snapshot_count, init_db
 from .display_processing import process_routes_for_display
 from .ml_predictor import predictor as ml_predictor
 from .next_sailings import CACHED_DELAYS, get_next_sailings
@@ -188,6 +188,32 @@ async def get_sailings_tab(request: Request):
     return templates.TemplateResponse(
         "sailings_tab_fragment.html", {"request": request}
     )
+
+
+@app.get("/predictions-tab", response_class=HTMLResponse)
+async def get_predictions_tab(request: Request):
+    """Return the predictions dashboard tab content."""
+    return templates.TemplateResponse(
+        "predictions_tab_fragment.html", {"request": request}
+    )
+
+
+@app.get("/predictions-data")
+async def get_predictions_data():
+    """Return dashboard data as JSON for chart rendering."""
+    dashboard = get_dashboard_data()
+
+    # Include model evaluation metrics if available
+    model_info = {
+        "is_trained": ml_predictor.is_trained,
+        "last_trained": (
+            ml_predictor.last_trained.isoformat() if ml_predictor.last_trained else None
+        ),
+        "training_data_size": ml_predictor.training_data_size,
+        "evaluation": ml_predictor.last_evaluation,
+    }
+
+    return {**dashboard, "model": model_info}
 
 
 @app.get("/debug/cache-status")

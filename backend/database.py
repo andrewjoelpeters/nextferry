@@ -1,0 +1,289 @@
+"""SQLite database for accumulating historical ferry data."""
+
+import logging
+import os
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+from typing import List, Optional, Tuple
+from zoneinfo import ZoneInfo
+
+logger = logging.getLogger(__name__)
+
+_db_path: Optional[Path] = None
+
+
+def get_db_path() -> Path:
+    global _db_path
+    if _db_path is None:
+        volume_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
+        data_dir = Path(volume_path) if volume_path else Path("./data")
+        data_dir.mkdir(exist_ok=True)
+        _db_path = data_dir / "ferry.db"
+    return _db_path
+
+
+def get_connection() -> sqlite3.Connection:
+    conn = sqlite3.connect(str(get_db_path()), timeout=10)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    """Create tables and enable WAL mode."""
+    conn = get_connection()
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS vessel_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collected_at TEXT NOT NULL,
+                vessel_id INTEGER NOT NULL,
+                vessel_name TEXT NOT NULL,
+                route_abbrev TEXT,
+                departing_terminal_id INTEGER,
+                departing_terminal_name TEXT,
+                arriving_terminal_id INTEGER,
+                arriving_terminal_name TEXT,
+                latitude REAL,
+                longitude REAL,
+                speed REAL,
+                heading INTEGER,
+                in_service INTEGER NOT NULL,
+                at_dock INTEGER NOT NULL,
+                left_dock TEXT,
+                eta TEXT,
+                scheduled_departure TEXT,
+                vessel_position_num INTEGER,
+                UNIQUE(collected_at, vessel_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS sailing_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                vessel_id INTEGER NOT NULL,
+                vessel_name TEXT NOT NULL,
+                route_abbrev TEXT,
+                departing_terminal_id INTEGER,
+                arriving_terminal_id INTEGER,
+                scheduled_departure TEXT NOT NULL,
+                actual_departure TEXT NOT NULL,
+                delay_minutes REAL NOT NULL,
+                day_of_week INTEGER NOT NULL,
+                hour_of_day INTEGER NOT NULL,
+                UNIQUE(vessel_id, scheduled_departure)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_snapshots_vessel_time
+                ON vessel_snapshots(vessel_id, collected_at);
+            CREATE INDEX IF NOT EXISTS idx_sailing_events_scheduled
+                ON sailing_events(scheduled_departure);
+            CREATE INDEX IF NOT EXISTS idx_sailing_events_route
+                ON sailing_events(route_abbrev);
+            """
+        )
+        conn.commit()
+        logger.info(f"Database initialized at {get_db_path()}")
+    finally:
+        conn.close()
+
+
+def insert_vessel_snapshot(
+    collected_at: str,
+    vessel_id: int,
+    vessel_name: str,
+    route_abbrev: Optional[str],
+    departing_terminal_id: Optional[int],
+    departing_terminal_name: Optional[str],
+    arriving_terminal_id: Optional[int],
+    arriving_terminal_name: Optional[str],
+    latitude: Optional[float],
+    longitude: Optional[float],
+    speed: Optional[float],
+    heading: Optional[int],
+    in_service: bool,
+    at_dock: bool,
+    left_dock: Optional[str],
+    eta: Optional[str],
+    scheduled_departure: Optional[str],
+    vessel_position_num: Optional[int],
+):
+    """Insert a vessel snapshot, ignoring duplicates."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO vessel_snapshots (
+                collected_at, vessel_id, vessel_name, route_abbrev,
+                departing_terminal_id, departing_terminal_name,
+                arriving_terminal_id, arriving_terminal_name,
+                latitude, longitude, speed, heading,
+                in_service, at_dock, left_dock, eta,
+                scheduled_departure, vessel_position_num
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                collected_at,
+                vessel_id,
+                vessel_name,
+                route_abbrev,
+                departing_terminal_id,
+                departing_terminal_name,
+                arriving_terminal_id,
+                arriving_terminal_name,
+                latitude,
+                longitude,
+                speed,
+                heading,
+                int(in_service),
+                int(at_dock),
+                left_dock,
+                eta,
+                scheduled_departure,
+                vessel_position_num,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def insert_vessel_snapshots_batch(snapshots: list):
+    """Insert multiple vessel snapshots in one transaction."""
+    conn = get_connection()
+    try:
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO vessel_snapshots (
+                collected_at, vessel_id, vessel_name, route_abbrev,
+                departing_terminal_id, departing_terminal_name,
+                arriving_terminal_id, arriving_terminal_name,
+                latitude, longitude, speed, heading,
+                in_service, at_dock, left_dock, eta,
+                scheduled_departure, vessel_position_num
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            snapshots,
+        )
+        conn.commit()
+        logger.info(f"Inserted {conn.total_changes} vessel snapshots")
+    finally:
+        conn.close()
+
+
+def extract_sailing_events():
+    """Extract sailing events from vessel snapshots where left_dock is set.
+
+    For each distinct (vessel_id, scheduled_departure) where left_dock is known,
+    compute the delay and insert into sailing_events.
+    """
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO sailing_events (
+                vessel_id, vessel_name, route_abbrev,
+                departing_terminal_id, arriving_terminal_id,
+                scheduled_departure, actual_departure, delay_minutes,
+                day_of_week, hour_of_day
+            )
+            SELECT
+                vessel_id,
+                vessel_name,
+                route_abbrev,
+                departing_terminal_id,
+                arriving_terminal_id,
+                scheduled_departure,
+                left_dock AS actual_departure,
+                (julianday(left_dock) - julianday(scheduled_departure)) * 24 * 60 AS delay_minutes,
+                CAST(strftime('%w', scheduled_departure) AS INTEGER) AS day_of_week,
+                CAST(strftime('%H', scheduled_departure) AS INTEGER) AS hour_of_day
+            FROM vessel_snapshots
+            WHERE left_dock IS NOT NULL
+              AND scheduled_departure IS NOT NULL
+              AND left_dock != ''
+              AND scheduled_departure != ''
+            GROUP BY vessel_id, scheduled_departure
+            HAVING MAX(collected_at)
+            """
+        )
+        inserted = conn.total_changes
+        conn.commit()
+        if inserted > 0:
+            logger.info(f"Extracted {inserted} new sailing events")
+    finally:
+        conn.close()
+
+
+def get_training_data() -> List[dict]:
+    """Return all sailing events as dicts for ML training."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            """
+            SELECT
+                id, vessel_id, vessel_name, route_abbrev,
+                departing_terminal_id, arriving_terminal_id,
+                scheduled_departure, actual_departure, delay_minutes,
+                day_of_week, hour_of_day
+            FROM sailing_events
+            ORDER BY scheduled_departure
+            """
+        )
+        columns = [desc[0] for desc in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_vessel_delay_at_time(
+    vessel_id: int, query_time: str, scheduled_departure: str
+) -> Optional[float]:
+    """Get the most recent observed delay for a vessel at a given time.
+
+    Looks at the vessel's most recent snapshot before query_time where
+    left_dock and scheduled_departure are set (i.e., it has departed
+    on a *previous* sailing).
+    """
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                (julianday(left_dock) - julianday(scheduled_departure)) * 24 * 60 AS delay_minutes
+            FROM vessel_snapshots
+            WHERE vessel_id = ?
+              AND collected_at <= ?
+              AND left_dock IS NOT NULL
+              AND scheduled_departure IS NOT NULL
+              AND left_dock != ''
+              AND scheduled_departure != ''
+              AND scheduled_departure != ?
+            ORDER BY collected_at DESC
+            LIMIT 1
+            """,
+            (vessel_id, query_time, scheduled_departure),
+        ).fetchone()
+        return row["delay_minutes"] if row else None
+    finally:
+        conn.close()
+
+
+def get_sailing_event_count() -> int:
+    """Return the total number of sailing events."""
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT COUNT(*) as cnt FROM sailing_events").fetchone()
+        return row["cnt"]
+    finally:
+        conn.close()
+
+
+def get_snapshot_count() -> int:
+    """Return the total number of vessel snapshots."""
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT COUNT(*) as cnt FROM vessel_snapshots").fetchone()
+        return row["cnt"]
+    finally:
+        conn.close()

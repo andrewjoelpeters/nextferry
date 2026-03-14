@@ -446,6 +446,10 @@ header h1 {
     height: 220px;
 }
 
+.chart-wrap-tall {
+    height: 280px;
+}
+
 .stat-row {
     display: flex;
     justify-content: space-around;

@@ -61,36 +61,19 @@
         // Build the dashboard HTML structure
         let html = '';
 
-        // Model status card
+        // Model status + error curve
         const model = data.model;
-        if (model.is_trained && model.evaluation) {
+        if (model.is_trained && model.evaluation && model.evaluation.error_by_horizon) {
             const ev = model.evaluation;
             html += `
             <div class="dash-card dash-card-wide">
-                <div class="dash-card-header">Model Performance</div>
+                <div class="dash-card-header">Prediction Error by Time to Departure</div>
                 <div class="dash-card-body">
-                    <div class="stat-row">
-                        <div class="stat-item">
-                            <span class="stat-value">${ev.overall_mae}</span>
-                            <span class="stat-label">MAE (min)</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-value">${ev.overall_rmse}</span>
-                            <span class="stat-label">RMSE (min)</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-value">${ev.coverage_90pct}%</span>
-                            <span class="stat-label">90% Coverage</span>
-                        </div>
-                        ${ev.improvement_pct !== undefined ? `
-                        <div class="stat-item">
-                            <span class="stat-value stat-positive">+${ev.improvement_pct}%</span>
-                            <span class="stat-label">vs Baseline</span>
-                        </div>` : ''}
-                    </div>
-                    <div class="stat-meta">
-                        ${data.event_count.toLocaleString()} sailings tracked &middot;
-                        Model trained ${model.last_trained ? new Date(model.last_trained).toLocaleDateString() : 'N/A'}
+                    <div class="chart-wrap chart-wrap-tall"><canvas id="chart-horizon"></canvas></div>
+                    <div class="stat-meta" style="margin-top: var(--sm)">
+                        Overall: ${ev.overall_mae} min MAE, ${ev.overall_mean_error > 0 ? '+' : ''}${ev.overall_mean_error} min bias
+                        ${ev.improvement_pct !== undefined ? ` &middot; ${ev.improvement_pct}% better than flat propagation` : ''}
+                        &middot; ${data.event_count.toLocaleString()} sailings
                     </div>
                 </div>
             </div>`;
@@ -101,15 +84,6 @@
                 <div class="dash-card-body">
                     <div class="stat-meta">${data.event_count.toLocaleString()} sailings tracked. Model not yet trained.</div>
                 </div>
-            </div>`;
-        }
-
-        // Prediction error by horizon chart
-        if (model.is_trained && model.evaluation && model.evaluation.by_horizon) {
-            html += `
-            <div class="dash-card dash-card-wide">
-                <div class="dash-card-header">Prediction Error by Time to Departure</div>
-                <div class="dash-card-body"><div class="chart-wrap"><canvas id="chart-horizon"></canvas></div></div>
             </div>`;
         }
 
@@ -154,29 +128,39 @@
 
         // --- Render charts ---
 
-        // Prediction error by horizon
-        if (model.is_trained && model.evaluation && model.evaluation.by_horizon) {
-            const horizon = model.evaluation.by_horizon;
-            const labels = Object.keys(horizon);
-            const maeValues = labels.map(l => horizon[l].mae);
-            const rmseValues = labels.map(l => horizon[l].rmse);
+        // Prediction error by horizon (line chart)
+        if (model.is_trained && model.evaluation && model.evaluation.error_by_horizon) {
+            const horizon = model.evaluation.error_by_horizon;
+            const labels = horizon.map(d => d.minutes_out + 'm');
+            const maeValues = horizon.map(d => d.mae);
+            const biasValues = horizon.map(d => d.mean_error);
 
             new Chart(document.getElementById('chart-horizon'), {
-                type: 'bar',
+                type: 'line',
                 data: {
                     labels: labels,
                     datasets: [
                         {
-                            label: 'MAE (min)',
+                            label: 'Avg Error (MAE)',
                             data: maeValues,
-                            backgroundColor: OCEAN_SURFACE,
-                            borderRadius: 6,
+                            borderColor: OCEAN_DEEP,
+                            backgroundColor: 'rgba(30, 58, 138, 0.08)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 2,
+                            pointHoverRadius: 5,
+                            borderWidth: 2,
                         },
                         {
-                            label: 'RMSE (min)',
-                            data: rmseValues,
-                            backgroundColor: OCEAN_DEEP,
-                            borderRadius: 6,
+                            label: 'Bias (direction)',
+                            data: biasValues,
+                            borderColor: DANGER_RED,
+                            borderDash: [4, 3],
+                            tension: 0.3,
+                            pointRadius: 2,
+                            pointHoverRadius: 5,
+                            borderWidth: 1.5,
+                            fill: false,
                         },
                     ],
                 },
@@ -185,11 +169,27 @@
                     plugins: {
                         ...chartDefaults.plugins,
                         legend: { display: true, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+                        tooltip: {
+                            ...chartDefaults.plugins.tooltip,
+                            callbacks: {
+                                label: function(ctx) {
+                                    const val = ctx.parsed.y;
+                                    const sign = val >= 0 ? '+' : '';
+                                    return `${ctx.dataset.label}: ${sign}${val.toFixed(1)} min`;
+                                },
+                            },
+                        },
                     },
                     scales: {
                         ...chartDefaults.scales,
-                        y: { ...chartDefaults.scales.y, title: { display: true, text: 'Error (minutes)', color: DECK_GRAY } },
-                        x: { ...chartDefaults.scales.x, title: { display: true, text: 'Time to Departure', color: DECK_GRAY } },
+                        y: {
+                            ...chartDefaults.scales.y,
+                            title: { display: true, text: 'Error (minutes)', color: DECK_GRAY },
+                        },
+                        x: {
+                            ...chartDefaults.scales.x,
+                            title: { display: true, text: 'Time to Departure', color: DECK_GRAY },
+                        },
                     },
                 },
             });

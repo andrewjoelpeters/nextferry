@@ -134,8 +134,8 @@
             const labels = horizon.map(d => d.minutes_out + 'm');
             const maeValues = horizon.map(d => d.mae);
             const biasValues = horizon.map(d => d.mean_error);
-            const ciUpper = horizon.map(d => d.mae + (d.ci_upper || 0));
-            const ciLower = horizon.map(d => Math.max(0, d.mae - (d.ci_lower || 0)));
+            const errUpper = horizon.map(d => d.error_p88 || 0);
+            const errLower = horizon.map(d => d.error_p12 || 0);
 
             new Chart(document.getElementById('chart-horizon'), {
                 type: 'line',
@@ -143,8 +143,8 @@
                     labels: labels,
                     datasets: [
                         {
-                            label: '70% CI Upper',
-                            data: ciUpper,
+                            label: '75% of errors',
+                            data: errUpper,
                             borderColor: 'transparent',
                             pointRadius: 0,
                             pointHitRadius: 0,
@@ -156,8 +156,8 @@
                             },
                         },
                         {
-                            label: '70% CI Lower',
-                            data: ciLower,
+                            label: '75% error lower',
+                            data: errLower,
                             borderColor: 'transparent',
                             pointRadius: 0,
                             pointHitRadius: 0,
@@ -203,14 +203,14 @@
                                 boxHeight: 6,
                                 font: { size: 11 },
                                 filter: function(item) {
-                                    return item.text !== '70% CI Upper' && item.text !== '70% CI Lower';
+                                    return item.text !== '75% error lower';
                                 },
                             },
                         },
                         tooltip: {
                             ...chartDefaults.plugins.tooltip,
                             filter: function(item) {
-                                return item.dataset.label !== '70% CI Upper' && item.dataset.label !== '70% CI Lower';
+                                return item.dataset.label !== '75% error lower';
                             },
                             callbacks: {
                                 label: function(ctx) {

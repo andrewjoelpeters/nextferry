@@ -2,7 +2,7 @@ from datetime import timedelta
 from typing import List
 
 from .serializers import RouteSchedule
-from .utils import format_delay_text, format_time_until
+from .utils import format_confidence_text, format_delay_text, format_time_until
 
 
 def process_routes_for_display(routes_data: List[RouteSchedule]):
@@ -33,6 +33,11 @@ def process_routes_for_display(routes_data: List[RouteSchedule]):
                 # Final status prioritizes delay status if there is a delay
                 final_status = delay_status if sailing.delay_in_minutes else base_status
 
+                # Confidence interval text
+                confidence_text = format_confidence_text(
+                    sailing.delay_lower_bound, sailing.delay_upper_bound
+                )
+
                 processed_sailings.append(
                     {
                         "time_until": time_until,
@@ -47,6 +52,7 @@ def process_routes_for_display(routes_data: List[RouteSchedule]):
                             else "N/A"
                         ),
                         "delay_text": delay_text,
+                        "confidence_text": confidence_text,
                         "vessel_name": sailing.vessel_name,
                         "status_class": final_status,
                         "has_delay": sailing.delay_in_minutes is not None

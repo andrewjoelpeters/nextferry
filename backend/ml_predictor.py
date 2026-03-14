@@ -30,12 +30,18 @@ MINIMUM_TRAINING_EVENTS = 200
 TIME_HORIZONS_MINUTES = [5, 15, 30, 60, 120]
 
 
-def get_model_dir() -> Path:
+def get_volume_model_dir() -> Path:
+    """Model directory on the persistent volume (Railway or local data/)."""
     volume_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
     data_dir = Path(volume_path) if volume_path else Path("./data")
     model_dir = data_dir / "models"
     model_dir.mkdir(parents=True, exist_ok=True)
     return model_dir
+
+
+def get_bundled_model_dir() -> Path:
+    """Model directory shipped with the repo (fallback for fresh deploys)."""
+    return Path(__file__).resolve().parent.parent / "models"
 
 
 def is_peak_hour(hour: int) -> bool:
@@ -287,7 +293,7 @@ class DelayPredictor:
 
     def save(self, path: Optional[Path] = None):
         """Save models and metadata to disk."""
-        model_dir = path or get_model_dir()
+        model_dir = path or get_volume_model_dir()
         model_dir.mkdir(parents=True, exist_ok=True)
 
         joblib.dump(self.model_q50, model_dir / "delay_model_q50.joblib")
@@ -305,10 +311,8 @@ class DelayPredictor:
         )
         logger.info(f"Models saved to {model_dir}")
 
-    def load(self, path: Optional[Path] = None) -> bool:
-        """Load models from disk. Returns True on success."""
-        model_dir = path or get_model_dir()
-
+    def _load_from_dir(self, model_dir: Path) -> bool:
+        """Attempt to load models from a specific directory."""
         required_files = [
             "delay_model_q50.joblib",
             "delay_model_q05.joblib",
@@ -317,7 +321,6 @@ class DelayPredictor:
         ]
 
         if not all((model_dir / f).exists() for f in required_files):
-            logger.info("No saved models found")
             return False
 
         try:
@@ -336,8 +339,26 @@ class DelayPredictor:
             )
             return True
         except Exception as e:
-            logger.error(f"Failed to load models: {e}")
+            logger.error(f"Failed to load models from {model_dir}: {e}")
             return False
+
+    def load(self, path: Optional[Path] = None) -> bool:
+        """Load models from disk. Checks volume first, then bundled repo models."""
+        if path:
+            return self._load_from_dir(path)
+
+        # Prefer volume models (fresher, from daily retraining)
+        if self._load_from_dir(get_volume_model_dir()):
+            return True
+
+        # Fall back to bundled models shipped with the repo
+        bundled = get_bundled_model_dir()
+        if self._load_from_dir(bundled):
+            logger.info("Loaded bundled models (no volume models found)")
+            return True
+
+        logger.info("No saved models found in volume or repo")
+        return False
 
 
 # Module-level singleton

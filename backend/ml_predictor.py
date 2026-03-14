@@ -21,13 +21,16 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-from .database import (get_connection, get_sailing_event_count,
-                       get_training_data)
+from .database import get_connection, get_sailing_event_count, get_training_data
 
 logger = logging.getLogger(__name__)
 
 MINIMUM_TRAINING_EVENTS = 200
-TIME_HORIZONS_MINUTES = [5, 15, 30, 60, 120]
+TIME_HORIZONS_MINUTES = list(range(2, 62, 2)) + [
+    75,
+    90,
+    120,
+]  # every 2min to 60, then 75/90/120
 
 
 def get_volume_model_dir() -> Path:

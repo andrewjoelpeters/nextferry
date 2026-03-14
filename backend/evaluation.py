@@ -1,6 +1,7 @@
 """Evaluation framework for the delay prediction model.
 
-Computes RMSE stratified by time-until-departure and prediction interval coverage.
+Computes mean error (bias) stratified by time-until-departure in fine-grained
+bins. Positive bias = model over-predicts delay, negative = under-predicts.
 
 Usage:
     python -m backend.evaluation
@@ -14,13 +15,8 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-HORIZON_BINS = [
-    (0, 5, "0-5min"),
-    (5, 15, "5-15min"),
-    (15, 30, "15-30min"),
-    (30, 60, "30-60min"),
-    (60, float("inf"), "60+min"),
-]
+# 2-minute bins from 0 to 120, then a 120+ bucket
+FINE_BINS = list(range(0, 122, 2))  # [0, 2, 4, ..., 120]
 
 
 def evaluate_predictions(test_df: pd.DataFrame) -> dict:
@@ -35,10 +31,11 @@ def evaluate_predictions(test_df: pd.DataFrame) -> dict:
     """
     results = {}
 
-    # Overall RMSE
-    residuals = test_df["actual_delay_minutes"] - test_df["predicted_delay"]
-    results["overall_rmse"] = round(float(np.sqrt(np.mean(residuals**2))), 2)
-    results["overall_mae"] = round(float(np.mean(np.abs(residuals))), 2)
+    errors = test_df["predicted_delay"] - test_df["actual_delay_minutes"]
+
+    # Overall metrics
+    results["overall_mean_error"] = round(float(errors.mean()), 2)
+    results["overall_mae"] = round(float(np.abs(errors).mean()), 2)
 
     # Coverage: % of actuals within [lower_bound, upper_bound]
     within_bounds = (test_df["actual_delay_minutes"] >= test_df["lower_bound"]) & (
@@ -46,35 +43,49 @@ def evaluate_predictions(test_df: pd.DataFrame) -> dict:
     )
     results["coverage_70pct"] = round(float(within_bounds.mean() * 100), 1)
 
-    # RMSE by time horizon
-    horizon_results = {}
-    for lo, hi, label in HORIZON_BINS:
-        mask = (test_df["minutes_until_scheduled_departure"] >= lo) & (
-            test_df["minutes_until_scheduled_departure"] < hi
-        )
-        subset = test_df[mask]
-        if len(subset) > 0:
-            r = subset["actual_delay_minutes"] - subset["predicted_delay"]
-            horizon_results[label] = {
-                "rmse": round(float(np.sqrt(np.mean(r**2))), 2),
-                "mae": round(float(np.mean(np.abs(r))), 2),
-                "n_samples": int(len(subset)),
-            }
-    results["by_horizon"] = horizon_results
-
     # Baseline comparison: "flat delay" = use current_vessel_delay_minutes as prediction
     if "current_vessel_delay_minutes" in test_df.columns:
-        baseline_residuals = (
-            test_df["actual_delay_minutes"] - test_df["current_vessel_delay_minutes"]
+        baseline_errors = (
+            test_df["current_vessel_delay_minutes"] - test_df["actual_delay_minutes"]
         )
-        results["baseline_rmse"] = round(
-            float(np.sqrt(np.mean(baseline_residuals**2))), 2
-        )
+        results["baseline_mae"] = round(float(np.abs(baseline_errors).mean()), 2)
         results["improvement_pct"] = round(
-            (1 - results["overall_rmse"] / max(results["baseline_rmse"], 0.01)) * 100,
+            (1 - results["overall_mae"] / max(results["baseline_mae"], 0.01)) * 100,
             1,
         )
 
+    # Fine-grained: mean error by 2-minute time-to-departure bins
+    minutes_col = test_df["minutes_until_scheduled_departure"]
+    error_by_horizon = []
+
+    for i in range(len(FINE_BINS) - 1):
+        lo, hi = FINE_BINS[i], FINE_BINS[i + 1]
+        mask = (minutes_col >= lo) & (minutes_col < hi)
+        subset_errors = errors[mask]
+        if len(subset_errors) > 0:
+            error_by_horizon.append(
+                {
+                    "minutes_out": lo,
+                    "mean_error": round(float(subset_errors.mean()), 2),
+                    "mae": round(float(np.abs(subset_errors).mean()), 2),
+                    "n": int(len(subset_errors)),
+                }
+            )
+
+    # 120+ bucket
+    mask = minutes_col >= 120
+    subset_errors = errors[mask]
+    if len(subset_errors) > 0:
+        error_by_horizon.append(
+            {
+                "minutes_out": 120,
+                "mean_error": round(float(subset_errors.mean()), 2),
+                "mae": round(float(np.abs(subset_errors).mean()), 2),
+                "n": int(len(subset_errors)),
+            }
+        )
+
+    results["error_by_horizon"] = error_by_horizon
     results["n_test_samples"] = int(len(test_df))
     return results
 
@@ -144,18 +155,19 @@ if __name__ == "__main__":
     if results:
         print("\n=== Delay Prediction Evaluation ===")
         print(f"Test samples: {results['n_test_samples']}")
-        print(f"Overall RMSE: {results['overall_rmse']} min")
-        print(f"Overall MAE: {results['overall_mae']} min")
+        print(f"Mean Error (bias): {results['overall_mean_error']} min")
+        print(f"MAE: {results['overall_mae']} min")
         print(f"70% Interval Coverage: {results['coverage_70pct']}%")
 
-        if "baseline_rmse" in results:
-            print(f"\nBaseline RMSE (flat delay): {results['baseline_rmse']} min")
+        if "baseline_mae" in results:
+            print(f"\nBaseline MAE (flat delay): {results['baseline_mae']} min")
             print(f"Improvement over baseline: {results['improvement_pct']}%")
 
-        print("\nRMSE by time horizon:")
-        for label, metrics in results.get("by_horizon", {}).items():
+        print("\nMean error by time-to-departure (2min bins):")
+        print(f"  {'Min out':>8}  {'Bias':>8}  {'MAE':>8}  {'N':>6}")
+        for row in results.get("error_by_horizon", []):
             print(
-                f"  {label}: RMSE={metrics['rmse']}, MAE={metrics['mae']}, n={metrics['n_samples']}"
+                f"  {row['minutes_out']:>6}m  {row['mean_error']:>+8.2f}  {row['mae']:>8.2f}  {row['n']:>6}"
             )
     else:
         print("Evaluation could not be run. Ensure model is trained and data exists.")

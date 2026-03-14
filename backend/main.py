@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -117,6 +117,12 @@ app = FastAPI(lifespan=lifespan)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+
+
+@app.get("/sw.js")
+async def service_worker():
+    """Serve service worker from root scope for full app control"""
+    return FileResponse("static/sw.js", media_type="application/javascript")
 
 
 @app.get("/", response_class=HTMLResponse)

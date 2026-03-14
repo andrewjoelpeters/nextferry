@@ -10,10 +10,14 @@ from pathlib import Path
 from typing import Any, Dict, List
 from zoneinfo import ZoneInfo
 
+from .database import extract_sailing_events, insert_vessel_snapshots_batch
 from .serializers import FlatSailingSpace, SailingSpace, Vessel
 from .wsdot_client import get_sailing_space, get_vessel_positions
 
 logger = logging.getLogger(__name__)
+
+# Set to False to disable legacy JSONL writing
+WRITE_JSONL = os.getenv("WRITE_JSONL", "true").lower() == "true"
 
 
 def get_data_directory() -> Path:
@@ -78,6 +82,37 @@ def next_two_departures_per_route(
     return result
 
 
+def store_vessels_to_db(vessels: List[Vessel]):
+    """Insert vessel positions into SQLite for historical accumulation."""
+    collected_at = datetime.now(ZoneInfo("America/Los_Angeles")).isoformat()
+    batch = []
+    for v in vessels:
+        route_abbrev = v.route_name[0] if v.route_name else None
+        batch.append(
+            (
+                collected_at,
+                v.vessel_id,
+                v.vessel_name,
+                route_abbrev,
+                v.departing_terminal_id,
+                v.departing_terminal_name,
+                v.arriving_terminal_id,
+                v.arriving_terminal_name,
+                v.latitude,
+                v.longitude,
+                v.speed,
+                v.heading,
+                int(v.in_service),
+                int(v.at_dock),
+                v.left_dock.isoformat() if v.left_dock else None,
+                v.eta.isoformat() if v.eta else None,
+                v.scheduled_departure.isoformat() if v.scheduled_departure else None,
+                v.vessel_position_num,
+            )
+        )
+    insert_vessel_snapshots_batch(batch)
+
+
 async def collect_data():
     """Background task to collect WSDOT data every X minutes and write to volume"""
     data_dir = get_data_directory()
@@ -89,7 +124,14 @@ async def collect_data():
 
             logger.info("Fetching vessel positions")
             vessels = get_vessel_positions()
-            save_data_to_jsonl("vessels", vessels, data_dir)
+
+            # Store to SQLite for ML training
+            store_vessels_to_db(vessels)
+            extract_sailing_events()
+
+            # Optionally keep JSONL writing
+            if WRITE_JSONL:
+                save_data_to_jsonl("vessels", vessels, data_dir)
 
             # get sailing space data
             logger.info("Fetching sailing space data")
@@ -100,7 +142,8 @@ async def collect_data():
                 for flat in flatten_sailing_space(space)
             ]
             filtered = next_two_departures_per_route(flattened)
-            save_data_to_jsonl("sailing_space", filtered, data_dir)
+            if WRITE_JSONL:
+                save_data_to_jsonl("sailing_space", filtered, data_dir)
 
         except Exception as e:
             logger.error(f"Data collection failed: {e}")

@@ -4,7 +4,7 @@ import os
 import tempfile
 import zipfile
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo
@@ -15,7 +15,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .data_collector import collect_data
+from .database import get_sailing_event_count, get_snapshot_count, init_db
 from .display_processing import process_routes_for_display
+from .ml_predictor import predictor as ml_predictor
 from .next_sailings import CACHED_DELAYS, get_next_sailings
 from .wsdot_client import get_vessel_positions
 
@@ -50,8 +52,49 @@ async def update_sailings_cache():
         await asyncio.sleep(30)
 
 
+async def retrain_model_daily():
+    """Background task to retrain the ML model daily at 2 AM Pacific."""
+    # On startup, try to load saved model
+    logger.info("Attempting to load saved ML model...")
+    ml_predictor.load()
+
+    while True:
+        try:
+            now = datetime.now(tz=ZoneInfo("America/Los_Angeles"))
+            # Calculate seconds until next 2 AM
+            next_2am = now.replace(hour=2, minute=0, second=0, microsecond=0)
+            if now.hour >= 2:
+                next_2am += timedelta(days=1)
+            wait_seconds = (next_2am - now).total_seconds()
+
+            logger.info(
+                f"Next model retrain scheduled in {wait_seconds / 3600:.1f} hours"
+            )
+            await asyncio.sleep(wait_seconds)
+
+            logger.info("Starting daily model retraining...")
+            success = ml_predictor.train()
+            if success:
+                ml_predictor.save()
+                logger.info(
+                    f"Model retrained on {ml_predictor.training_data_size} rows"
+                )
+            else:
+                logger.info("Model retraining skipped (insufficient data)")
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Model retraining failed: {e}")
+            await asyncio.sleep(3600)  # retry in 1 hour on error
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialize database
+    logger.info("Initializing database")
+    init_db()
+
     # Start background task on startup
     logger.info("Starting sailings cache background task")
     sailings_cache_task = asyncio.create_task(update_sailings_cache())
@@ -59,11 +102,14 @@ async def lifespan(app: FastAPI):
     logger.info("Starting data collector backround tasks")
     collector_task = asyncio.create_task(collect_data())
 
+    logger.info("Starting ML model retraining task")
+    retrain_task = asyncio.create_task(retrain_model_daily())
+
     yield
 
     # Clean shutdown
     logger.info("Shutting down background tasks")
-    for task in [sailings_cache_task, collector_task]:
+    for task in [sailings_cache_task, collector_task, retrain_task]:
         task.cancel()
         try:
             await task
@@ -158,82 +204,99 @@ async def debug_cache_status():
     }
 
 
+@app.get("/debug/model-status")
+async def debug_model_status():
+    """Debug endpoint showing ML model status and evaluation metrics."""
+    return {
+        "is_trained": ml_predictor.is_trained,
+        "last_trained": (
+            ml_predictor.last_trained.isoformat() if ml_predictor.last_trained else None
+        ),
+        "training_data_size": ml_predictor.training_data_size,
+        "evaluation_metrics": ml_predictor.last_evaluation,
+        "database": {
+            "snapshot_count": get_snapshot_count(),
+            "sailing_event_count": get_sailing_event_count(),
+        },
+    }
+
+
 # --- DATA DOWNLOAD ENDPOINTS ---
 
 
-# @app.get("/data/download/latest")
-# async def download_latest_vessel_data(
-#     file_type: str = Query(
-#         description="Filter by file type: 'vessels' or 'sailing_space'"
-#     ),
-# ):
-#     """Download the most recent data file (vessels or sailing space)"""
-#     volume_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "./data")
-#     data_dir = Path(volume_path)
+@app.get("/data/download/latest")
+async def download_latest_vessel_data(
+    file_type: str = Query(
+        description="Filter by file type: 'vessels' or 'sailing_space'"
+    ),
+):
+    """Download the most recent data file (vessels or sailing space)"""
+    volume_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "./data")
+    data_dir = Path(volume_path)
 
-#     if not data_dir.exists():
-#         raise HTTPException(status_code=404, detail="Data directory not found")
+    if not data_dir.exists():
+        raise HTTPException(status_code=404, detail="Data directory not found")
 
-#     # Find files with either vessels_ or sailing_space_ prefix
-#     if file_type == "vessels":
-#         data_files = list(data_dir.glob("vessels_*.jsonl"))
-#     elif file_type == "sailing_space":
-#         data_files = list(data_dir.glob("sailing_space_*.jsonl"))
-#     else:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="Invalid file_type. Must be 'vessels' or 'sailing_space'",
-#         )
+    # Find files with either vessels_ or sailing_space_ prefix
+    if file_type == "vessels":
+        data_files = list(data_dir.glob("vessels_*.jsonl"))
+    elif file_type == "sailing_space":
+        data_files = list(data_dir.glob("sailing_space_*.jsonl"))
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file_type. Must be 'vessels' or 'sailing_space'",
+        )
 
-#     if not data_files:
-#         file_type_msg = f" {file_type}" if file_type else ""
-#         raise HTTPException(
-#             status_code=404, detail=f"No{file_type_msg} data files found"
-#         )
+    if not data_files:
+        file_type_msg = f" {file_type}" if file_type else ""
+        raise HTTPException(
+            status_code=404, detail=f"No{file_type_msg} data files found"
+        )
 
-#     # Get the most recent file
-#     latest_file = max(data_files, key=lambda f: f.stat().st_mtime)
+    # Get the most recent file
+    latest_file = max(data_files, key=lambda f: f.stat().st_mtime)
 
-#     # Determine appropriate media type based on file extension
-#     media_type = (
-#         "application/jsonl" if latest_file.suffix == ".jsonl" else "application/json"
-#     )
+    # Determine appropriate media type based on file extension
+    media_type = (
+        "application/jsonl" if latest_file.suffix == ".jsonl" else "application/json"
+    )
 
-#     return FileResponse(
-#         path=str(latest_file), filename=latest_file.name, media_type=media_type
-#     )
+    return FileResponse(
+        path=str(latest_file), filename=latest_file.name, media_type=media_type
+    )
 
 
-# @app.get("/data/download/all")
-# async def download_all_vessel_data():
-#     """Download all vessel data files as a ZIP archive"""
-#     volume_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "./data")
-#     data_dir = Path(volume_path)
+@app.get("/data/download/all")
+async def download_all_vessel_data():
+    """Download all vessel data files as a ZIP archive"""
+    volume_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "./data")
+    data_dir = Path(volume_path)
 
-#     if not data_dir.exists():
-#         raise HTTPException(status_code=404, detail="Data directory not found")
+    if not data_dir.exists():
+        raise HTTPException(status_code=404, detail="Data directory not found")
 
-#     json_files = list(data_dir.glob("vessels_*.json"))
-#     if not json_files:
-#         raise HTTPException(status_code=404, detail="No vessel data files found")
+    jsonl_files = list(data_dir.glob("vessels_*.jsonl"))
+    if not jsonl_files:
+        raise HTTPException(status_code=404, detail="No vessel data files found")
 
-#     # Create ZIP file in memory
-#     with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as temp_zip:
-#         with zipfile.ZipFile(temp_zip.name, "w", zipfile.ZIP_DEFLATED) as zipf:
-#             for file_path in json_files:
-#                 zipf.write(file_path, file_path.name)
+    # Create ZIP file in memory
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as temp_zip:
+        with zipfile.ZipFile(temp_zip.name, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for file_path in jsonl_files:
+                zipf.write(file_path, file_path.name)
 
-#         # Return the ZIP file
-#         def iterfile():
-#             with open(temp_zip.name, "rb") as f:
-#                 yield from f
-#             os.unlink(temp_zip.name)  # Clean up temp file
+        # Return the ZIP file
+        def iterfile():
+            with open(temp_zip.name, "rb") as f:
+                yield from f
+            os.unlink(temp_zip.name)  # Clean up temp file
 
-#         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-#         return StreamingResponse(
-#             iterfile(),
-#             media_type="application/zip",
-#             headers={
-#                 "Content-Disposition": f"attachment; filename=vessel_data_{timestamp}.zip"
-#             },
-#         )
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return StreamingResponse(
+            iterfile(),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f"attachment; filename=vessel_data_{timestamp}.zip"
+            },
+        )

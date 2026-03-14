@@ -16,6 +16,9 @@
                             <div class="scheduled-time">Scheduled: {{ sailing.scheduled_time }}</div>
                             {% if sailing.has_delay %}
                             <div class="estimated-time">Estimated: {{ sailing.estimated_departure }} {{ sailing.delay_text }}</div>
+                            {% if sailing.confidence_text %}
+                            <div class="confidence-range">{{ sailing.confidence_text }}</div>
+                            {% endif %}
                             {% endif %}
                         </div>
                         {% if sailing.vessel_name %}

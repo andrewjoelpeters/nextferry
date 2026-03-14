@@ -74,12 +74,30 @@ def init_db():
                 UNIQUE(vessel_id, scheduled_departure)
             );
 
+            CREATE TABLE IF NOT EXISTS sailing_space_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collected_at TEXT NOT NULL,
+                departing_terminal_id INTEGER NOT NULL,
+                departing_terminal_name TEXT NOT NULL,
+                departure_time TEXT NOT NULL,
+                vessel_name TEXT NOT NULL,
+                vessel_id INTEGER NOT NULL,
+                arriving_terminal_id INTEGER NOT NULL,
+                arriving_terminal_name TEXT NOT NULL,
+                max_space_count INTEGER NOT NULL,
+                drive_up_space_count INTEGER NOT NULL,
+                reservable_space_count INTEGER,
+                UNIQUE(collected_at, departing_terminal_id, arriving_terminal_id, departure_time)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_snapshots_vessel_time
                 ON vessel_snapshots(vessel_id, collected_at);
             CREATE INDEX IF NOT EXISTS idx_sailing_events_scheduled
                 ON sailing_events(scheduled_departure);
             CREATE INDEX IF NOT EXISTS idx_sailing_events_route
                 ON sailing_events(route_abbrev);
+            CREATE INDEX IF NOT EXISTS idx_sailing_space_time
+                ON sailing_space_snapshots(collected_at);
             """
         )
         conn.commit()
@@ -167,6 +185,27 @@ def insert_vessel_snapshots_batch(snapshots: list):
         )
         conn.commit()
         logger.info(f"Inserted {conn.total_changes} vessel snapshots")
+    finally:
+        conn.close()
+
+
+def insert_sailing_space_batch(rows: list):
+    """Insert multiple sailing space snapshots in one transaction."""
+    conn = get_connection()
+    try:
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO sailing_space_snapshots (
+                collected_at, departing_terminal_id, departing_terminal_name,
+                departure_time, vessel_name, vessel_id,
+                arriving_terminal_id, arriving_terminal_name,
+                max_space_count, drive_up_space_count, reservable_space_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        conn.commit()
+        logger.info(f"Inserted {conn.total_changes} sailing space snapshots")
     finally:
         conn.close()
 

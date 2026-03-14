@@ -60,3 +60,23 @@ def format_delay_text(delay_minutes: int) -> tuple[str, str]:
 def datetime_to_minutes(dt: timedelta) -> int:
     # get the floor of the total minutes,
     return int(dt.total_seconds() // 60)
+
+
+def format_confidence_text(
+    lower_bound: Optional[int], upper_bound: Optional[int]
+) -> str:
+    """Format the confidence interval as display text, e.g. '(+1 to +5m)'."""
+    if lower_bound is None or upper_bound is None:
+        return ""
+    if lower_bound == 0 and upper_bound == 0:
+        return ""
+
+    def fmt(val):
+        return f"+{val}" if val >= 0 else str(val)
+
+    return f"({fmt(lower_bound)} to {fmt(upper_bound)}m)"
+
+
+def is_peak_hour(hour: int) -> bool:
+    """Return True if the hour falls in commuter peak windows."""
+    return (6 <= hour <= 9) or (15 <= hour <= 19)

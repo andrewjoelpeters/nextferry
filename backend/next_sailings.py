@@ -11,6 +11,11 @@ from .serializers import (DirectionalSailing, DirectionalSchedule,
 from .utils import datetime_to_minutes
 from .wsdot_client import get_schedule_today, get_vessel_positions
 
+try:
+    from .ml_predictor import predictor as ml_predictor
+except ImportError:
+    ml_predictor = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -84,12 +89,46 @@ def get_route_schedule_by_boat(
 def propigate_delays(
     delay: Optional[datetime], sailings: List[DirectionalSailing]
 ) -> List[DirectionalSailing]:
-    if not delay:
+    """Apply delays to sailings, using ML predictions if available, else flat propagation."""
+    if not delay and not (ml_predictor and ml_predictor.is_trained):
         return sailings
-    else:
-        for sailing in sailings:
-            sailing.delay_in_minutes = datetime_to_minutes(delay)
-        return sailings
+
+    delay_minutes = datetime_to_minutes(delay) if delay else 0
+    now = datetime.now(tz=ZoneInfo("America/Los_Angeles"))
+
+    for sailing in sailings:
+        if ml_predictor and ml_predictor.is_trained and sailing.scheduled_departure:
+            # Compute minutes until departure
+            time_diff = sailing.scheduled_departure - now
+            minutes_until = max(0, time_diff.total_seconds() / 60)
+
+            route_abbrev = None
+            # Get route from config by terminal IDs
+            for route in ROUTES:
+                if sailing.departing_terminal_id in route["terminals"]:
+                    route_abbrev = route["route_name"]
+                    break
+
+            if route_abbrev:
+                prediction = ml_predictor.predict(
+                    route_abbrev=route_abbrev,
+                    departing_terminal_id=sailing.departing_terminal_id,
+                    day_of_week=sailing.scheduled_departure.weekday(),
+                    hour_of_day=sailing.scheduled_departure.hour,
+                    minutes_until_scheduled_departure=minutes_until,
+                    current_vessel_delay_minutes=delay_minutes,
+                )
+                if prediction:
+                    sailing.delay_in_minutes = round(prediction["predicted_delay"])
+                    sailing.delay_lower_bound = round(prediction["lower_bound"])
+                    sailing.delay_upper_bound = round(prediction["upper_bound"])
+                    continue
+
+        # Fallback: flat propagation
+        if delay:
+            sailing.delay_in_minutes = delay_minutes
+
+    return sailings
 
 
 def get_next_sailings_by_boat(

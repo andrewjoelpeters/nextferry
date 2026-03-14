@@ -4,7 +4,7 @@ import os
 import tempfile
 import zipfile
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo
@@ -15,7 +15,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .data_collector import collect_data
+from .database import get_sailing_event_count, get_snapshot_count, init_db
 from .display_processing import process_routes_for_display
+from .ml_predictor import predictor as ml_predictor
 from .next_sailings import CACHED_DELAYS, get_next_sailings
 from .wsdot_client import get_vessel_positions
 
@@ -50,8 +52,49 @@ async def update_sailings_cache():
         await asyncio.sleep(30)
 
 
+async def retrain_model_daily():
+    """Background task to retrain the ML model daily at 2 AM Pacific."""
+    # On startup, try to load saved model
+    logger.info("Attempting to load saved ML model...")
+    ml_predictor.load()
+
+    while True:
+        try:
+            now = datetime.now(tz=ZoneInfo("America/Los_Angeles"))
+            # Calculate seconds until next 2 AM
+            next_2am = now.replace(hour=2, minute=0, second=0, microsecond=0)
+            if now.hour >= 2:
+                next_2am += timedelta(days=1)
+            wait_seconds = (next_2am - now).total_seconds()
+
+            logger.info(
+                f"Next model retrain scheduled in {wait_seconds / 3600:.1f} hours"
+            )
+            await asyncio.sleep(wait_seconds)
+
+            logger.info("Starting daily model retraining...")
+            success = ml_predictor.train()
+            if success:
+                ml_predictor.save()
+                logger.info(
+                    f"Model retrained on {ml_predictor.training_data_size} rows"
+                )
+            else:
+                logger.info("Model retraining skipped (insufficient data)")
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Model retraining failed: {e}")
+            await asyncio.sleep(3600)  # retry in 1 hour on error
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialize database
+    logger.info("Initializing database")
+    init_db()
+
     # Start background task on startup
     logger.info("Starting sailings cache background task")
     sailings_cache_task = asyncio.create_task(update_sailings_cache())
@@ -59,11 +102,14 @@ async def lifespan(app: FastAPI):
     logger.info("Starting data collector backround tasks")
     collector_task = asyncio.create_task(collect_data())
 
+    logger.info("Starting ML model retraining task")
+    retrain_task = asyncio.create_task(retrain_model_daily())
+
     yield
 
     # Clean shutdown
     logger.info("Shutting down background tasks")
-    for task in [sailings_cache_task, collector_task]:
+    for task in [sailings_cache_task, collector_task, retrain_task]:
         task.cancel()
         try:
             await task
@@ -155,6 +201,23 @@ async def debug_cache_status():
         "cache_age_seconds": cache_age_seconds,
         "routes_count": len(_sailings_cache["routes"]),
         "cached_delays": CACHED_DELAYS,
+    }
+
+
+@app.get("/debug/model-status")
+async def debug_model_status():
+    """Debug endpoint showing ML model status and evaluation metrics."""
+    return {
+        "is_trained": ml_predictor.is_trained,
+        "last_trained": (
+            ml_predictor.last_trained.isoformat() if ml_predictor.last_trained else None
+        ),
+        "training_data_size": ml_predictor.training_data_size,
+        "evaluation_metrics": ml_predictor.last_evaluation,
+        "database": {
+            "snapshot_count": get_snapshot_count(),
+            "sailing_event_count": get_sailing_event_count(),
+        },
     }
 
 

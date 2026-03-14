@@ -203,10 +203,10 @@ header h1 {
 }
 
 .confidence-range {
-    font-size: var(--text-xs);
+    font-size: 0.65rem;
     color: var(--deck-gray);
+    font-weight: 400;
     font-style: italic;
-    line-height: 1.2;
 }
 
 .vessel-name {

@@ -44,7 +44,7 @@ def evaluate_predictions(test_df: pd.DataFrame) -> dict:
     within_bounds = (test_df["actual_delay_minutes"] >= test_df["lower_bound"]) & (
         test_df["actual_delay_minutes"] <= test_df["upper_bound"]
     )
-    results["coverage_90pct"] = round(float(within_bounds.mean() * 100), 1)
+    results["coverage_70pct"] = round(float(within_bounds.mean() * 100), 1)
 
     # RMSE by time horizon
     horizon_results = {}
@@ -128,8 +128,8 @@ def run_full_evaluation() -> Optional[dict]:
 
     X_arr = X_test.values
     test_df["predicted_delay"] = evaluator.model_q50.predict(X_arr)
-    test_df["lower_bound"] = evaluator.model_q05.predict(X_arr)
-    test_df["upper_bound"] = evaluator.model_q95.predict(X_arr)
+    test_df["lower_bound"] = evaluator.model_q15.predict(X_arr)
+    test_df["upper_bound"] = evaluator.model_q85.predict(X_arr)
 
     return evaluate_predictions(test_df)
 
@@ -146,7 +146,7 @@ if __name__ == "__main__":
         print(f"Test samples: {results['n_test_samples']}")
         print(f"Overall RMSE: {results['overall_rmse']} min")
         print(f"Overall MAE: {results['overall_mae']} min")
-        print(f"90% Interval Coverage: {results['coverage_90pct']}%")
+        print(f"70% Interval Coverage: {results['coverage_70pct']}%")
 
         if "baseline_rmse" in results:
             print(f"\nBaseline RMSE (flat delay): {results['baseline_rmse']} min")

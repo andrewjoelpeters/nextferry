@@ -52,8 +52,8 @@ def is_peak_hour(hour: int) -> bool:
 class DelayPredictor:
     def __init__(self):
         self.model_q50 = None
-        self.model_q05 = None
-        self.model_q95 = None
+        self.model_q15 = None
+        self.model_q85 = None
         self.is_trained: bool = False
         self.last_trained: Optional[datetime] = None
         self.last_evaluation: Optional[dict] = None
@@ -208,8 +208,8 @@ class DelayPredictor:
 
         logger.info(f"Training on {len(X_train)} rows, testing on {len(X_test)} rows")
 
-        # Train three quantile models
-        quantiles = {"q50": 0.50, "q05": 0.05, "q95": 0.95}
+        # Train three quantile models (70% prediction interval)
+        quantiles = {"q50": 0.50, "q15": 0.15, "q85": 0.85}
         models = {}
 
         for name, quantile in quantiles.items():
@@ -227,8 +227,8 @@ class DelayPredictor:
             logger.info(f"Trained {name} model (quantile={quantile})")
 
         self.model_q50 = models["q50"]
-        self.model_q05 = models["q05"]
-        self.model_q95 = models["q95"]
+        self.model_q15 = models["q15"]
+        self.model_q85 = models["q85"]
         self.is_trained = True
         self.last_trained = datetime.now()
         self.training_data_size = len(df)
@@ -239,8 +239,8 @@ class DelayPredictor:
 
             test_df = df[test_mask].copy()
             test_df["predicted_delay"] = self.model_q50.predict(X_test)
-            test_df["lower_bound"] = self.model_q05.predict(X_test)
-            test_df["upper_bound"] = self.model_q95.predict(X_test)
+            test_df["lower_bound"] = self.model_q15.predict(X_test)
+            test_df["upper_bound"] = self.model_q85.predict(X_test)
             self.last_evaluation = evaluate_predictions(test_df)
             logger.info(f"Evaluation: {self.last_evaluation}")
 
@@ -282,8 +282,8 @@ class DelayPredictor:
         )
 
         predicted = self.model_q50.predict(features)[0]
-        lower = self.model_q05.predict(features)[0]
-        upper = self.model_q95.predict(features)[0]
+        lower = self.model_q15.predict(features)[0]
+        upper = self.model_q85.predict(features)[0]
 
         return {
             "predicted_delay": round(predicted, 1),
@@ -297,8 +297,8 @@ class DelayPredictor:
         model_dir.mkdir(parents=True, exist_ok=True)
 
         joblib.dump(self.model_q50, model_dir / "delay_model_q50.joblib")
-        joblib.dump(self.model_q05, model_dir / "delay_model_q05.joblib")
-        joblib.dump(self.model_q95, model_dir / "delay_model_q95.joblib")
+        joblib.dump(self.model_q15, model_dir / "delay_model_q15.joblib")
+        joblib.dump(self.model_q85, model_dir / "delay_model_q85.joblib")
         joblib.dump(
             {
                 "route_mapping": self._route_mapping,
@@ -315,8 +315,8 @@ class DelayPredictor:
         """Attempt to load models from a specific directory."""
         required_files = [
             "delay_model_q50.joblib",
-            "delay_model_q05.joblib",
-            "delay_model_q95.joblib",
+            "delay_model_q15.joblib",
+            "delay_model_q85.joblib",
             "delay_model_meta.joblib",
         ]
 
@@ -325,8 +325,8 @@ class DelayPredictor:
 
         try:
             self.model_q50 = joblib.load(model_dir / "delay_model_q50.joblib")
-            self.model_q05 = joblib.load(model_dir / "delay_model_q05.joblib")
-            self.model_q95 = joblib.load(model_dir / "delay_model_q95.joblib")
+            self.model_q15 = joblib.load(model_dir / "delay_model_q15.joblib")
+            self.model_q85 = joblib.load(model_dir / "delay_model_q85.joblib")
             meta = joblib.load(model_dir / "delay_model_meta.joblib")
             self._route_mapping = meta["route_mapping"]
             self._terminal_mapping = meta["terminal_mapping"]

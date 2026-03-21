@@ -52,25 +52,26 @@ body {
     padding-bottom: 80px; /* space for bottom nav */
 }
 
-/* Header (hidden after scroll) */
+/* Header - hidden on mobile to save screen space */
 header {
-    position: fixed;
-    top: var(--sm);
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(255, 255, 255, 0.92);
-    backdrop-filter: blur(10px);
-    border-radius: 12px;
-    padding: var(--sm) var(--lg);
-    box-shadow: var(--shadow-floating);
-    z-index: 100;
-    transition: opacity 0.3s ease;
-    max-width: 320px;
+    display: none;
 }
 
-header.hidden {
-    opacity: 0;
-    pointer-events: none;
+@media (min-width: 768px) {
+    header {
+        display: block;
+        position: fixed;
+        top: var(--sm);
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(10px);
+        border-radius: 12px;
+        padding: var(--sm) var(--lg);
+        box-shadow: var(--shadow-floating);
+        z-index: 100;
+        max-width: 320px;
+    }
 }
 
 header h1 {
@@ -114,9 +115,15 @@ header h1 {
 
 /* Main container */
 .next-sailings-container {
-    padding: calc(60px + var(--xl)) var(--lg) calc(80px + var(--xl));
+    padding: var(--xl) var(--lg) calc(80px + var(--xl));
     max-width: 1200px;
     margin: 0 auto;
+}
+
+@media (min-width: 768px) {
+    .next-sailings-container {
+        padding-top: calc(60px + var(--xl));
+    }
 }
 
 /* Route section */
@@ -401,9 +408,15 @@ header h1 {
 /* ===== Predictions Dashboard ===== */
 
 .dashboard-container {
-    padding: calc(60px + var(--xl)) var(--lg) calc(80px + var(--xl));
+    padding: var(--xl) var(--lg) calc(80px + var(--xl));
     max-width: 1200px;
     margin: 0 auto;
+}
+
+@media (min-width: 768px) {
+    .dashboard-container {
+        padding-top: calc(60px + var(--xl));
+    }
 }
 
 .dashboard-grid {

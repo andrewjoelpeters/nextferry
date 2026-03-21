@@ -1,8 +1,21 @@
+import logging
 from datetime import timedelta
 from typing import List
 
+from .config import ROUTES
+from .fill_predictor import fill_predictor
 from .serializers import RouteSchedule
 from .utils import format_confidence_text, format_delay_text, format_time_until
+
+logger = logging.getLogger(__name__)
+
+
+def _get_route_abbrev(departing_terminal_id: int) -> str:
+    """Look up route abbreviation from departing terminal ID."""
+    for route in ROUTES:
+        if departing_terminal_id in route["terminals"]:
+            return route["route_name"]
+    return "unknown"
 
 
 def process_routes_for_display(routes_data: List[RouteSchedule]):
@@ -38,6 +51,21 @@ def process_routes_for_display(routes_data: List[RouteSchedule]):
                     sailing.delay_lower_bound, sailing.delay_upper_bound
                 )
 
+                # Fill risk prediction
+                fill_risk = None
+                if fill_predictor.is_trained and sailing.scheduled_departure:
+                    try:
+                        fill_risk = fill_predictor.predict(
+                            route_abbrev=_get_route_abbrev(
+                                schedule.departing_terminal_id
+                            ),
+                            departing_terminal_id=schedule.departing_terminal_id,
+                            day_of_week=sailing.scheduled_departure.weekday(),
+                            hour_of_day=sailing.scheduled_departure.hour,
+                        )
+                    except Exception as e:
+                        logger.debug(f"Fill risk prediction failed: {e}")
+
                 processed_sailings.append(
                     {
                         "time_until": time_until,
@@ -57,6 +85,7 @@ def process_routes_for_display(routes_data: List[RouteSchedule]):
                         "status_class": final_status,
                         "has_delay": sailing.delay_in_minutes is not None
                         and sailing.delay_in_minutes != 0,
+                        "fill_risk": fill_risk,
                     }
                 )
 

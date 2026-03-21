@@ -18,9 +18,14 @@
                             <div class="estimated-time">Estimated: {{ sailing.estimated_departure }} {{ sailing.delay_text }}</div>
                             {% endif %}
                         </div>
-                        {% if sailing.vessel_name %}
-                        <div class="vessel-name">{{ sailing.vessel_name }}</div>
-                        {% endif %}
+                        <div class="sailing-meta">
+                            {% if sailing.vessel_name %}
+                            <span class="vessel-name">{{ sailing.vessel_name }}</span>
+                            {% endif %}
+                            {% if sailing.fill_risk %}
+                            <span class="fill-risk fill-risk-{{ sailing.fill_risk.risk_level }}">{{ sailing.fill_risk.label }}</span>
+                            {% endif %}
+                        </div>
                     </div>
                     {% endfor %}
                 {% else %}

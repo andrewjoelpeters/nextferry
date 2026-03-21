@@ -209,11 +209,42 @@ header h1 {
     font-style: italic;
 }
 
+.sailing-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+}
+
 .vessel-name {
     font-size: var(--text-xs);
     color: var(--deck-gray);
     text-transform: uppercase;
     letter-spacing: 0.05em;
+}
+
+/* Fill risk badges */
+.fill-risk {
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 8px;
+    white-space: nowrap;
+}
+
+.fill-risk-low {
+    color: var(--success-green);
+    background: rgba(16, 185, 129, 0.1);
+}
+
+.fill-risk-moderate {
+    color: var(--warning-orange);
+    background: rgba(245, 158, 11, 0.1);
+}
+
+.fill-risk-high {
+    color: var(--danger-red);
+    background: rgba(239, 68, 68, 0.1);
 }
 
 /* Status indicators: color bars only */

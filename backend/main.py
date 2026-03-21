@@ -15,6 +15,7 @@ from .database import get_dashboard_data, get_sailing_event_count, get_snapshot_
 from .display_processing import process_routes_for_display
 from .ml_predictor import predictor as ml_predictor
 from .next_sailings import CACHED_DELAYS, get_next_sailings
+from .sailing_space import get_sailing_space_lookup
 from .wsdot_client import get_vessel_positions
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,8 @@ async def update_sailings_cache():
         try:
             logger.info("Updating shared sailings cache")
             routes_data = get_next_sailings()
-            processed_routes = process_routes_for_display(routes_data)
+            space_lookup = get_sailing_space_lookup()
+            processed_routes = process_routes_for_display(routes_data, space_lookup)
 
             _sailings_cache = {
                 "routes": processed_routes,

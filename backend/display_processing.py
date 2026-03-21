@@ -1,11 +1,14 @@
 from datetime import timedelta
-from typing import List
+from typing import Dict, List, Optional, Tuple
 
 from .serializers import RouteSchedule
 from .utils import format_confidence_text, format_delay_text, format_time_until
 
 
-def process_routes_for_display(routes_data: List[RouteSchedule]):
+def process_routes_for_display(
+    routes_data: List[RouteSchedule],
+    space_lookup: Optional[Dict[Tuple[int, str], dict]] = None,
+):
     processed_routes = []
     for route in routes_data:
         processed_schedules = []
@@ -38,6 +41,25 @@ def process_routes_for_display(routes_data: List[RouteSchedule]):
                     sailing.delay_lower_bound, sailing.delay_upper_bound
                 )
 
+                # Look up drive-up capacity
+                capacity = None
+                if space_lookup and sailing.scheduled_departure:
+                    time_key = sailing.scheduled_departure.strftime("%Y-%m-%d %H:%M")
+                    space_info = space_lookup.get(
+                        (schedule.departing_terminal_id, time_key)
+                    )
+                    if space_info and space_info["max_space_count"] > 0:
+                        pct = int(
+                            space_info["drive_up_space_count"]
+                            / space_info["max_space_count"]
+                            * 100
+                        )
+                        capacity = {
+                            "spaces": space_info["drive_up_space_count"],
+                            "total": space_info["max_space_count"],
+                            "percent": pct,
+                        }
+
                 processed_sailings.append(
                     {
                         "time_until": time_until,
@@ -57,6 +79,7 @@ def process_routes_for_display(routes_data: List[RouteSchedule]):
                         "status_class": final_status,
                         "has_delay": sailing.delay_in_minutes is not None
                         and sailing.delay_in_minutes != 0,
+                        "capacity": capacity,
                     }
                 )
 

@@ -156,6 +156,7 @@ class RouteSailing(BaseModel):
     delay_upper_bound: Optional[int] = None
     vessel_name: str
     vessel_position_num: int
+    departed: bool = False
 
 
 class DirectionalSailing(RouteSailing):
@@ -174,6 +175,7 @@ class DirectionalSailing(RouteSailing):
                     "delay_upper_bound",
                     "vessel_name",
                     "vessel_position_num",
+                    "departed",
                 }
             )
         )

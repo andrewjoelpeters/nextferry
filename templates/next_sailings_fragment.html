@@ -10,14 +10,20 @@
                 
                 {% if schedule.sailings %}
                     {% for sailing in schedule.sailings %}
-                    <div class="sailing-item {{ sailing.status_class }}">
+                    <div class="sailing-item {{ sailing.status_class }}{% if sailing.departed %} sailing-departed{% endif %}">
                         <div class="time-until-prominent">{{ sailing.time_until }}</div>
+                        {% if sailing.departed %}
+                        <div class="departure-times">
+                            <div class="departed-info">Departed {{ sailing.scheduled_time }} · en route to {{ schedule.arriving_terminal_name }}</div>
+                        </div>
+                        {% else %}
                         <div class="departure-times">
                             <div class="scheduled-time">Scheduled: {{ sailing.scheduled_time }}</div>
                             {% if sailing.has_delay %}
                             <div class="estimated-time">Estimated: {{ sailing.estimated_departure }} {{ sailing.delay_text }}</div>
                             {% endif %}
                         </div>
+                        {% endif %}
                         {% if sailing.vessel_name %}
                         <div class="vessel-name">{{ sailing.vessel_name }}</div>
                         {% endif %}

@@ -1,9 +1,14 @@
 """ML delay predictor using HistGradientBoostingRegressor with quantile loss.
 
-Three models are trained on the same data:
-- q=0.50 (median point estimate)
-- q=0.05 (lower bound of 90% prediction interval)
-- q=0.95 (upper bound of 90% prediction interval)
+Delegates model training, encoding, and prediction to QuantileGBTModel
+(backend.model_training.backtest_model), which is the single source of truth
+for features, hyperparams, and categorical encoding.
+
+This module owns:
+- Data loading (build_training_data)
+- Save/load orchestration (volume → bundled fallback, legacy format support)
+- The predict() API surface consumed by the serving layer
+- The module-level singleton
 
 Usage:
     # Train from command line
@@ -19,7 +24,6 @@ from typing import Optional
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import HistGradientBoostingRegressor
 
 from .config import ROUTES
 from .database import (
@@ -27,6 +31,7 @@ from .database import (
     get_sailing_event_count,
     get_training_data,
 )
+from .model_training.backtest_model import QuantileGBTModel, is_peak_hour
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +41,10 @@ TIME_HORIZONS_MINUTES = list(range(2, 62, 2)) + [
     90,
     120,
 ]  # every 2min to 60, then 75/90/120
+
+# New single-file save name (v2 format)
+_MODEL_FILENAME = "delay_model_v2.joblib"
+_META_FILENAME = "delay_model_meta.joblib"
 
 
 def get_volume_model_dir() -> Path:
@@ -52,20 +61,27 @@ def get_bundled_model_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "models"
 
 
-def is_peak_hour(hour: int) -> bool:
-    """Return True if the hour falls in commuter peak windows."""
-    return (6 <= hour <= 9) or (15 <= hour <= 19)
-
-
 class DelayPredictor:
     def __init__(self):
-        self.model_q50 = None
-        self.model_q15 = None
-        self.model_q85 = None
+        self._model: Optional[QuantileGBTModel] = None
         self.is_trained: bool = False
         self.last_trained: Optional[datetime] = None
         self.last_evaluation: Optional[dict] = None
         self.training_data_size: int = 0
+
+    @property
+    def _route_mapping(self) -> dict:
+        """Backward-compatible access to route category mapping."""
+        if self._model is None:
+            return {}
+        return self._model._category_maps.get("route_abbrev", {})
+
+    @property
+    def _terminal_mapping(self) -> dict:
+        """Backward-compatible access to terminal category mapping."""
+        if self._model is None:
+            return {}
+        return self._model._category_maps.get("departing_terminal_id", {})
 
     def build_training_data(self) -> Optional[pd.DataFrame]:
         """Build training dataset from sailing events and vessel snapshots.
@@ -276,59 +292,12 @@ class DelayPredictor:
         return result
 
     def train(self) -> bool:
-        """Train the three quantile models. Returns True on success."""
+        """Train the model. Returns True on success."""
         df = self.build_training_data()
         if df is None:
             return False
 
-        feature_cols = [
-            "route_abbrev",
-            "departing_terminal_id",
-            "day_of_week",
-            "hour_of_day",
-            "minutes_until_scheduled_departure",
-            "current_vessel_delay_minutes",
-            "is_peak_hour",
-            "previous_sailing_fullness",
-            "turnaround_minutes",
-        ]
-        target_col = "actual_delay_minutes"
-
-        # Encode categoricals
-        categorical_features = [
-            0,
-            1,
-            2,
-        ]  # route_abbrev, departing_terminal_id, day_of_week
-
-        X = df[feature_cols].copy()
-        # Encode route_abbrev as category codes
-        X["route_abbrev"] = X["route_abbrev"].astype("category").cat.codes
-        X["departing_terminal_id"] = (
-            X["departing_terminal_id"].astype("category").cat.codes
-        )
-        X["day_of_week"] = X["day_of_week"].astype("category").cat.codes
-
-        # Store mappings for prediction time
-        self._route_mapping = dict(
-            zip(
-                df["route_abbrev"].astype("category").cat.categories,
-                range(len(df["route_abbrev"].astype("category").cat.categories)),
-            )
-        )
-        self._terminal_mapping = dict(
-            zip(
-                df["departing_terminal_id"].astype("category").cat.categories,
-                range(
-                    len(df["departing_terminal_id"].astype("category").cat.categories)
-                ),
-            )
-        )
-
-        y = df[target_col].values
-
-        # Chronological split: train on earlier data, test on later
-        # Use sailing_event_id to keep all horizons from same event together
+        # Chronological split for evaluation
         unique_events = df["sailing_event_id"].unique()
         split_idx = int(len(unique_events) * 0.8)
         train_events = set(unique_events[:split_idx])
@@ -337,46 +306,28 @@ class DelayPredictor:
         train_mask = df["sailing_event_id"].isin(train_events)
         test_mask = df["sailing_event_id"].isin(test_events)
 
-        X_train, y_train = X[train_mask].values, y[train_mask]
-        X_test, y_test = X[test_mask].values, y[test_mask]
+        train_df = df[train_mask]
+        test_df = df[test_mask].copy()
 
-        logger.info(f"Training on {len(X_train)} rows, testing on {len(X_test)} rows")
+        logger.info(f"Training on {len(train_df)} rows, testing on {len(test_df)} rows")
 
-        # Train three quantile models (70% prediction interval)
-        quantiles = {"q50": 0.50, "q15": 0.15, "q85": 0.85}
-        models = {}
+        # Evaluate on 80/20 split
+        eval_model = QuantileGBTModel()
+        eval_model.fit(train_df)
 
-        for name, quantile in quantiles.items():
-            model = HistGradientBoostingRegressor(
-                loss="quantile",
-                quantile=quantile,
-                max_iter=200,
-                max_depth=6,
-                learning_rate=0.1,
-                categorical_features=categorical_features,
-                random_state=42,
-            )
-            model.fit(X_train, y_train)
-            models[name] = model
-            logger.info(f"Trained {name} model (quantile={quantile})")
+        if len(test_df) > 0:
+            from .model_training.evaluation import evaluate_predictions
 
-        self.model_q50 = models["q50"]
-        self.model_q15 = models["q15"]
-        self.model_q85 = models["q85"]
+            test_df = eval_model.predict(test_df)
+            self.last_evaluation = evaluate_predictions(test_df)
+            logger.info(f"Evaluation: {self.last_evaluation}")
+
+        # Train production model on all data
+        self._model = QuantileGBTModel()
+        self._model.fit(df)
         self.is_trained = True
         self.last_trained = datetime.now()
         self.training_data_size = len(df)
-
-        # Evaluate on test set
-        if len(X_test) > 0:
-            from .model_training.evaluation import evaluate_predictions
-
-            test_df = df[test_mask].copy()
-            test_df["predicted_delay"] = self.model_q50.predict(X_test)
-            test_df["lower_bound"] = self.model_q15.predict(X_test)
-            test_df["upper_bound"] = self.model_q85.predict(X_test)
-            self.last_evaluation = evaluate_predictions(test_df)
-            logger.info(f"Evaluation: {self.last_evaluation}")
 
         return True
 
@@ -396,92 +347,94 @@ class DelayPredictor:
         Returns dict with predicted_delay, lower_bound, upper_bound (all in minutes),
         or None if model is not trained.
         """
-        if not self.is_trained:
+        if not self.is_trained or self._model is None:
             return None
 
-        route_code = self._route_mapping.get(route_abbrev, -1)
-        terminal_code = self._terminal_mapping.get(departing_terminal_id, -1)
-        dow_code = day_of_week  # Already 0-6
-
-        features = np.array(
-            [
-                [
-                    route_code,
-                    terminal_code,
-                    dow_code,
-                    hour_of_day,
-                    minutes_until_scheduled_departure,
-                    current_vessel_delay_minutes,
-                    int(is_peak_hour(hour_of_day)),
-                    previous_sailing_fullness if previous_sailing_fullness is not None else np.nan,
-                    turnaround_minutes if turnaround_minutes is not None else np.nan,
-                ]
-            ]
-        )
-
         try:
-            predicted = self.model_q50.predict(features)[0]
-            lower = self.model_q15.predict(features)[0]
-            upper = self.model_q85.predict(features)[0]
+            return self._model.predict_single(
+                route_abbrev=route_abbrev,
+                departing_terminal_id=departing_terminal_id,
+                day_of_week=day_of_week,
+                hour_of_day=hour_of_day,
+                minutes_until_scheduled_departure=minutes_until_scheduled_departure,
+                current_vessel_delay_minutes=current_vessel_delay_minutes,
+                previous_sailing_fullness=previous_sailing_fullness,
+                turnaround_minutes=turnaround_minutes,
+            )
         except ValueError as e:
             logger.error(f"Prediction failed (models may need retraining): {e}")
             return None
 
-        return {
-            "predicted_delay": round(predicted, 1),
-            "lower_bound": round(lower, 1),
-            "upper_bound": round(upper, 1),
-        }
-
     def save(self, path: Optional[Path] = None):
-        """Save models and metadata to disk."""
+        """Save model and metadata to disk."""
         model_dir = path or get_volume_model_dir()
         model_dir.mkdir(parents=True, exist_ok=True)
 
-        joblib.dump(self.model_q50, model_dir / "delay_model_q50.joblib")
-        joblib.dump(self.model_q15, model_dir / "delay_model_q15.joblib")
-        joblib.dump(self.model_q85, model_dir / "delay_model_q85.joblib")
+        self._model.save(model_dir / _MODEL_FILENAME)
         joblib.dump(
             {
-                "route_mapping": self._route_mapping,
-                "terminal_mapping": self._terminal_mapping,
                 "last_trained": self.last_trained,
                 "training_data_size": self.training_data_size,
                 "last_evaluation": self.last_evaluation,
             },
-            model_dir / "delay_model_meta.joblib",
+            model_dir / _META_FILENAME,
         )
         logger.info(f"Models saved to {model_dir}")
 
     def _load_from_dir(self, model_dir: Path) -> bool:
-        """Attempt to load models from a specific directory."""
+        """Attempt to load models from a directory (v2 format first, then legacy)."""
+        # Try v2 format: single model file + metadata
+        v2_path = model_dir / _MODEL_FILENAME
+        if v2_path.exists():
+            try:
+                self._model = QuantileGBTModel.load(v2_path)
+                meta = joblib.load(model_dir / _META_FILENAME)
+                self.last_trained = meta["last_trained"]
+                self.training_data_size = meta["training_data_size"]
+                self.last_evaluation = meta.get("last_evaluation")
+                self.is_trained = True
+                logger.info(
+                    f"Models loaded from {model_dir} (trained: {self.last_trained})"
+                )
+                return True
+            except Exception as e:
+                logger.error(f"Failed to load v2 models from {model_dir}: {e}")
+                return False
+
+        # Legacy format: 4 separate joblib files
+        return self._load_legacy(model_dir)
+
+    def _load_legacy(self, model_dir: Path) -> bool:
+        """Load from the legacy 4-file format for backward compatibility."""
         required_files = [
             "delay_model_q50.joblib",
             "delay_model_q15.joblib",
             "delay_model_q85.joblib",
             "delay_model_meta.joblib",
         ]
-
         if not all((model_dir / f).exists() for f in required_files):
             return False
 
         try:
-            self.model_q50 = joblib.load(model_dir / "delay_model_q50.joblib")
-            self.model_q15 = joblib.load(model_dir / "delay_model_q15.joblib")
-            self.model_q85 = joblib.load(model_dir / "delay_model_q85.joblib")
             meta = joblib.load(model_dir / "delay_model_meta.joblib")
-            self._route_mapping = meta["route_mapping"]
-            self._terminal_mapping = meta["terminal_mapping"]
+            self._model = QuantileGBTModel.from_legacy(
+                model_q50=joblib.load(model_dir / "delay_model_q50.joblib"),
+                model_q15=joblib.load(model_dir / "delay_model_q15.joblib"),
+                model_q85=joblib.load(model_dir / "delay_model_q85.joblib"),
+                route_mapping=meta["route_mapping"],
+                terminal_mapping=meta["terminal_mapping"],
+            )
             self.last_trained = meta["last_trained"]
             self.training_data_size = meta["training_data_size"]
             self.last_evaluation = meta.get("last_evaluation")
             self.is_trained = True
             logger.info(
-                f"Models loaded from {model_dir} (trained: {self.last_trained})"
+                f"Models loaded from {model_dir} [legacy format] "
+                f"(trained: {self.last_trained})"
             )
             return True
         except Exception as e:
-            logger.error(f"Failed to load models from {model_dir}: {e}")
+            logger.error(f"Failed to load legacy models from {model_dir}: {e}")
             return False
 
     def load(self, path: Optional[Path] = None) -> bool:

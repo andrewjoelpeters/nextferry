@@ -7,8 +7,10 @@ To swap models, features, or encodings: change this file (or write a new
 implementation). The harness never changes.
 """
 
-from typing import Protocol, runtime_checkable
+from pathlib import Path
+from typing import Optional, Protocol, runtime_checkable
 
+import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -29,6 +31,15 @@ class BacktestModel(Protocol):
 
     def fit(self, train_df: pd.DataFrame) -> None: ...
     def predict(self, test_df: pd.DataFrame) -> pd.DataFrame: ...
+
+
+# ---------------------------------------------------------------------------
+# Feature helpers
+# ---------------------------------------------------------------------------
+
+def is_peak_hour(hour: int) -> bool:
+    """Return True if the hour falls in commuter peak windows."""
+    return (6 <= hour <= 9) or (15 <= hour <= 19)
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +72,9 @@ TARGET_COL = "actual_delay_minutes"
 # Sentinel for categories seen at predict time but not during fit
 UNSEEN_CATEGORY_CODE = -1
 
+# Save format version for forward/backward compatibility
+_SAVE_VERSION = 2
+
 
 class QuantileGBTModel:
     """Default backtest model: three HistGradientBoostingRegressors (q15/q50/q85).
@@ -73,6 +87,10 @@ class QuantileGBTModel:
         self.params = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
         self.models: dict = {}
         self._category_maps: dict[str, dict] = {}
+
+    @property
+    def is_fitted(self) -> bool:
+        return bool(self.models)
 
     def _learn_categories(self, df: pd.DataFrame) -> None:
         """Learn category→code mappings from training data."""
@@ -116,3 +134,92 @@ class QuantileGBTModel:
         out["lower_bound"] = self.models["q15"].predict(X_test)
         out["upper_bound"] = self.models["q85"].predict(X_test)
         return out
+
+    def predict_single(
+        self,
+        route_abbrev: str,
+        departing_terminal_id: int,
+        day_of_week: int,
+        hour_of_day: int,
+        minutes_until_scheduled_departure: float,
+        current_vessel_delay_minutes: float,
+        previous_sailing_fullness: Optional[float] = None,
+        turnaround_minutes: Optional[float] = None,
+    ) -> Optional[dict]:
+        """Predict delay for a single sailing.
+
+        Returns dict with predicted_delay, lower_bound, upper_bound (minutes),
+        or None if the model is not fitted.
+        """
+        if not self.is_fitted:
+            return None
+
+        row = pd.DataFrame(
+            [
+                {
+                    "route_abbrev": route_abbrev,
+                    "departing_terminal_id": departing_terminal_id,
+                    "day_of_week": day_of_week,
+                    "hour_of_day": hour_of_day,
+                    "minutes_until_scheduled_departure": minutes_until_scheduled_departure,
+                    "current_vessel_delay_minutes": current_vessel_delay_minutes,
+                    "is_peak_hour": int(is_peak_hour(hour_of_day)),
+                    "previous_sailing_fullness": previous_sailing_fullness
+                    if previous_sailing_fullness is not None
+                    else np.nan,
+                    "turnaround_minutes": turnaround_minutes
+                    if turnaround_minutes is not None
+                    else np.nan,
+                }
+            ]
+        )
+
+        X = self._encode(row)
+        return {
+            "predicted_delay": round(float(self.models["q50"].predict(X)[0]), 1),
+            "lower_bound": round(float(self.models["q15"].predict(X)[0]), 1),
+            "upper_bound": round(float(self.models["q85"].predict(X)[0]), 1),
+        }
+
+    def save(self, path: Path) -> None:
+        """Save model state to a single joblib file."""
+        joblib.dump(
+            {
+                "version": _SAVE_VERSION,
+                "models": self.models,
+                "category_maps": self._category_maps,
+                "params": self.params,
+            },
+            path,
+        )
+
+    @classmethod
+    def load(cls, path: Path) -> Optional["QuantileGBTModel"]:
+        """Load model from a v2 joblib file. Returns None if file doesn't exist."""
+        if not path.exists():
+            return None
+        data = joblib.load(path)
+        instance = cls(hyperparams=data["params"])
+        instance.models = data["models"]
+        instance._category_maps = data["category_maps"]
+        return instance
+
+    @classmethod
+    def from_legacy(
+        cls,
+        model_q50,
+        model_q15,
+        model_q85,
+        route_mapping: dict,
+        terminal_mapping: dict,
+    ) -> "QuantileGBTModel":
+        """Reconstruct from the legacy 4-file save format."""
+        instance = cls()
+        instance.models = {"q50": model_q50, "q15": model_q15, "q85": model_q85}
+        instance._category_maps = {
+            "route_abbrev": route_mapping,
+            "departing_terminal_id": terminal_mapping,
+            # day_of_week was encoded via .cat.codes on ints 0-6 → identity
+            "day_of_week": {i: i for i in range(7)},
+        }
+        return instance

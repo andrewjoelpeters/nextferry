@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from .data_collector import collect_data
 from .database import get_dashboard_data, get_sailing_event_count, get_snapshot_count, init_db
 from .display_processing import process_routes_for_display
+from .fill_predictor import fill_predictor
 from .ml_predictor import predictor as ml_predictor
 from .next_sailings import CACHED_DELAYS, get_next_sailings, get_vessels_with_delays
 from .utils import datetime_to_minutes
@@ -50,27 +51,38 @@ async def update_sailings_cache():
 
 
 async def retrain_model_daily():
-    """Background task to load/train the ML model, then retrain daily at 2 AM Pacific."""
-    # On startup, try to load saved model (volume first, then bundled)
-    logger.info("Attempting to load saved ML model...")
-    loaded = ml_predictor.load()
+    """Background task to load/train ML models, then retrain daily at 2 AM Pacific."""
+    # On startup, try to load saved models (volume first, then bundled)
+    logger.info("Attempting to load saved ML models...")
+    ml_predictor.load()
+    fill_predictor.load()
 
-    # If no model found anywhere, try an immediate background train
-    if not loaded:
-        logger.info("No saved model found, attempting background train...")
+    # If no models found, try an immediate background train
+    if not ml_predictor.is_trained:
+        logger.info("No delay model found, attempting background train...")
         try:
-            success = ml_predictor.train()
-            if success:
+            if ml_predictor.train():
                 ml_predictor.save()
                 logger.info(
-                    f"Initial model trained on {ml_predictor.training_data_size} rows"
+                    f"Initial delay model trained on {ml_predictor.training_data_size} rows"
                 )
             else:
-                logger.info(
-                    "Initial training skipped (insufficient data), using heuristics"
-                )
+                logger.info("Delay model training skipped (insufficient data)")
         except Exception as e:
-            logger.error(f"Initial model training failed: {e}")
+            logger.error(f"Initial delay model training failed: {e}")
+
+    if not fill_predictor.is_trained:
+        logger.info("No fill risk model found, attempting background train...")
+        try:
+            if fill_predictor.train():
+                fill_predictor.save()
+                logger.info(
+                    f"Initial fill risk model trained on {fill_predictor.training_data_size} sailings"
+                )
+            else:
+                logger.info("Fill risk training skipped (insufficient data)")
+        except Exception as e:
+            logger.error(f"Initial fill risk training failed: {e}")
 
     while True:
         try:
@@ -87,14 +99,17 @@ async def retrain_model_daily():
             await asyncio.sleep(wait_seconds)
 
             logger.info("Starting daily model retraining...")
-            success = ml_predictor.train()
-            if success:
+            if ml_predictor.train():
                 ml_predictor.save()
                 logger.info(
-                    f"Model retrained on {ml_predictor.training_data_size} rows"
+                    f"Delay model retrained on {ml_predictor.training_data_size} rows"
                 )
-            else:
-                logger.info("Model retraining skipped (insufficient data)")
+
+            if fill_predictor.train():
+                fill_predictor.save()
+                logger.info(
+                    f"Fill risk model retrained on {fill_predictor.training_data_size} sailings"
+                )
 
         except asyncio.CancelledError:
             raise
@@ -270,12 +285,26 @@ async def debug_cache_status():
 async def debug_model_status():
     """Debug endpoint showing ML model status and evaluation metrics."""
     return {
-        "is_trained": ml_predictor.is_trained,
-        "last_trained": (
-            ml_predictor.last_trained.isoformat() if ml_predictor.last_trained else None
-        ),
-        "training_data_size": ml_predictor.training_data_size,
-        "evaluation_metrics": ml_predictor.last_evaluation,
+        "delay_model": {
+            "is_trained": ml_predictor.is_trained,
+            "last_trained": (
+                ml_predictor.last_trained.isoformat()
+                if ml_predictor.last_trained
+                else None
+            ),
+            "training_data_size": ml_predictor.training_data_size,
+            "evaluation_metrics": ml_predictor.last_evaluation,
+        },
+        "fill_risk_model": {
+            "is_trained": fill_predictor.is_trained,
+            "last_trained": (
+                fill_predictor.last_trained.isoformat()
+                if fill_predictor.last_trained
+                else None
+            ),
+            "training_data_size": fill_predictor.training_data_size,
+            "fill_rate": fill_predictor.fill_rate,
+        },
         "database": {
             "snapshot_count": get_snapshot_count(),
             "sailing_event_count": get_sailing_event_count(),

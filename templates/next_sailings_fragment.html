@@ -39,6 +39,9 @@
                                 {% endif %}
                             </div>
                             {% endif %}
+                            {% if sailing.fill_risk %}
+                            <span class="fill-risk fill-risk-{{ sailing.fill_risk.risk_level }}">{{ sailing.fill_risk.label }}</span>
+                            {% endif %}
                             {% if sailing.vessel_name and sailing.status_class != 'status-departed' %}
                             <button class="alert-btn"
                                     onclick="openAlertPicker(this)"

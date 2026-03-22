@@ -14,7 +14,8 @@ from .data_collector import collect_data
 from .database import get_dashboard_data, get_sailing_event_count, get_snapshot_count, init_db
 from .display_processing import process_routes_for_display
 from .ml_predictor import predictor as ml_predictor
-from .next_sailings import CACHED_DELAYS, get_next_sailings
+from .next_sailings import CACHED_DELAYS, get_next_sailings, get_vessels_with_delays
+from .utils import datetime_to_minutes
 from .wsdot_client import get_vessel_positions
 
 logger = logging.getLogger(__name__)
@@ -191,10 +192,26 @@ async def get_map_tab(request: Request):
 
 @app.get("/ferry-data")
 async def get_ferry_positions():
-    """Return ferry position data as JSON for the map"""
+    """Return enriched ferry position data as JSON for the map"""
     try:
-        ferry_data = get_vessel_positions()
-        return ferry_data
+        ferry_data = get_vessels_with_delays()
+        result = []
+        for v in ferry_data:
+            data = v.model_dump(by_alias=True)
+            # Add computed delay fields (not in WSDOT response)
+            if v.delay:
+                delay_minutes = datetime_to_minutes(v.delay)
+                data["DelayMinutes"] = delay_minutes
+                if v.scheduled_departure:
+                    predicted = v.scheduled_departure + timedelta(minutes=delay_minutes)
+                    data["PredictedDeparture"] = predicted.isoformat()
+                else:
+                    data["PredictedDeparture"] = None
+            else:
+                data["DelayMinutes"] = None
+                data["PredictedDeparture"] = None
+            result.append(data)
+        return result
     except Exception as e:
         return {"error": str(e)}
 

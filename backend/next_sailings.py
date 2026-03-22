@@ -180,6 +180,16 @@ def get_next_sailings_by_boat(
 
         v_id = current_vessel.vessel_id if current_vessel else None
         next_sailings = propigate_delays(current_vessel.delay, next_sailings, vessel_id=v_id)
+
+        # Annotate the first sailing with live vessel state
+        if next_sailings and current_vessel:
+            first = next_sailings[0]
+            first.vessel_at_dock = current_vessel.at_dock
+            first.vessel_left_dock = current_vessel.left_dock
+            first.vessel_eta = current_vessel.eta
+            if current_vessel.delay:
+                first.vessel_delay_minutes = datetime_to_minutes(current_vessel.delay)
+
         next_sailings_by_boat[vessel_position_num] = next_sailings
 
     return next_sailings_by_boat

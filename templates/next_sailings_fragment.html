@@ -26,6 +26,14 @@
                                 {% if sailing.has_delay %}
                                 <div class="estimated-time">Estimated: {{ sailing.estimated_departure }} {{ sailing.delay_text }}</div>
                                 {% endif %}
+                                {% if sailing.capacity %}
+                                <div class="capacity-info">
+                                    <div class="capacity-bar">
+                                        <div class="capacity-fill {% if sailing.capacity.percent > 50 %}capacity-ok{% elif sailing.capacity.percent > 20 %}capacity-low{% else %}capacity-full{% endif %}" style="width: {{ sailing.capacity.percent }}%"></div>
+                                    </div>
+                                    <span class="capacity-text">{{ sailing.capacity.spaces }} spaces</span>
+                                </div>
+                                {% endif %}
                             </div>
                             {% endif %}
                             {% if sailing.vessel_name %}

@@ -1,6 +1,6 @@
 import logging
 from datetime import timedelta
-from typing import List
+from typing import Dict, List, Optional, Tuple
 
 from .config import ROUTES
 from .fill_predictor import fill_predictor
@@ -54,7 +54,10 @@ def _format_vessel_status(sailing) -> dict:
         return result
 
 
-def process_routes_for_display(routes_data: List[RouteSchedule]):
+def process_routes_for_display(
+    routes_data: List[RouteSchedule],
+    space_lookup: Optional[Dict[Tuple[int, str], dict]] = None,
+):
     processed_routes = []
     for route in routes_data:
         processed_schedules = []
@@ -93,6 +96,25 @@ def process_routes_for_display(routes_data: List[RouteSchedule]):
                     sailing.delay_lower_bound, sailing.delay_upper_bound
                 )
 
+                # Look up drive-up capacity
+                capacity = None
+                if space_lookup and sailing.scheduled_departure:
+                    time_key = sailing.scheduled_departure.strftime("%Y-%m-%d %H:%M")
+                    space_info = space_lookup.get(
+                        (schedule.departing_terminal_id, time_key)
+                    )
+                    if space_info and space_info["max_space_count"] > 0:
+                        pct = int(
+                            space_info["drive_up_space_count"]
+                            / space_info["max_space_count"]
+                            * 100
+                        )
+                        capacity = {
+                            "spaces": space_info["drive_up_space_count"],
+                            "total": space_info["max_space_count"],
+                            "percent": pct,
+                        }
+
                 # Fill risk prediction
                 fill_risk = None
                 if fill_predictor.is_trained and sailing.scheduled_departure:
@@ -128,6 +150,7 @@ def process_routes_for_display(routes_data: List[RouteSchedule]):
                     "has_delay": sailing.delay_in_minutes is not None
                     and sailing.delay_in_minutes != 0,
                     "vessel_info": _format_vessel_status(sailing),
+                    "capacity": capacity,
                     "departing_terminal_name": schedule.departing_terminal_name,
                     "scheduled_departure_iso": (
                         sailing.scheduled_departure.isoformat()

@@ -466,6 +466,39 @@ header h1 {
     opacity: 0.6;
 }
 
+/* Drive-up capacity */
+.capacity-info {
+    display: flex;
+    align-items: center;
+    gap: var(--sm);
+    margin-top: 2px;
+}
+
+.capacity-bar {
+    flex: 1;
+    height: 4px;
+    background: rgba(0, 0, 0, 0.08);
+    border-radius: 2px;
+    max-width: 60px;
+    overflow: hidden;
+}
+
+.capacity-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s var(--ease-out);
+}
+
+.capacity-ok   { background: var(--success-green); }
+.capacity-low  { background: var(--warning-orange); }
+.capacity-full { background: var(--danger-red); }
+
+.capacity-text {
+    font-size: 0.65rem;
+    color: var(--deck-gray);
+    white-space: nowrap;
+}
+
 /* Departed sailing: subtle but informative */
 .sailing-departed {
     border-left-color: var(--deck-gray);

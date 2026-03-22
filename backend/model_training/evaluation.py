@@ -228,7 +228,7 @@ def evaluate_predictions(test_df: pd.DataFrame) -> dict:
 
 def run_full_evaluation() -> Optional[dict]:
     """Run a full evaluation using the current predictor and database."""
-    from .ml_predictor import DelayPredictor
+    from ..ml_predictor import DelayPredictor
 
     evaluator = DelayPredictor()
 
@@ -250,32 +250,7 @@ def run_full_evaluation() -> Optional[dict]:
         logger.warning("No test data available")
         return None
 
-    X_test = test_df[
-        [
-            "route_abbrev",
-            "departing_terminal_id",
-            "day_of_week",
-            "hour_of_day",
-            "minutes_until_scheduled_departure",
-            "current_vessel_delay_minutes",
-            "is_peak_hour",
-            "previous_sailing_fullness",
-            "turnaround_minutes",
-        ]
-    ].copy()
-
-    X_test["route_abbrev"] = (
-        X_test["route_abbrev"].map(evaluator._route_mapping).fillna(-1)
-    )
-    X_test["departing_terminal_id"] = (
-        X_test["departing_terminal_id"].map(evaluator._terminal_mapping).fillna(-1)
-    )
-
-    X_arr = X_test.values
-    test_df["predicted_delay"] = evaluator.model_q50.predict(X_arr)
-    test_df["lower_bound"] = evaluator.model_q15.predict(X_arr)
-    test_df["upper_bound"] = evaluator.model_q85.predict(X_arr)
-
+    test_df = evaluator._model.predict(test_df)
     return evaluate_predictions(test_df)
 
 

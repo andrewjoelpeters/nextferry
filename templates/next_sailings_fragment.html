@@ -10,31 +10,33 @@
                 
                 {% if schedule.sailings %}
                     {% for sailing in schedule.sailings %}
-                    <div class="sailing-item {{ sailing.status_class }}{% if sailing.departed %} sailing-departed{% endif %}">
-                        <div class="time-until-prominent">{{ sailing.time_until }}</div>
-                        {% if sailing.departed %}
-                        <div class="departure-times">
-                            <div class="departed-info">Departed {{ sailing.scheduled_time }} · en route to {{ schedule.arriving_terminal_name }}</div>
-                        </div>
-                        {% else %}
-                        <div class="departure-times">
-                            <div class="scheduled-time">Scheduled: {{ sailing.scheduled_time }}</div>
-                            {% if sailing.has_delay %}
-                            <div class="estimated-time">Estimated: {{ sailing.estimated_departure }} {{ sailing.delay_text }}</div>
-                            {% endif %}
-                        </div>
-                        {% endif %}
-                        {% if sailing.vessel_name %}
-                        <div class="vessel-name">{{ sailing.vessel_name }}
-                            {% if sailing.vessel_info %}
-                                {% if sailing.vessel_info.vessel_status == 'At Dock' %}
-                                    <span class="vessel-status vessel-at-dock">At Dock</span>
-                                {% elif sailing.vessel_info.vessel_status == 'In Transit' %}
-                                    <span class="vessel-status vessel-in-transit">In Transit</span>
+                    <details class="sailing-item {{ sailing.status_class }}{% if sailing.departed %} sailing-departed{% endif %}{% if sailing.vessel_info %} has-details{% endif %}">
+                        <summary class="sailing-summary">
+                            <div class="time-until-prominent">{{ sailing.time_until }}</div>
+                            {% if sailing.departed %}
+                            <div class="departure-times">
+                                <div class="departed-info">Departed {{ sailing.scheduled_time }} · en route to {{ schedule.arriving_terminal_name }}</div>
+                            </div>
+                            {% else %}
+                            <div class="departure-times">
+                                <div class="scheduled-time">Scheduled: {{ sailing.scheduled_time }}</div>
+                                {% if sailing.has_delay %}
+                                <div class="estimated-time">Estimated: {{ sailing.estimated_departure }} {{ sailing.delay_text }}</div>
                                 {% endif %}
+                            </div>
                             {% endif %}
-                        </div>
-                        {% endif %}
+                            {% if sailing.vessel_name %}
+                            <div class="vessel-name">{{ sailing.vessel_name }}
+                                {% if sailing.vessel_info %}
+                                    {% if sailing.vessel_info.vessel_status == 'At Dock' %}
+                                        <span class="vessel-status vessel-at-dock">At Dock</span>
+                                    {% elif sailing.vessel_info.vessel_status == 'In Transit' %}
+                                        <span class="vessel-status vessel-in-transit">In Transit</span>
+                                    {% endif %}
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                        </summary>
                         {% if sailing.vessel_info %}
                         <div class="vessel-live-info">
                             {% if sailing.vessel_info.vessel_status == 'At Dock' %}
@@ -46,18 +48,18 @@
                                 {% endif %}
                             {% elif sailing.vessel_info.vessel_status == 'In Transit' %}
                                 {% if sailing.vessel_info.left_dock %}
-                                    <span>Left dock: {{ sailing.vessel_info.left_dock }}</span>
+                                    <span>Left {{ schedule.arriving_terminal_name }}: {{ sailing.vessel_info.left_dock }}</span>
                                 {% endif %}
                                 {% if sailing.vessel_info.departure_delay %}
                                     <span>({{ sailing.vessel_info.departure_delay }})</span>
                                 {% endif %}
                                 {% if sailing.vessel_info.eta %}
-                                    <span>ETA: {{ sailing.vessel_info.eta }}</span>
+                                    <span>Arrives {{ schedule.departing_terminal_name }}: {{ sailing.vessel_info.eta }}</span>
                                 {% endif %}
                             {% endif %}
                         </div>
                         {% endif %}
-                    </div>
+                    </details>
                     {% endfor %}
                 {% else %}
                     <div class="no-sailings">No upcoming sailings</div>

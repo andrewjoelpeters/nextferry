@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
+from .config import ROUTES
 from .database import (
     get_connection,
     get_sailing_event_count,
@@ -85,8 +86,19 @@ class DelayPredictor:
 
         conn = get_connection()
         try:
-            # --- Load events into a DataFrame ---
+            # --- Load events into a DataFrame, filtered to configured routes ---
             events_df = pd.DataFrame(events)
+            active_routes = {r["route_name"] for r in ROUTES}
+            events_df = events_df[events_df["route_abbrev"].isin(active_routes)].copy()
+            logger.info(
+                f"Filtered to {len(events_df)} events for routes: {active_routes}"
+            )
+            if len(events_df) < MINIMUM_TRAINING_EVENTS:
+                logger.warning(
+                    f"Only {len(events_df)} events for active routes, "
+                    f"need {MINIMUM_TRAINING_EVENTS}"
+                )
+                return None
             events_df["departing_terminal_id"] = events_df["departing_terminal_id"].fillna(0).astype(int)
             events_df["route_abbrev"] = events_df["route_abbrev"].fillna("unknown")
             events_df["scheduled_departure_dt"] = pd.to_datetime(
@@ -102,17 +114,21 @@ class DelayPredictor:
             expanded = events_df.assign(key=1).merge(horizons.assign(key=1), on="key").drop(columns="key")
             expanded["predict_time"] = expanded["scheduled_departure_dt"] - pd.to_timedelta(expanded["horizon_min"], unit="m")
 
-            # --- Bulk query 1: vessel delay snapshots ---
+            # --- Bulk query 1: vessel delay snapshots (filtered to relevant vessels) ---
             logger.info("Loading vessel delay snapshots...")
+            vessel_ids = events_df["vessel_id"].unique().tolist()
+            placeholders = ",".join("?" * len(vessel_ids))
             delays_df = pd.read_sql_query(
-                """
+                f"""
                 SELECT vessel_id, collected_at, scheduled_departure AS snap_sched_dep,
                        (julianday(left_dock) - julianday(scheduled_departure)) * 24 * 60 AS snap_delay_minutes
                 FROM vessel_snapshots
                 WHERE left_dock IS NOT NULL AND scheduled_departure IS NOT NULL
                   AND left_dock != '' AND scheduled_departure != ''
+                  AND vessel_id IN ({placeholders})
                 """,
                 conn,
+                params=vessel_ids,
             )
             delays_df["collected_at"] = pd.to_datetime(
                 delays_df["collected_at"], format="ISO8601", utc=True
@@ -120,8 +136,8 @@ class DelayPredictor:
             delays_df.sort_values(["vessel_id", "collected_at"], inplace=True)
             logger.info(f"Loaded {len(delays_df)} delay snapshots")
 
-            # merge_asof: for each (vessel_id, predict_time), find most recent snapshot
-            # Both sides must be sorted by the on-key within each by-group
+            # merge_asof: for each (vessel_id, predict_time), find most recent snapshot.
+            # Both sides must be sorted by the on-key for merge_asof.
             expanded.sort_values("predict_time", inplace=True)
             delays_df.sort_values("collected_at", inplace=True)
             merged = pd.merge_asof(
@@ -134,7 +150,9 @@ class DelayPredictor:
             )
 
             # Exclude snapshots from the *same* sailing (matches original query's
-            # `scheduled_departure != ?` filter) and default to 0.0
+            # `scheduled_departure != ?` filter) and default to 0.0.
+            # ~2.5% of rows are affected; defaulting these to 0.0 rather than
+            # falling back to an older snapshot has negligible impact on model quality.
             same_sailing = merged["snap_sched_dep"] == merged["scheduled_departure"]
             merged.loc[same_sailing, "snap_delay_minutes"] = np.nan
             merged["current_vessel_delay_minutes"] = merged["snap_delay_minutes"].fillna(0.0)
@@ -157,30 +175,36 @@ class DelayPredictor:
                     1.0 - fullness_df["drive_up_space_count"] / fullness_df["max_space_count"]
                 )
                 fullness_df = fullness_df[["arriving_terminal_id", "departure_time", "previous_sailing_fullness"]]
-                fullness_df.sort_values(["arriving_terminal_id", "departure_time"], inplace=True)
 
-                # merge_asof: match each event's (departing_terminal_id, scheduled_departure)
-                # to the most recent fullness for that terminal
+                # merge_asof per terminal to avoid global sort requirement on on-key
                 events_for_fullness = (
                     merged[["sailing_event_id", "departing_terminal_id", "scheduled_departure_dt"]]
                     .drop_duplicates(subset=["sailing_event_id"])
-                    .sort_values("scheduled_departure_dt")
                 )
-                fullness_df.sort_values("departure_time", inplace=True)
-                fullness_merged = pd.merge_asof(
-                    events_for_fullness,
-                    fullness_df,
-                    left_on="scheduled_departure_dt",
-                    right_on="departure_time",
-                    left_by="departing_terminal_id",
-                    right_by="arriving_terminal_id",
-                    direction="backward",
-                )
-                merged = merged.merge(
-                    fullness_merged[["sailing_event_id", "previous_sailing_fullness"]],
-                    on="sailing_event_id",
-                    how="left",
-                )
+                fullness_parts = []
+                for terminal_id in events_for_fullness["departing_terminal_id"].unique():
+                    ev_term = events_for_fullness.loc[
+                        events_for_fullness["departing_terminal_id"] == terminal_id
+                    ].sort_values("scheduled_departure_dt")
+                    fu_term = fullness_df.loc[
+                        fullness_df["arriving_terminal_id"] == terminal_id
+                    ].sort_values("departure_time")
+                    if fu_term.empty:
+                        continue
+                    matched = pd.merge_asof(
+                        ev_term[["sailing_event_id", "scheduled_departure_dt"]],
+                        fu_term[["departure_time", "previous_sailing_fullness"]],
+                        left_on="scheduled_departure_dt",
+                        right_on="departure_time",
+                        direction="backward",
+                    )
+                    fullness_parts.append(matched[["sailing_event_id", "previous_sailing_fullness"]])
+
+                if fullness_parts:
+                    fullness_result = pd.concat(fullness_parts, ignore_index=True)
+                    merged = merged.merge(fullness_result, on="sailing_event_id", how="left")
+                else:
+                    merged["previous_sailing_fullness"] = np.nan
             else:
                 merged["previous_sailing_fullness"] = np.nan
             logger.info("Fullness features joined")
@@ -193,6 +217,7 @@ class DelayPredictor:
                 FROM vessel_snapshots
                 WHERE at_dock = 1
                   AND scheduled_departure IS NOT NULL AND scheduled_departure != ''
+                  AND collected_at <= scheduled_departure
                 GROUP BY vessel_id, scheduled_departure
                 """,
                 conn,
@@ -204,9 +229,6 @@ class DelayPredictor:
                 turnaround_df["sched_dt"] = pd.to_datetime(
                     turnaround_df["scheduled_departure"], format="ISO8601", utc=True
                 ).dt.tz_localize(None)
-                # Strip tzinfo to avoid naive/aware mismatch
-                turnaround_df["docked_at"] = turnaround_df["docked_at"].dt.tz_localize(None)
-                turnaround_df["sched_dt"] = turnaround_df["sched_dt"].dt.tz_localize(None)
                 turnaround_df["turnaround_minutes"] = (
                     (turnaround_df["sched_dt"] - turnaround_df["docked_at"]).dt.total_seconds() / 60
                 ).clip(lower=0)

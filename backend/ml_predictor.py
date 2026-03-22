@@ -304,9 +304,13 @@ class DelayPredictor:
             ]
         )
 
-        predicted = self.model_q50.predict(features)[0]
-        lower = self.model_q15.predict(features)[0]
-        upper = self.model_q85.predict(features)[0]
+        try:
+            predicted = self.model_q50.predict(features)[0]
+            lower = self.model_q15.predict(features)[0]
+            upper = self.model_q85.predict(features)[0]
+        except ValueError as e:
+            logger.error(f"Prediction failed (models may need retraining): {e}")
+            return None
 
         return {
             "predicted_delay": round(predicted, 1),

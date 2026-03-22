@@ -1,6 +1,6 @@
 import logging
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -23,14 +23,14 @@ logger = logging.getLogger(__name__)
 CACHED_DELAYS = {}
 
 
-def update_cached_delay(vessel: Vessel, delay: datetime):
+def update_cached_delay(vessel: Vessel, delay: timedelta):
     for route in vessel.route_name:
         if route not in CACHED_DELAYS:
             CACHED_DELAYS[route] = {}
         CACHED_DELAYS[route][vessel.vessel_position_num] = delay
 
 
-def get_cached_delay(vessel: Vessel) -> Optional[datetime]:
+def get_cached_delay(vessel: Vessel) -> Optional[timedelta]:
     # some vessels don't have routes assigned
     if not vessel.route_name:
         return None
@@ -88,7 +88,7 @@ def get_route_schedule_by_boat(
 
 
 def propigate_delays(
-    delay: Optional[datetime],
+    delay: Optional[timedelta],
     sailings: List[DirectionalSailing],
     vessel_id: Optional[int] = None,
 ) -> List[DirectionalSailing]:

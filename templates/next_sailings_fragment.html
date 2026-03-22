@@ -10,7 +10,10 @@
                 
                 {% if schedule.sailings %}
                     {% for sailing in schedule.sailings %}
-                    <div class="sailing-item {{ sailing.status_class }}">
+                    <div class="sailing-item {{ sailing.status_class }}"
+                         data-vessel="{{ sailing.vessel_name or '' }}"
+                         data-terminal="{{ sailing.departing_terminal_name or '' }}"
+                         data-departure="{{ sailing.scheduled_departure_iso or '' }}">
                         <div class="time-until-prominent">{{ sailing.time_until }}</div>
                         <div class="departure-times">
                             <div class="scheduled-time">Scheduled: {{ sailing.scheduled_time }}</div>
@@ -18,17 +21,29 @@
                             <div class="estimated-time">Estimated: {{ sailing.estimated_departure }} {{ sailing.delay_text }}</div>
                             {% endif %}
                         </div>
-                        {% if sailing.vessel_name %}
-                        <div class="vessel-name">{{ sailing.vessel_name }}
-                            {% if sailing.vessel_info %}
-                                {% if sailing.vessel_info.vessel_status == 'At Dock' %}
-                                    <span class="vessel-status vessel-at-dock">At Dock</span>
-                                {% elif sailing.vessel_info.vessel_status == 'In Transit' %}
-                                    <span class="vessel-status vessel-in-transit">In Transit</span>
+                        <div class="sailing-meta">
+                            {% if sailing.vessel_name %}
+                            <div class="vessel-name">{{ sailing.vessel_name }}
+                                {% if sailing.vessel_info %}
+                                    {% if sailing.vessel_info.vessel_status == 'At Dock' %}
+                                        <span class="vessel-status vessel-at-dock">At Dock</span>
+                                    {% elif sailing.vessel_info.vessel_status == 'In Transit' %}
+                                        <span class="vessel-status vessel-in-transit">In Transit</span>
+                                    {% endif %}
                                 {% endif %}
+                            </div>
+                            {% endif %}
+                            {% if sailing.vessel_name and sailing.status_class != 'status-departed' %}
+                            <button class="alert-btn"
+                                    onclick="openAlertPicker(this)"
+                                    title="Set arrival alert">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                                    <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                                </svg>
+                            </button>
                             {% endif %}
                         </div>
-                        {% endif %}
                         {% if sailing.vessel_info %}
                         <div class="vessel-live-info">
                             {% if sailing.vessel_info.vessel_status == 'At Dock' %}

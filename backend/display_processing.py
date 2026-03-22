@@ -128,6 +128,12 @@ def process_routes_for_display(routes_data: List[RouteSchedule]):
                     "has_delay": sailing.delay_in_minutes is not None
                     and sailing.delay_in_minutes != 0,
                     "vessel_info": _format_vessel_status(sailing),
+                    "departing_terminal_name": schedule.departing_terminal_name,
+                    "scheduled_departure_iso": (
+                        sailing.scheduled_departure.isoformat()
+                        if sailing.scheduled_departure
+                        else ""
+                    ),
                     "fill_risk": fill_risk,
                 }
 

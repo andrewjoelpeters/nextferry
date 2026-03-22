@@ -308,6 +308,75 @@ def get_vessel_delay_at_time(
         conn.close()
 
 
+def get_previous_sailing_fullness(
+    departing_terminal_id: int, scheduled_departure: str
+) -> Optional[float]:
+    """Get the fullness (0.0-1.0) of the inbound sailing that brought the boat to this terminal.
+
+    Looks at the most recent sailing_space_snapshot for a departure FROM the
+    arriving terminal TO the departing terminal (i.e. the reverse direction)
+    that occurred before this sailing's scheduled departure. Fullness is
+    calculated as 1 - (drive_up_space_count / max_space_count).
+    """
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                max_space_count,
+                drive_up_space_count
+            FROM sailing_space_snapshots
+            WHERE arriving_terminal_id = ?
+              AND departure_time <= ?
+              AND max_space_count > 0
+            ORDER BY departure_time DESC
+            LIMIT 1
+            """,
+            (departing_terminal_id, scheduled_departure),
+        ).fetchone()
+        if row and row["max_space_count"] > 0:
+            return 1.0 - (row["drive_up_space_count"] / row["max_space_count"])
+        return None
+    finally:
+        conn.close()
+
+
+def get_turnaround_minutes(
+    vessel_id: int, scheduled_departure: str
+) -> Optional[float]:
+    """Get how many minutes before scheduled departure the vessel docked.
+
+    Finds the earliest snapshot where the vessel is at_dock=1 at the departing
+    terminal for this sailing, after its previous departure. Returns the
+    difference between scheduled_departure and when the vessel first appeared
+    at dock.
+    """
+    conn = get_connection()
+    try:
+        # Find when the vessel first appeared at dock before this scheduled departure
+        # by looking for the most recent transition to at_dock after the previous sailing
+        row = conn.execute(
+            """
+            SELECT
+                MIN(collected_at) as docked_at
+            FROM vessel_snapshots
+            WHERE vessel_id = ?
+              AND at_dock = 1
+              AND scheduled_departure = ?
+              AND collected_at <= ?
+            """,
+            (vessel_id, scheduled_departure, scheduled_departure),
+        ).fetchone()
+        if row and row["docked_at"]:
+            docked_dt = datetime.fromisoformat(row["docked_at"])
+            sched_dt = datetime.fromisoformat(scheduled_departure)
+            diff = (sched_dt - docked_dt).total_seconds() / 60
+            return max(0, diff)
+        return None
+    finally:
+        conn.close()
+
+
 def get_sailing_event_count() -> int:
     """Return the total number of sailing events."""
     conn = get_connection()

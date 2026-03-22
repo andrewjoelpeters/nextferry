@@ -135,6 +135,7 @@ class DelayPredictor:
                     rows.append(
                         {
                             "sailing_event_id": event["id"],
+                            "scheduled_departure": scheduled_dep,
                             "route_abbrev": event["route_abbrev"] or "unknown",
                             "departing_terminal_id": departing_terminal_id,
                             "day_of_week": event["day_of_week"],
@@ -254,7 +255,7 @@ class DelayPredictor:
 
         # Evaluate on test set
         if len(X_test) > 0:
-            from .evaluation import evaluate_predictions
+            from .model_training.evaluation import evaluate_predictions
 
             test_df = df[test_mask].copy()
             test_df["predicted_delay"] = self.model_q50.predict(X_test)

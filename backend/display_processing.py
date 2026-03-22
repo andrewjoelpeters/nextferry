@@ -5,6 +5,42 @@ from .serializers import RouteSchedule
 from .utils import format_confidence_text, format_delay_text, format_time_until
 
 
+def _format_vessel_status(sailing) -> dict:
+    """Build display info for the vessel's live status on the current sailing."""
+    if sailing.vessel_at_dock is None:
+        return {}
+
+    fmt_time = lambda dt: dt.strftime("%I:%M %p").lstrip("0") if dt else None
+
+    if sailing.vessel_at_dock:
+        # Vessel is at dock — show docked time and predicted departure
+        result = {"vessel_status": "At Dock"}
+        if sailing.vessel_eta:
+            result["docked_at"] = fmt_time(sailing.vessel_eta)
+        if sailing.scheduled_departure and sailing.vessel_delay_minutes:
+            predicted = sailing.scheduled_departure + timedelta(
+                minutes=sailing.vessel_delay_minutes
+            )
+            result["predicted_departure"] = fmt_time(predicted)
+        return result
+    else:
+        # Vessel is in transit — show departure time and delay
+        result = {"vessel_status": "In Transit"}
+        if sailing.vessel_left_dock:
+            result["left_dock"] = fmt_time(sailing.vessel_left_dock)
+        if sailing.vessel_delay_minutes is not None:
+            dm = sailing.vessel_delay_minutes
+            if dm > 0:
+                result["departure_delay"] = f"+{dm}m late"
+            elif dm < 0:
+                result["departure_delay"] = f"{dm}m early"
+            else:
+                result["departure_delay"] = "on time"
+        if sailing.vessel_eta:
+            result["eta"] = fmt_time(sailing.vessel_eta)
+        return result
+
+
 def process_routes_for_display(routes_data: List[RouteSchedule]):
     processed_routes = []
     for route in routes_data:
@@ -44,28 +80,29 @@ def process_routes_for_display(routes_data: List[RouteSchedule]):
                     sailing.delay_lower_bound, sailing.delay_upper_bound
                 )
 
-                processed_sailings.append(
-                    {
-                        "time_until": time_until,
-                        "scheduled_time": (
-                            sailing.scheduled_departure.strftime("%I:%M %p").lstrip("0")
-                            if sailing.scheduled_departure
-                            else "N/A"
-                        ),
-                        "estimated_departure": (
-                            estimated_departure.strftime("%I:%M %p").lstrip("0")
-                            if estimated_departure
-                            else "N/A"
-                        ),
-                        "delay_text": delay_text,
-                        "confidence_text": confidence_text,
-                        "vessel_name": sailing.vessel_name,
-                        "status_class": final_status,
-                        "departed": sailing.departed,
-                        "has_delay": sailing.delay_in_minutes is not None
-                        and sailing.delay_in_minutes != 0,
-                    }
-                )
+                sailing_data = {
+                    "time_until": time_until,
+                    "scheduled_time": (
+                        sailing.scheduled_departure.strftime("%I:%M %p").lstrip("0")
+                        if sailing.scheduled_departure
+                        else "N/A"
+                    ),
+                    "estimated_departure": (
+                        estimated_departure.strftime("%I:%M %p").lstrip("0")
+                        if estimated_departure
+                        else "N/A"
+                    ),
+                    "delay_text": delay_text,
+                    "confidence_text": confidence_text,
+                    "vessel_name": sailing.vessel_name,
+                    "status_class": final_status,
+                    "departed": sailing.departed,
+                    "has_delay": sailing.delay_in_minutes is not None
+                    and sailing.delay_in_minutes != 0,
+                    "vessel_info": _format_vessel_status(sailing),
+                }
+
+                processed_sailings.append(sailing_data)
 
             processed_schedules.append(
                 {

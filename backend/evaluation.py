@@ -128,6 +128,8 @@ def run_full_evaluation() -> Optional[dict]:
             "minutes_until_scheduled_departure",
             "current_vessel_delay_minutes",
             "is_peak_hour",
+            "previous_sailing_fullness",
+            "turnaround_minutes",
         ]
     ].copy()
 

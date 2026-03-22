@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from backend.config import ROUTES
 
+from .database import get_previous_sailing_fullness, get_turnaround_minutes
 from .serializers import (DirectionalSailing, DirectionalSchedule,
                           RawDirectionalSchedule, RouteSchedule, Vessel)
 from .utils import datetime_to_minutes
@@ -87,7 +88,9 @@ def get_route_schedule_by_boat(
 
 
 def propigate_delays(
-    delay: Optional[datetime], sailings: List[DirectionalSailing]
+    delay: Optional[datetime],
+    sailings: List[DirectionalSailing],
+    vessel_id: Optional[int] = None,
 ) -> List[DirectionalSailing]:
     """Apply delays to sailings, using ML predictions if available, else flat propagation."""
     if not delay and not (ml_predictor and ml_predictor.is_trained):
@@ -110,6 +113,16 @@ def propigate_delays(
                     break
 
             if route_abbrev:
+                sched_iso = sailing.scheduled_departure.isoformat()
+
+                # Look up docking features for this sailing
+                prev_fullness = get_previous_sailing_fullness(
+                    sailing.departing_terminal_id, sched_iso
+                )
+                turnaround = None
+                if vessel_id is not None:
+                    turnaround = get_turnaround_minutes(vessel_id, sched_iso)
+
                 prediction = ml_predictor.predict(
                     route_abbrev=route_abbrev,
                     departing_terminal_id=sailing.departing_terminal_id,
@@ -117,6 +130,8 @@ def propigate_delays(
                     hour_of_day=sailing.scheduled_departure.hour,
                     minutes_until_scheduled_departure=minutes_until,
                     current_vessel_delay_minutes=delay_minutes,
+                    previous_sailing_fullness=prev_fullness,
+                    turnaround_minutes=turnaround,
                 )
                 if prediction:
                     sailing.delay_in_minutes = round(prediction["predicted_delay"])
@@ -178,7 +193,18 @@ def get_next_sailings_by_boat(
             if departed_sailing:
                 next_sailings.insert(0, departed_sailing)
 
-        next_sailings = propigate_delays(current_vessel.delay, next_sailings)
+        v_id = current_vessel.vessel_id if current_vessel else None
+        next_sailings = propigate_delays(current_vessel.delay, next_sailings, vessel_id=v_id)
+
+        # Annotate the first sailing with live vessel state
+        if next_sailings and current_vessel:
+            first = next_sailings[0]
+            first.vessel_at_dock = current_vessel.at_dock
+            first.vessel_left_dock = current_vessel.left_dock
+            first.vessel_eta = current_vessel.eta
+            if current_vessel.delay:
+                first.vessel_delay_minutes = datetime_to_minutes(current_vessel.delay)
+
         next_sailings_by_boat[vessel_position_num] = next_sailings
 
     return next_sailings_by_boat
@@ -217,6 +243,7 @@ def get_directional_schedules(
             )
         )
 
+    direction_schedules.sort(key=lambda ds: ds.departing_terminal_name)
     return direction_schedules
 
 

@@ -151,6 +151,12 @@ def process_routes_for_display(
                     and sailing.delay_in_minutes != 0,
                     "vessel_info": _format_vessel_status(sailing),
                     "capacity": capacity,
+                    "departing_terminal_name": schedule.departing_terminal_name,
+                    "scheduled_departure_iso": (
+                        sailing.scheduled_departure.isoformat()
+                        if sailing.scheduled_departure
+                        else ""
+                    ),
                     "fill_risk": fill_risk,
                 }
 

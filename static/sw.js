@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nextferry-v1';
+const CACHE_NAME = 'nextferry-v2';
 const SHELL_ASSETS = [
   '/',
   '/static/style.css',
@@ -20,6 +20,34 @@ self.addEventListener('activate', (event) => {
     )
   );
   self.clients.claim();
+});
+
+// Show notification when the page sends a FERRY_ALERT message
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'FERRY_ALERT') {
+    self.registration.showNotification(event.data.title, {
+      body: event.data.body,
+      icon: '/static/icons/icon-192.png',
+      badge: '/static/icons/icon-192.png',
+      vibrate: [200, 100, 200],
+      tag: 'ferry-alert',
+      renotify: true,
+    });
+  }
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    clients.matchAll({ type: 'window' }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url.includes('/') && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      return clients.openWindow('/');
+    })
+  );
 });
 
 self.addEventListener('fetch', (event) => {

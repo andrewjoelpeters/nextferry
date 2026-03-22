@@ -98,6 +98,8 @@ def init_db():
                 ON sailing_events(route_abbrev);
             CREATE INDEX IF NOT EXISTS idx_sailing_space_time
                 ON sailing_space_snapshots(collected_at);
+            CREATE INDEX IF NOT EXISTS idx_sailing_space_arriving_departure
+                ON sailing_space_snapshots(arriving_terminal_id, departure_time);
             """
         )
         conn.commit()

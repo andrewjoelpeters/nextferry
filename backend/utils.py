@@ -21,7 +21,7 @@ def string_format_time(dt: datetime):
     return dt.strftime("%-I:%M %p")
 
 
-def format_time_until(scheduled_time: datetime) -> tuple[str, str]:
+def format_time_until(scheduled_time: datetime, departed: bool = False) -> tuple[str, str]:
     if not scheduled_time:
         return "N/A", "status-unknown"
 
@@ -34,7 +34,13 @@ def format_time_until(scheduled_time: datetime) -> tuple[str, str]:
     time_diff = scheduled_time - now
     minutes_until = int(time_diff.total_seconds() / 60)
 
-    if -5 <= minutes_until <= 2:
+    if departed:
+        minutes_ago = abs(minutes_until)
+        if minutes_ago <= 1:
+            return "Just left", "status-departed"
+        else:
+            return f"{minutes_ago}m ago", "status-departed"
+    elif -5 <= minutes_until <= 2:
         return "Now", "status-departing"
     elif minutes_until > 2:
         if minutes_until < 60:

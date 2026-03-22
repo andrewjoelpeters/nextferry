@@ -98,6 +98,8 @@ def init_db():
                 ON sailing_events(route_abbrev);
             CREATE INDEX IF NOT EXISTS idx_sailing_space_time
                 ON sailing_space_snapshots(collected_at);
+            CREATE INDEX IF NOT EXISTS idx_sailing_space_arriving_departure
+                ON sailing_space_snapshots(arriving_terminal_id, departure_time);
             """
         )
         conn.commit()
@@ -370,6 +372,9 @@ def get_turnaround_minutes(
         if row and row["docked_at"]:
             docked_dt = datetime.fromisoformat(row["docked_at"])
             sched_dt = datetime.fromisoformat(scheduled_departure)
+            # Strip tzinfo to avoid mixing naive/aware datetimes
+            docked_dt = docked_dt.replace(tzinfo=None)
+            sched_dt = sched_dt.replace(tzinfo=None)
             diff = (sched_dt - docked_dt).total_seconds() / 60
             return max(0, diff)
         return None

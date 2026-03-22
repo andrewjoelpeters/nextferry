@@ -49,8 +49,12 @@ def process_routes_for_display(routes_data: List[RouteSchedule]):
         for schedule in route.schedules:
             processed_sailings = []
 
-            # Only show next 3 sailings
-            for sailing in schedule.times[:3]:
+            # Show departed sailings + next 3 upcoming
+            departed = [s for s in schedule.times if s.departed]
+            upcoming = [s for s in schedule.times if not s.departed][:3]
+            visible_sailings = departed + upcoming
+
+            for sailing in visible_sailings:
                 # Calculate estimated departure
                 estimated_departure = None
                 if sailing.scheduled_departure:
@@ -61,7 +65,9 @@ def process_routes_for_display(routes_data: List[RouteSchedule]):
                         )
 
                 # Use estimated departure for time_until
-                time_until, base_status = format_time_until(estimated_departure)
+                time_until, base_status = format_time_until(
+                    estimated_departure, departed=sailing.departed
+                )
 
                 # Delay info
                 delay_text, delay_status = format_delay_text(sailing.delay_in_minutes)
@@ -90,6 +96,7 @@ def process_routes_for_display(routes_data: List[RouteSchedule]):
                     "confidence_text": confidence_text,
                     "vessel_name": sailing.vessel_name,
                     "status_class": final_status,
+                    "departed": sailing.departed,
                     "has_delay": sailing.delay_in_minutes is not None
                     and sailing.delay_in_minutes != 0,
                     "vessel_info": _format_vessel_status(sailing),

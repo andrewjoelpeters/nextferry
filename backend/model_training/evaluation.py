@@ -21,7 +21,7 @@ Top-level only:
 - "improvement_pct": vs naive "current delay = future delay" baseline
 
 Usage:
-    python -m backend.evaluation
+    python -m backend.model_training.evaluation
 """
 
 import logging

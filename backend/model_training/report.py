@@ -27,6 +27,8 @@ def _metric_table(data: dict, key_label: str) -> list:
 
 def _delta_str(prev_val, curr_val, lower_is_better=True):
     d = curr_val - prev_val
+    if d == 0:
+        return "0.00 (no change)"
     sign = "+" if d > 0 else ""
     better = (d < 0) if lower_is_better else (d > 0)
     return f"{sign}{d:.2f} ({'better' if better else 'worse'})"

@@ -54,8 +54,12 @@ FEATURE_COLS = [
     "turnaround_minutes",
 ]
 
-CATEGORICAL_FEATURES = [0, 1, 2]  # route_abbrev, departing_terminal_id, day_of_week
+CATEGORICAL_COLS = ["route_abbrev", "departing_terminal_id", "day_of_week"]
+CATEGORICAL_FEATURES = [0, 1, 2]  # indices into FEATURE_COLS
 TARGET_COL = "actual_delay_minutes"
+
+# Sentinel for categories seen at predict time but not during fit
+UNSEEN_CATEGORY_CODE = -1
 
 
 class QuantileGBTModel:
@@ -68,15 +72,30 @@ class QuantileGBTModel:
     def __init__(self, hyperparams: dict | None = None):
         self.params = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
         self.models: dict = {}
+        self._category_maps: dict[str, dict] = {}
+
+    def _learn_categories(self, df: pd.DataFrame) -> None:
+        """Learn category→code mappings from training data."""
+        for col in CATEGORICAL_COLS:
+            categories = sorted(df[col].unique())
+            self._category_maps[col] = {
+                cat: code for code, cat in enumerate(categories)
+            }
 
     def _encode(self, df: pd.DataFrame) -> np.ndarray:
+        """Encode features using mappings learned during fit().
+
+        Unseen categories get UNSEEN_CATEGORY_CODE (-1), which
+        HistGradientBoosting handles via its missing-value path.
+        """
         X = df[FEATURE_COLS].copy()
-        X["route_abbrev"] = X["route_abbrev"].astype("category").cat.codes
-        X["departing_terminal_id"] = X["departing_terminal_id"].astype("category").cat.codes
-        X["day_of_week"] = X["day_of_week"].astype("category").cat.codes
+        for col in CATEGORICAL_COLS:
+            mapping = self._category_maps[col]
+            X[col] = X[col].map(mapping).fillna(UNSEEN_CATEGORY_CODE).astype(int)
         return X.values
 
     def fit(self, train_df: pd.DataFrame) -> None:
+        self._learn_categories(train_df)
         X_train = self._encode(train_df)
         y_train = train_df[TARGET_COL].values
 

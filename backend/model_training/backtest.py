@@ -86,13 +86,22 @@ def walk_forward_backtest(
         n_folds = max(1, (n_events // (min_train_events // 2)) - 1)
         chunk_size = n_events // (n_folds + 1)
 
+    # When n_folds==1, ensure the train window is at least min_train_events
+    # so the single fold doesn't get skipped by the threshold check below.
+    if n_folds == 1 and chunk_size < min_train_events and n_events >= min_train_events:
+        chunk_size = min_train_events
+
     fold_results = []
     all_test_dfs = []
 
     for fold_idx in range(n_folds):
         train_end = (fold_idx + 1) * chunk_size
         test_start = train_end
-        test_end = min(test_start + chunk_size, n_events)
+        # Last fold absorbs all remaining events (fixes remainder-drop bug)
+        if fold_idx == n_folds - 1:
+            test_end = n_events
+        else:
+            test_end = min(test_start + chunk_size, n_events)
 
         if train_end < min_train_events:
             logger.info(f"Fold {fold_idx}: skipping, only {train_end} train events")

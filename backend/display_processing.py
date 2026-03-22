@@ -57,6 +57,12 @@ def process_routes_for_display(routes_data: List[RouteSchedule]):
                         "status_class": final_status,
                         "has_delay": sailing.delay_in_minutes is not None
                         and sailing.delay_in_minutes != 0,
+                        "departing_terminal_name": schedule.departing_terminal_name,
+                        "scheduled_departure_iso": (
+                            sailing.scheduled_departure.isoformat()
+                            if sailing.scheduled_departure
+                            else ""
+                        ),
                     }
                 )
 

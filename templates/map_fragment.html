@@ -192,12 +192,22 @@ function showFerryDetails(ferry) {
         }
     };
 
-    // Update ferry details panel
-    document.getElementById('ferry-name').textContent = ferry.VesselName;
-    document.getElementById('ferry-details').innerHTML = `
+    const formatDelay = (minutes) => {
+        if (minutes === null || minutes === undefined) return '';
+        if (minutes === 0) return ' (on time)';
+        if (minutes > 0) return ` (+${minutes}m late)`;
+        return ` (${minutes}m early)`;
+    };
+
+    // Build context-specific details
+    let detailsHtml = `
         <div class="detail-row">
             <span class="detail-label">Status:</span>
             <span class="route-status ${statusClass}">${status}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Route:</span>
+            <span>${ferry.OpRouteAbbrev?.join(', ') || 'Unknown'}</span>
         </div>
         <div class="detail-row">
             <span class="detail-label">From:</span>
@@ -207,27 +217,53 @@ function showFerryDetails(ferry) {
             <span class="detail-label">To:</span>
             <span>${ferry.ArrivingTerminalName || 'Unknown'}</span>
         </div>
-        <div class="detail-row">
-            <span class="detail-label">Speed:</span>
-            <span>${ferry.Speed ? ferry.Speed.toFixed(1) : '0'} knots</span>
-        </div>
-        <div class="detail-row">
-            <span class="detail-label">Heading:</span>
-            <span>${ferry.Heading ? ferry.Heading.toFixed(0) : '0'}°</span>
-        </div>
-        <div class="detail-row">
-            <span class="detail-label">Route:</span>
-            <span>${ferry.OpRouteAbbrev?.join(', ') || 'Unknown'}</span>
-        </div>
-        <div class="detail-row">
-            <span class="detail-label">Scheduled Departure:</span>
-            <span>${formatTime(ferry.ScheduledDeparture)}</span>
-        </div>
-        <div class="detail-row">
-            <span class="detail-label">Left Dock:</span>
-            <span>${formatTime(ferry.LeftDock)}</span>
-        </div>
     `;
+
+    if (ferry.InService && ferry.AtDock) {
+        // At dock: show docked time, scheduled departure, predicted departure
+        detailsHtml += `
+            <div class="detail-row">
+                <span class="detail-label">Docked at:</span>
+                <span>${formatTime(ferry.Eta)}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Scheduled Departure:</span>
+                <span>${formatTime(ferry.ScheduledDeparture)}</span>
+            </div>
+        `;
+        if (ferry.PredictedDeparture && ferry.DelayMinutes) {
+            detailsHtml += `
+                <div class="detail-row">
+                    <span class="detail-label">Predicted Departure:</span>
+                    <span>${formatTime(ferry.PredictedDeparture)}${formatDelay(ferry.DelayMinutes)}</span>
+                </div>
+            `;
+        }
+    } else if (ferry.InService && !ferry.AtDock) {
+        // In transit: show left dock time, scheduled departure, delay
+        detailsHtml += `
+            <div class="detail-row">
+                <span class="detail-label">Scheduled Departure:</span>
+                <span>${formatTime(ferry.ScheduledDeparture)}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Left Dock:</span>
+                <span>${formatTime(ferry.LeftDock)}${formatDelay(ferry.DelayMinutes)}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Speed:</span>
+                <span>${ferry.Speed ? ferry.Speed.toFixed(1) : '0'} knots</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">ETA:</span>
+                <span>${formatTime(ferry.Eta)}</span>
+            </div>
+        `;
+    }
+
+    // Update ferry details panel
+    document.getElementById('ferry-name').textContent = ferry.VesselName;
+    document.getElementById('ferry-details').innerHTML = detailsHtml;
 
     // Show the panel
     document.getElementById('ferry-info-panel').classList.remove('hidden');

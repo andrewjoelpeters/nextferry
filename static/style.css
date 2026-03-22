@@ -281,25 +281,60 @@ header h1 {
     text-align: center;
 }
 
-.alert-picker-option {
+.alert-picker-form {
+    display: flex;
+    align-items: center;
+    gap: var(--sm);
+    padding: var(--md);
+}
+
+.alert-picker-input {
+    width: 52px;
+    padding: var(--xs) var(--sm);
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    border-radius: 6px;
+    font-size: var(--text-base);
+    font-weight: 600;
+    text-align: center;
+    color: var(--ocean-deep);
+    outline: none;
+}
+
+.alert-picker-input:focus {
+    border-color: var(--ocean-surface);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+/* Hide number input spinners */
+.alert-picker-input::-webkit-inner-spin-button,
+.alert-picker-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.alert-picker-input[type=number] {
+    -moz-appearance: textfield;
+}
+
+.alert-picker-label {
+    font-size: var(--text-xs);
+    color: var(--deck-gray);
+}
+
+.alert-picker-set {
     display: block;
     width: 100%;
     padding: var(--sm) var(--md);
     border: none;
-    background: none;
-    text-align: left;
+    background: var(--ocean-deep);
+    color: white;
     font-size: var(--text-sm);
-    color: var(--ocean-midnight);
+    font-weight: 600;
     cursor: pointer;
     transition: background 0.15s;
 }
 
-.alert-picker-option:hover {
-    background: var(--wave-foam);
-}
-
-.alert-picker-option:not(:last-child) {
-    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+.alert-picker-set:hover {
+    background: var(--ocean-surface);
 }
 
 .alert-picker-cancel {
@@ -343,6 +378,34 @@ header h1 {
 .alert-toast.visible {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
+}
+
+.vessel-status {
+    font-size: var(--text-xs);
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 6px;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.vessel-at-dock {
+    background: rgba(255, 193, 7, 0.15);
+    color: #ffc107;
+}
+
+.vessel-in-transit {
+    background: rgba(40, 167, 69, 0.15);
+    color: #28a745;
+}
+
+.vessel-live-info {
+    font-size: var(--text-xs);
+    color: var(--deck-gray);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    margin-top: 2px;
 }
 
 /* Status indicators: color bars only */

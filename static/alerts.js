@@ -214,33 +214,51 @@
 
     const title = document.createElement('div');
     title.className = 'alert-picker-title';
-    title.textContent = 'Alert when ' + vesselName + ' is:';
+    title.textContent = 'Alert when ' + vesselName + ' is near ' + terminal;
     picker.appendChild(title);
 
-    const options = [5, 10, 15, 20];
-    options.forEach((min) => {
-      const optBtn = document.createElement('button');
-      optBtn.className = 'alert-picker-option';
-      optBtn.textContent = min + ' min from ' + terminal;
-      if (current && current.minutes === min) {
-        optBtn.style.fontWeight = '700';
-        optBtn.style.color = 'var(--ocean-deep)';
+    const form = document.createElement('div');
+    form.className = 'alert-picker-form';
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.className = 'alert-picker-input';
+    input.min = '1';
+    input.max = '60';
+    input.placeholder = 'min';
+    input.value = current ? current.minutes : '10';
+    input.addEventListener('click', (e) => e.stopPropagation());
+
+    const label = document.createElement('span');
+    label.className = 'alert-picker-label';
+    label.textContent = 'minutes before arrival';
+
+    const setBtn = document.createElement('button');
+    setBtn.className = 'alert-picker-set';
+    setBtn.textContent = current ? 'Update alert' : 'Set alert';
+    setBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const min = parseInt(input.value, 10);
+      if (!min || min < 1 || min > 60) {
+        input.focus();
+        return;
       }
-      optBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const granted = await requestPermission();
-        if (!granted) {
-          showToast('Please enable notifications in your browser settings');
-          closePickers();
-          return;
-        }
-        addAlert(vesselName, terminal, departure, min);
+      const granted = await requestPermission();
+      if (!granted) {
+        showToast('Please enable notifications in your browser settings');
         closePickers();
-        updateBellStates();
-        showToast('Alert set: ' + vesselName + ' ' + min + 'min from dock');
-      });
-      picker.appendChild(optBtn);
+        return;
+      }
+      addAlert(vesselName, terminal, departure, min);
+      closePickers();
+      updateBellStates();
+      showToast('Alert set: ' + vesselName + ' ' + min + 'min from dock');
     });
+
+    form.appendChild(input);
+    form.appendChild(label);
+    picker.appendChild(form);
+    picker.appendChild(setBtn);
 
     // Cancel / remove alert option
     if (current) {
@@ -259,6 +277,8 @@
 
     btn.closest('.sailing-meta').style.position = 'relative';
     btn.closest('.sailing-meta').appendChild(picker);
+    input.focus();
+    input.select();
 
     // Close when clicking outside
     setTimeout(() => {

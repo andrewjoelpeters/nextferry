@@ -255,7 +255,7 @@ class DelayPredictor:
 
         # Evaluate on test set
         if len(X_test) > 0:
-            from .evaluation import evaluate_predictions
+            from .model_training.evaluation import evaluate_predictions
 
             test_df = df[test_mask].copy()
             test_df["predicted_delay"] = self.model_q50.predict(X_test)

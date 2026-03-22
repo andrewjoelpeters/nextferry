@@ -247,6 +247,34 @@ header h1 {
     background: rgba(239, 68, 68, 0.1);
 }
 
+.vessel-status {
+    font-size: var(--text-xs);
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 6px;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.vessel-at-dock {
+    background: rgba(255, 193, 7, 0.15);
+    color: #ffc107;
+}
+
+.vessel-in-transit {
+    background: rgba(40, 167, 69, 0.15);
+    color: #28a745;
+}
+
+.vessel-live-info {
+    font-size: var(--text-xs);
+    color: var(--deck-gray);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    margin-top: 2px;
+}
+
 /* Status indicators: color bars only */
 .status-on-time { border-left-color: var(--success-green); }
 .status-delayed { border-left-color: var(--danger-red); }

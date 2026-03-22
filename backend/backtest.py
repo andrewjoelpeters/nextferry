@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-from .evaluation import compute_metrics, evaluate_predictions
+from .evaluation import ERROR_PERCENTILES, compute_metrics, evaluate_predictions
 
 logger = logging.getLogger(__name__)
 
@@ -166,8 +166,8 @@ def walk_forward_backtest(
             f"Fold {fold_idx}: train={len(train_event_ids)} events, "
             f"test={fold_eval.get('n_test_events', '?')} events, "
             f"MAE={fold_eval['overall_mae']}, "
-            f"safe_2min={fold_eval['overall_safe_2min']}%, "
-            f"risky={fold_eval['overall_risky_rate']}%"
+            f"bias={fold_eval['overall_bias']:+.2f}, "
+            f"p90={fold_eval['overall_error_p90']:+.2f}"
         )
 
     if not fold_results:
@@ -186,10 +186,9 @@ def walk_forward_backtest(
         return {"mean": round(float(np.mean(vals)), 2), "std": round(float(np.std(vals)), 2)}
 
     stability = {
-        "safe_2min": _fold_stat("overall_safe_2min"),
-        "risky_rate": _fold_stat("overall_risky_rate"),
         "mae": _fold_stat("overall_mae"),
         "bias": _fold_stat("overall_bias"),
+        "error_p90": _fold_stat("overall_error_p90"),
         "coverage": _fold_stat("overall_coverage_70pct"),
         "ece": _fold_stat("overall_ece"),
     }
@@ -211,14 +210,16 @@ def walk_forward_backtest(
 def _metric_table(data: dict, key_label: str) -> list:
     """Render a dict of {label: metrics} as a markdown table."""
     lines = []
-    lines.append(f"| {key_label} | Safe 2m | Safe 5m | Risky | MAE | Bias | ECE | N |")
-    lines.append("|" + "|".join(["---"] * 8) + "|")
+    p_cols = " | ".join(f"p{p}" for p in ERROR_PERCENTILES)
+    lines.append(f"| {key_label} | MAE | Bias | {p_cols} | ECE | N |")
+    n_cols = 4 + len(ERROR_PERCENTILES) + 1  # key + mae + bias + percentiles + ece + n
+    lines.append("|" + "|".join(["---"] * n_cols) + "|")
 
     for label, m in sorted(data.items()):
+        p_vals = " | ".join(f"{m[f'error_p{p}']:+.2f}" for p in ERROR_PERCENTILES)
         lines.append(
-            f"| {label} | {m['safe_2min']}% | {m['safe_5min']}% | "
-            f"{m['risky_rate']}% | {m['mae']} | {m['bias']:+.2f} | "
-            f"{m['ece']} | {m['n']} |"
+            f"| {label} | {m['mae']} | {m['bias']:+.2f} | "
+            f"{p_vals} | {m['ece']} | {m['n']} |"
         )
     return lines
 
@@ -259,30 +260,35 @@ def generate_markdown_report(
     lines.append("")
     lines.append("| Metric | Value | What it means |")
     lines.append("|--------|-------|---------------|")
-    lines.append(
-        f"| **Safe within 2 min** | **{agg['overall_safe_2min']}%** | "
-        f"Predicted departure ≤2 min after actual (rider makes it) |"
-    )
-    lines.append(
-        f"| Safe within 5 min | {agg['overall_safe_5min']}% | "
-        f"Predicted departure ≤5 min after actual |"
-    )
-    lines.append(
-        f"| **Risky rate** | **{agg['overall_risky_rate']}%** | "
-        f"Predicted delay >3 min over actual (could miss boat) |"
-    )
-    lines.append(
-        f"| MAE | {agg['overall_mae']} min | Average prediction error |"
-    )
+    lines.append(f"| **MAE** | **{agg['overall_mae']} min** | Average prediction error |")
     lines.append(
         f"| Bias | {agg['overall_bias']:+.2f} min | "
-        f"{'Positive = overpredicts delay = risky' if agg['overall_bias'] > 0 else 'Negative = underpredicts delay = conservative'} |"
+        f"{'Positive = overpredicts delay = risky' if agg['overall_bias'] > 0 else 'Negative = conservative (rider arrives early)'} |"
     )
     lines.append(f"| 70% Interval Coverage | {agg['overall_coverage_70pct']}% | Target: 70% |")
     lines.append(f"| ECE | {agg['overall_ece']} | Quantile calibration (lower is better) |")
     if "overall_baseline_mae" in agg:
         lines.append(f"| Baseline MAE (flat delay) | {agg['overall_baseline_mae']} min | Naive model comparison |")
         lines.append(f"| Improvement vs baseline | {agg['overall_improvement_pct']}% | |")
+    lines.append("")
+
+    # ---- Error distribution ----
+    lines.append("## Error Distribution (predicted - actual)")
+    lines.append("")
+    lines.append("> Positive = overpredicted delay = rider might miss boat.  ")
+    lines.append("> Negative = underpredicted delay = rider arrives early (safe).")
+    lines.append("")
+    lines.append("| Percentile | Value | Interpretation |")
+    lines.append("|------------|-------|----------------|")
+    for p in ERROR_PERCENTILES:
+        val = agg[f"overall_error_p{p}"]
+        if p <= 50:
+            interp = "Typical error"
+        elif p <= 75:
+            interp = f"{p}% of predictions are below this"
+        else:
+            interp = f"Worst {100 - p}% of cases exceed this"
+        lines.append(f"| p{p} | {val:+.2f} min | {interp} |")
     lines.append("")
 
     # ---- Comparison (right after top-line if available) ----
@@ -295,10 +301,9 @@ def generate_markdown_report(
     lines.append("| Metric | Mean | Std Dev | Interpretation |")
     lines.append("|--------|------|---------|----------------|")
     for key, label, note_fn in [
-        ("safe_2min", "Safe 2 min", lambda s: "stable" if s["std"] < 3 else "variable"),
-        ("risky_rate", "Risky rate", lambda s: "low" if s["mean"] < 10 else ("moderate" if s["mean"] < 20 else "high")),
         ("mae", "MAE", lambda s: "stable" if s["std"] < 0.5 else "variable"),
         ("bias", "Bias", lambda s: "safe (negative)" if s["mean"] < 0 and s["std"] < 0.5 else ("risky (positive)" if s["mean"] > 0.5 else "neutral")),
+        ("error_p90", "Error p90", lambda s: "stable" if s["std"] < 1 else "variable"),
         ("coverage", "Coverage", lambda s: "calibrated" if abs(s["mean"] - 70) < 5 else "miscalibrated"),
         ("ece", "ECE", lambda s: "well calibrated" if s["mean"] < 0.1 else "needs calibration"),
     ]:
@@ -308,13 +313,13 @@ def generate_markdown_report(
     lines.append("")
 
     # Per-fold detail
-    lines.append("| Fold | Train | Test | Safe 2m | Risky | MAE | Bias |")
-    lines.append("|------|-------|------|---------|-------|-----|------|")
+    lines.append("| Fold | Train | Test | MAE | Bias | p90 | Coverage |")
+    lines.append("|------|-------|------|-----|------|-----|----------|")
     for f in backtest_results["fold_results"]:
         lines.append(
             f"| {f['fold']} | {f['n_train_events']} | {f.get('n_test_events', '?')} | "
-            f"{f['overall_safe_2min']}% | {f['overall_risky_rate']}% | "
-            f"{f['overall_mae']} | {f['overall_bias']:+.2f} |"
+            f"{f['overall_mae']} | {f['overall_bias']:+.2f} | "
+            f"{f['overall_error_p90']:+.2f} | {f['overall_coverage_70pct']}% |"
         )
     lines.append("")
 
@@ -398,9 +403,6 @@ def _comparison_section(agg: dict, prev: dict) -> list:
     lines.append("|--------|----------|---------|-------|")
 
     comparisons = [
-        ("Safe 2 min", "overall_safe_2min", "%", False),
-        ("Safe 5 min", "overall_safe_5min", "%", False),
-        ("Risky rate", "overall_risky_rate", "%", True),
         ("MAE", "overall_mae", " min", True),
         ("Bias (abs)", None, " min", True),  # special handling
         ("Coverage", "overall_coverage_70pct", "%", False),
@@ -428,6 +430,21 @@ def _comparison_section(agg: dict, prev: dict) -> list:
                 f"{_delta_str(p, c, lower_is_better)} |"
             )
 
+    # Error percentile comparison
+    p_rows = []
+    for p in ERROR_PERCENTILES:
+        pk = f"overall_error_p{p}"
+        pv = prev.get(pk)
+        cv = agg.get(pk)
+        if pv is not None and cv is not None:
+            p_rows.append(
+                f"| Error p{p} | {pv:+.2f} min | {cv:+.2f} min | "
+                f"{_delta_str(pv, cv, lower_is_better=True)} |"
+            )
+    if p_rows:
+        for row in p_rows:
+            lines.append(row)
+
     # Per-route comparison
     prev_routes = prev.get("by_route", {})
     curr_routes = agg.get("by_route", {})
@@ -436,17 +453,17 @@ def _comparison_section(agg: dict, prev: dict) -> list:
         lines.append("")
         lines.append("### Per-Route Comparison")
         lines.append("")
-        lines.append("| Route | Prev Safe2m | Curr Safe2m | Prev Risky | Curr Risky | MAE Delta |")
-        lines.append("|-------|------------|------------|-----------|-----------|-----------|")
+        lines.append("| Route | Prev MAE | Curr MAE | Prev p90 | Curr p90 | MAE Delta |")
+        lines.append("|-------|----------|----------|----------|----------|-----------|")
         for r in all_routes:
-            ps = prev_routes.get(r, {}).get("safe_2min", "—")
-            cs = curr_routes.get(r, {}).get("safe_2min", "—")
-            pr = prev_routes.get(r, {}).get("risky_rate", "—")
-            cr = curr_routes.get(r, {}).get("risky_rate", "—")
             pm = prev_routes.get(r, {}).get("mae", "—")
             cm = curr_routes.get(r, {}).get("mae", "—")
+            pp = prev_routes.get(r, {}).get("error_p90", "—")
+            cp = curr_routes.get(r, {}).get("error_p90", "—")
             delta = _delta_str(pm, cm) if isinstance(pm, (int, float)) and isinstance(cm, (int, float)) else "—"
-            lines.append(f"| {r} | {ps}% | {cs}% | {pr}% | {cr}% | {delta} |")
+            pp_s = f"{pp:+.2f}" if isinstance(pp, (int, float)) else pp
+            cp_s = f"{cp:+.2f}" if isinstance(cp, (int, float)) else cp
+            lines.append(f"| {r} | {pm} | {cm} | {pp_s} | {cp_s} | {delta} |")
 
     lines.append("")
     return lines

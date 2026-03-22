@@ -1,17 +1,18 @@
 """Evaluation framework for the delay prediction model.
 
 Metrics are chosen from the ferry rider's perspective — asymmetric because
-underpredicting delay (rider misses boat) is far worse than overpredicting
-(rider waits a bit):
+overpredicting delay is dangerous (rider shows up late, boat already left):
 
-- "safe_2min": % where rider would arrive within 2 min of actual departure
-   i.e. predicted_delay >= actual_delay - 2. Overpredicting is fine here.
+- "safe_2min": % where predicted departure is within 2 min after actual.
+   Underpredicting delay (rider arrives early, waits) is always safe.
+   Overpredicting delay (rider thinks boat leaves later) is the risk.
 - "safe_5min": same with 5-min tolerance
-- "risky_rate": % where actual delay exceeded prediction by >3 min —
-   the rider might miss the boat
+- "risky_rate": % where predicted delay > actual delay + 3 min — the model
+   told the rider the boat departs later than it really did
 - "mae": mean absolute error in minutes
-- "bias": mean signed error (positive = overpredicts delay = conservative)
+- "bias": mean signed error (positive = overpredicts delay = DANGEROUS)
 - "coverage_70pct": % of actuals inside the [q15, q85] prediction interval
+- "ece": expected calibration error for quantile predictions
 - "baseline_mae" / "improvement_pct": vs naive "current delay = future delay"
 
 Usage:
@@ -61,8 +62,10 @@ def compute_metrics(errors: pd.Series, actuals: pd.Series,
     """Compute user-centric metrics for a group of predictions.
 
     errors = predicted - actual.
-    Positive error = overpredicted delay (rider waits, safe).
-    Negative error = underpredicted delay (rider may miss boat, dangerous).
+    Positive error = overpredicted delay = predicted departure AFTER actual
+        = DANGEROUS (rider arrives after the boat left).
+    Negative error = underpredicted delay = predicted departure BEFORE actual
+        = safe (rider arrives early, waits a bit).
     """
     if len(errors) == 0:
         return None
@@ -70,14 +73,22 @@ def compute_metrics(errors: pd.Series, actuals: pd.Series,
     abs_errors = np.abs(errors)
     within_bounds = (actuals >= lower) & (actuals <= upper)
 
-    # Asymmetric: "safe" means predicted >= actual - threshold.
-    # Equivalently: error >= -threshold (overpredicting is always safe).
-    safe_2min = (errors >= -2)
-    safe_5min = (errors >= -5)
+    # "Safe" means predicted departure is at most N min AFTER actual departure.
+    # predicted_delay <= actual_delay + threshold  →  error <= threshold
+    # Underpredicting (error < 0) is always safe — rider arrives early.
+    safe_2min = (errors <= 2)
+    safe_5min = (errors <= 5)
 
-    # "Risky" means actual exceeded prediction by >3 min — rider might
-    # have shown up too late and missed the boat.
-    risky = (errors < -3)
+    # "Risky" means predicted delay > actual delay + 3 min — the model said
+    # the boat would leave later than it did, rider could miss it.
+    risky = (errors > 3)
+
+    # Expected calibration error: how well do quantile predictions match
+    # their nominal levels? Measures |observed_freq - target_freq| for
+    # the q15 and q85 bounds.
+    q15_observed = float((actuals < lower).mean())  # should be ~0.15
+    q85_observed = float((actuals < upper).mean())   # should be ~0.85
+    ece = round(abs(q15_observed - 0.15) + abs(q85_observed - 0.85), 3)
 
     metrics = {
         "safe_2min": round(float(safe_2min.mean() * 100), 1),
@@ -86,6 +97,7 @@ def compute_metrics(errors: pd.Series, actuals: pd.Series,
         "mae": round(float(abs_errors.mean()), 2),
         "bias": round(float(errors.mean()), 2),
         "coverage_70pct": round(float(within_bounds.mean() * 100), 1),
+        "ece": ece,
         "n": int(len(errors)),
     }
     if baseline_errors is not None and len(baseline_errors) > 0:
@@ -293,10 +305,11 @@ def print_evaluation(results: dict):
 
     print(f"\n  Safe within 2 min: {results['overall_safe_2min']}%")
     print(f"  Safe within 5 min: {results['overall_safe_5min']}%")
-    print(f"  Risky rate (>3m under): {results['overall_risky_rate']}%")
+    print(f"  Risky rate (>3m over): {results['overall_risky_rate']}%")
     print(f"  MAE:               {results['overall_mae']} min")
-    print(f"  Bias:              {results['overall_bias']:+.2f} min")
+    print(f"  Bias:              {results['overall_bias']:+.2f} min (positive = risky)")
     print(f"  70% Coverage:      {results['overall_coverage_70pct']}%")
+    print(f"  ECE:               {results['overall_ece']}")
 
     if "overall_baseline_mae" in results:
         print(f"\n  Baseline MAE:      {results['overall_baseline_mae']} min")

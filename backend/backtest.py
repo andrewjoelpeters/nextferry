@@ -191,6 +191,7 @@ def walk_forward_backtest(
         "mae": _fold_stat("overall_mae"),
         "bias": _fold_stat("overall_bias"),
         "coverage": _fold_stat("overall_coverage_70pct"),
+        "ece": _fold_stat("overall_ece"),
     }
 
     return {
@@ -210,13 +211,14 @@ def walk_forward_backtest(
 def _metric_table(data: dict, key_label: str) -> list:
     """Render a dict of {label: metrics} as a markdown table."""
     lines = []
-    lines.append(f"| {key_label} | Safe 2m | Safe 5m | Risky | MAE | Bias | N |")
-    lines.append("|" + "|".join(["---"] * 7) + "|")
+    lines.append(f"| {key_label} | Safe 2m | Safe 5m | Risky | MAE | Bias | ECE | N |")
+    lines.append("|" + "|".join(["---"] * 8) + "|")
 
     for label, m in sorted(data.items()):
         lines.append(
             f"| {label} | {m['safe_2min']}% | {m['safe_5min']}% | "
-            f"{m['risky_rate']}% | {m['mae']} | {m['bias']:+.2f} | {m['n']} |"
+            f"{m['risky_rate']}% | {m['mae']} | {m['bias']:+.2f} | "
+            f"{m['ece']} | {m['n']} |"
         )
     return lines
 
@@ -259,24 +261,25 @@ def generate_markdown_report(
     lines.append("|--------|-------|---------------|")
     lines.append(
         f"| **Safe within 2 min** | **{agg['overall_safe_2min']}%** | "
-        f"Rider arrives with ≤2 min of actual departure |"
+        f"Predicted departure ≤2 min after actual (rider makes it) |"
     )
     lines.append(
         f"| Safe within 5 min | {agg['overall_safe_5min']}% | "
-        f"Rider arrives with ≤5 min of actual departure |"
+        f"Predicted departure ≤5 min after actual |"
     )
     lines.append(
         f"| **Risky rate** | **{agg['overall_risky_rate']}%** | "
-        f"Actual delay >3 min worse than predicted (could miss boat) |"
+        f"Predicted delay >3 min over actual (could miss boat) |"
     )
     lines.append(
         f"| MAE | {agg['overall_mae']} min | Average prediction error |"
     )
     lines.append(
         f"| Bias | {agg['overall_bias']:+.2f} min | "
-        f"{'Conservative (overpredicts)' if agg['overall_bias'] > 0 else 'Aggressive (underpredicts)'} |"
+        f"{'Positive = overpredicts delay = risky' if agg['overall_bias'] > 0 else 'Negative = underpredicts delay = conservative'} |"
     )
-    lines.append(f"| 70% Interval Coverage | {agg['overall_coverage_70pct']}% | Prediction interval calibration |")
+    lines.append(f"| 70% Interval Coverage | {agg['overall_coverage_70pct']}% | Target: 70% |")
+    lines.append(f"| ECE | {agg['overall_ece']} | Quantile calibration (lower is better) |")
     if "overall_baseline_mae" in agg:
         lines.append(f"| Baseline MAE (flat delay) | {agg['overall_baseline_mae']} min | Naive model comparison |")
         lines.append(f"| Improvement vs baseline | {agg['overall_improvement_pct']}% | |")
@@ -293,10 +296,11 @@ def generate_markdown_report(
     lines.append("|--------|------|---------|----------------|")
     for key, label, note_fn in [
         ("safe_2min", "Safe 2 min", lambda s: "stable" if s["std"] < 3 else "variable"),
-        ("risky_rate", "Risky rate", lambda s: "stable" if s["std"] < 2 else "variable"),
+        ("risky_rate", "Risky rate", lambda s: "low" if s["mean"] < 10 else ("moderate" if s["mean"] < 20 else "high")),
         ("mae", "MAE", lambda s: "stable" if s["std"] < 0.5 else "variable"),
-        ("bias", "Bias", lambda s: "consistent" if abs(s["mean"]) < 1 and s["std"] < 0.5 else "drifting"),
+        ("bias", "Bias", lambda s: "safe (negative)" if s["mean"] < 0 and s["std"] < 0.5 else ("risky (positive)" if s["mean"] > 0.5 else "neutral")),
         ("coverage", "Coverage", lambda s: "calibrated" if abs(s["mean"] - 70) < 5 else "miscalibrated"),
+        ("ece", "ECE", lambda s: "well calibrated" if s["mean"] < 0.1 else "needs calibration"),
     ]:
         s = stab.get(key)
         if s:
@@ -400,6 +404,7 @@ def _comparison_section(agg: dict, prev: dict) -> list:
         ("MAE", "overall_mae", " min", True),
         ("Bias (abs)", None, " min", True),  # special handling
         ("Coverage", "overall_coverage_70pct", "%", False),
+        ("ECE", "overall_ece", "", True),
         ("Improvement vs baseline", "overall_improvement_pct", "%", False),
     ]
 

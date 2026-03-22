@@ -21,7 +21,13 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-from .database import get_connection, get_sailing_event_count, get_training_data
+from .database import (
+    get_connection,
+    get_previous_sailing_fullness,
+    get_sailing_event_count,
+    get_training_data,
+    get_turnaround_minutes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +90,13 @@ class DelayPredictor:
                 scheduled_dep = event["scheduled_departure"]
                 vessel_id = event["vessel_id"]
                 actual_delay = event["delay_minutes"]
+                departing_terminal_id = event["departing_terminal_id"] or 0
+
+                # Get docking features (same for all horizons of this event)
+                prev_fullness = get_previous_sailing_fullness(
+                    departing_terminal_id, scheduled_dep
+                )
+                turnaround = get_turnaround_minutes(vessel_id, scheduled_dep)
 
                 for horizon_min in TIME_HORIZONS_MINUTES:
                     # Compute the time at which we'd be predicting
@@ -123,13 +136,14 @@ class DelayPredictor:
                         {
                             "sailing_event_id": event["id"],
                             "route_abbrev": event["route_abbrev"] or "unknown",
-                            "departing_terminal_id": event["departing_terminal_id"]
-                            or 0,
+                            "departing_terminal_id": departing_terminal_id,
                             "day_of_week": event["day_of_week"],
                             "hour_of_day": event["hour_of_day"],
                             "minutes_until_scheduled_departure": horizon_min,
                             "current_vessel_delay_minutes": current_vessel_delay,
                             "is_peak_hour": int(is_peak_hour(event["hour_of_day"])),
+                            "previous_sailing_fullness": prev_fullness if prev_fullness is not None else np.nan,
+                            "turnaround_minutes": turnaround if turnaround is not None else np.nan,
                             "actual_delay_minutes": actual_delay,
                         }
                     )
@@ -160,6 +174,8 @@ class DelayPredictor:
             "minutes_until_scheduled_departure",
             "current_vessel_delay_minutes",
             "is_peak_hour",
+            "previous_sailing_fullness",
+            "turnaround_minutes",
         ]
         target_col = "actual_delay_minutes"
 
@@ -257,6 +273,8 @@ class DelayPredictor:
         hour_of_day: int,
         minutes_until_scheduled_departure: float,
         current_vessel_delay_minutes: float,
+        previous_sailing_fullness: Optional[float] = None,
+        turnaround_minutes: Optional[float] = None,
     ) -> Optional[dict]:
         """Predict delay with confidence interval.
 
@@ -280,6 +298,8 @@ class DelayPredictor:
                     minutes_until_scheduled_departure,
                     current_vessel_delay_minutes,
                     int(is_peak_hour(hour_of_day)),
+                    previous_sailing_fullness if previous_sailing_fullness is not None else np.nan,
+                    turnaround_minutes if turnaround_minutes is not None else np.nan,
                 ]
             ]
         )

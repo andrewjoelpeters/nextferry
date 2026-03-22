@@ -156,6 +156,11 @@ class RouteSailing(BaseModel):
     delay_upper_bound: Optional[int] = None
     vessel_name: str
     vessel_position_num: int
+    # Live vessel state for the current/next sailing
+    vessel_at_dock: Optional[bool] = None
+    vessel_left_dock: Optional[datetime] = None
+    vessel_eta: Optional[datetime] = None
+    vessel_delay_minutes: Optional[int] = None
 
 
 class DirectionalSailing(RouteSailing):
@@ -174,6 +179,10 @@ class DirectionalSailing(RouteSailing):
                     "delay_upper_bound",
                     "vessel_name",
                     "vessel_position_num",
+                    "vessel_at_dock",
+                    "vessel_left_dock",
+                    "vessel_eta",
+                    "vessel_delay_minutes",
                 }
             )
         )

@@ -44,6 +44,9 @@
                                 {% endif %}
                             </div>
                             {% endif %}
+                            {% if sailing.fill_risk %}
+                            <span class="fill-risk fill-risk-{{ sailing.fill_risk.risk_level }}">{{ sailing.fill_risk.label }}</span>
+                            {% endif %}
                         </summary>
                         {% if sailing.vessel_info %}
                         <div class="vessel-live-info">

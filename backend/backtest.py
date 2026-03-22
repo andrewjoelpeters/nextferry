@@ -165,7 +165,9 @@ def walk_forward_backtest(
         logger.info(
             f"Fold {fold_idx}: train={len(train_event_ids)} events, "
             f"test={fold_eval.get('n_test_events', '?')} events, "
-            f"MAE={fold_eval['overall_mae']}, ±2min={fold_eval['overall_within_2min']}%"
+            f"MAE={fold_eval['overall_mae']}, "
+            f"safe_2min={fold_eval['overall_safe_2min']}%, "
+            f"risky={fold_eval['overall_risky_rate']}%"
         )
 
     if not fold_results:
@@ -184,7 +186,8 @@ def walk_forward_backtest(
         return {"mean": round(float(np.mean(vals)), 2), "std": round(float(np.std(vals)), 2)}
 
     stability = {
-        "within_2min": _fold_stat("overall_within_2min"),
+        "safe_2min": _fold_stat("overall_safe_2min"),
+        "risky_rate": _fold_stat("overall_risky_rate"),
         "mae": _fold_stat("overall_mae"),
         "bias": _fold_stat("overall_bias"),
         "coverage": _fold_stat("overall_coverage_70pct"),
@@ -204,21 +207,16 @@ def walk_forward_backtest(
 # Markdown report generation
 # ---------------------------------------------------------------------------
 
-def _metric_table(data: dict, key_label: str, sort_by: Optional[str] = None) -> list:
-    """Render a dict of {label: metrics} as a markdown table.
-
-    Columns: key_label | ±2 min | ±5 min | MAE | Bias | Coverage | Impr% | N
-    """
+def _metric_table(data: dict, key_label: str) -> list:
+    """Render a dict of {label: metrics} as a markdown table."""
     lines = []
-    lines.append(f"| {key_label} | ±2 min | ±5 min | MAE | Bias | Coverage | Impr% | N |")
-    lines.append("|" + "|".join(["---"] * 8) + "|")
+    lines.append(f"| {key_label} | Safe 2m | Safe 5m | Risky | MAE | Bias | N |")
+    lines.append("|" + "|".join(["---"] * 7) + "|")
 
-    items = sorted(data.items(), key=lambda x: x[1].get(sort_by, x[0]) if sort_by else x[0])
-    for label, m in items:
-        impr = f"{m['improvement_pct']}%" if "improvement_pct" in m else "—"
+    for label, m in sorted(data.items()):
         lines.append(
-            f"| {label} | {m['within_2min']}% | {m['within_5min']}% | "
-            f"{m['mae']} | {m['bias']:+.2f} | {m['coverage_70pct']}% | {impr} | {m['n']} |"
+            f"| {label} | {m['safe_2min']}% | {m['safe_5min']}% | "
+            f"{m['risky_rate']}% | {m['mae']} | {m['bias']:+.2f} | {m['n']} |"
         )
     return lines
 
@@ -254,26 +252,34 @@ def generate_markdown_report(
     lines.append(f"**Walk-forward folds:** {backtest_results['n_folds']}")
     lines.append("")
 
-    # ---- TOP-LINE RESULTS (the thing you look at first) ----
+    # ---- TOP-LINE RESULTS ----
     lines.append("## Top-Line Results")
     lines.append("")
-    lines.append("| Metric | Value |")
-    lines.append("|--------|-------|")
-
-    w2 = agg["overall_within_2min"]
-    w5 = agg["overall_within_5min"]
-    mae = agg["overall_mae"]
-    bias = agg["overall_bias"]
-    cov = agg["overall_coverage_70pct"]
-
-    lines.append(f"| **Predictions within ±2 min** | **{w2}%** |")
-    lines.append(f"| Predictions within ±5 min | {w5}% |")
-    lines.append(f"| Mean Absolute Error | {mae} min |")
-    lines.append(f"| Bias (positive = overpredicts delay) | {bias:+.2f} min |")
-    lines.append(f"| 70% Prediction Interval Coverage | {cov}% |")
+    lines.append("| Metric | Value | What it means |")
+    lines.append("|--------|-------|---------------|")
+    lines.append(
+        f"| **Safe within 2 min** | **{agg['overall_safe_2min']}%** | "
+        f"Rider arrives with ≤2 min of actual departure |"
+    )
+    lines.append(
+        f"| Safe within 5 min | {agg['overall_safe_5min']}% | "
+        f"Rider arrives with ≤5 min of actual departure |"
+    )
+    lines.append(
+        f"| **Risky rate** | **{agg['overall_risky_rate']}%** | "
+        f"Actual delay >3 min worse than predicted (could miss boat) |"
+    )
+    lines.append(
+        f"| MAE | {agg['overall_mae']} min | Average prediction error |"
+    )
+    lines.append(
+        f"| Bias | {agg['overall_bias']:+.2f} min | "
+        f"{'Conservative (overpredicts)' if agg['overall_bias'] > 0 else 'Aggressive (underpredicts)'} |"
+    )
+    lines.append(f"| 70% Interval Coverage | {agg['overall_coverage_70pct']}% | Prediction interval calibration |")
     if "overall_baseline_mae" in agg:
-        lines.append(f"| Baseline MAE (flat delay) | {agg['overall_baseline_mae']} min |")
-        lines.append(f"| Improvement vs baseline | {agg['overall_improvement_pct']}% |")
+        lines.append(f"| Baseline MAE (flat delay) | {agg['overall_baseline_mae']} min | Naive model comparison |")
+        lines.append(f"| Improvement vs baseline | {agg['overall_improvement_pct']}% | |")
     lines.append("")
 
     # ---- Comparison (right after top-line if available) ----
@@ -286,7 +292,8 @@ def generate_markdown_report(
     lines.append("| Metric | Mean | Std Dev | Interpretation |")
     lines.append("|--------|------|---------|----------------|")
     for key, label, note_fn in [
-        ("within_2min", "±2 min accuracy", lambda s: "stable" if s["std"] < 3 else "variable"),
+        ("safe_2min", "Safe 2 min", lambda s: "stable" if s["std"] < 3 else "variable"),
+        ("risky_rate", "Risky rate", lambda s: "stable" if s["std"] < 2 else "variable"),
         ("mae", "MAE", lambda s: "stable" if s["std"] < 0.5 else "variable"),
         ("bias", "Bias", lambda s: "consistent" if abs(s["mean"]) < 1 and s["std"] < 0.5 else "drifting"),
         ("coverage", "Coverage", lambda s: "calibrated" if abs(s["mean"] - 70) < 5 else "miscalibrated"),
@@ -297,12 +304,13 @@ def generate_markdown_report(
     lines.append("")
 
     # Per-fold detail
-    lines.append("| Fold | Train Events | Test Events | ±2 min | MAE | Bias |")
-    lines.append("|------|-------------|-------------|--------|-----|------|")
+    lines.append("| Fold | Train | Test | Safe 2m | Risky | MAE | Bias |")
+    lines.append("|------|-------|------|---------|-------|-----|------|")
     for f in backtest_results["fold_results"]:
         lines.append(
             f"| {f['fold']} | {f['n_train_events']} | {f.get('n_test_events', '?')} | "
-            f"{f['overall_within_2min']}% | {f['overall_mae']} | {f['overall_bias']:+.2f} |"
+            f"{f['overall_safe_2min']}% | {f['overall_risky_rate']}% | "
+            f"{f['overall_mae']} | {f['overall_bias']:+.2f} |"
         )
     lines.append("")
 
@@ -386,8 +394,9 @@ def _comparison_section(agg: dict, prev: dict) -> list:
     lines.append("|--------|----------|---------|-------|")
 
     comparisons = [
-        ("±2 min accuracy", "overall_within_2min", "%", False),
-        ("±5 min accuracy", "overall_within_5min", "%", False),
+        ("Safe 2 min", "overall_safe_2min", "%", False),
+        ("Safe 5 min", "overall_safe_5min", "%", False),
+        ("Risky rate", "overall_risky_rate", "%", True),
         ("MAE", "overall_mae", " min", True),
         ("Bias (abs)", None, " min", True),  # special handling
         ("Coverage", "overall_coverage_70pct", "%", False),
@@ -396,7 +405,6 @@ def _comparison_section(agg: dict, prev: dict) -> list:
 
     for label, key, suffix, lower_is_better in comparisons:
         if key is None:
-            # Bias absolute value
             p = prev.get("overall_bias")
             c = agg.get("overall_bias")
             if p is not None and c is not None:
@@ -423,15 +431,17 @@ def _comparison_section(agg: dict, prev: dict) -> list:
         lines.append("")
         lines.append("### Per-Route Comparison")
         lines.append("")
-        lines.append("| Route | Prev ±2min | Curr ±2min | Prev MAE | Curr MAE | MAE Delta |")
-        lines.append("|-------|-----------|-----------|----------|----------|-----------|")
+        lines.append("| Route | Prev Safe2m | Curr Safe2m | Prev Risky | Curr Risky | MAE Delta |")
+        lines.append("|-------|------------|------------|-----------|-----------|-----------|")
         for r in all_routes:
-            pw2 = prev_routes.get(r, {}).get("within_2min", "—")
-            cw2 = curr_routes.get(r, {}).get("within_2min", "—")
+            ps = prev_routes.get(r, {}).get("safe_2min", "—")
+            cs = curr_routes.get(r, {}).get("safe_2min", "—")
+            pr = prev_routes.get(r, {}).get("risky_rate", "—")
+            cr = curr_routes.get(r, {}).get("risky_rate", "—")
             pm = prev_routes.get(r, {}).get("mae", "—")
             cm = curr_routes.get(r, {}).get("mae", "—")
             delta = _delta_str(pm, cm) if isinstance(pm, (int, float)) and isinstance(cm, (int, float)) else "—"
-            lines.append(f"| {r} | {pw2}% | {cw2}% | {pm} | {cm} | {delta} |")
+            lines.append(f"| {r} | {ps}% | {cs}% | {pr}% | {cr}% | {delta} |")
 
     lines.append("")
     return lines

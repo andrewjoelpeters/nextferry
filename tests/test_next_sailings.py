@@ -206,8 +206,10 @@ class TestGetNextSailingsByBoat:
             ]
         }
         result = get_next_sailings_by_boat(sailings, [vessel])
-        # En route: excludes the current sailing
-        assert len(result[1]) == 1
+        # En route: includes the just-departed sailing (marked departed) + future
+        assert len(result[1]) == 2
+        assert result[1][0].departed is True
+        assert result[1][1].departed is False
 
 
 class TestGetDirectionalSchedules:

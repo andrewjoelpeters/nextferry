@@ -256,6 +256,22 @@ header h1 {
     opacity: 0.6;
 }
 
+/* Departed sailing: subtle but informative */
+.sailing-departed {
+    border-left-color: var(--deck-gray);
+    opacity: 0.55;
+    border-bottom: 1px dashed rgba(0, 0, 0, 0.08);
+}
+.sailing-departed .time-until-prominent {
+    font-size: var(--text-sm);
+    color: var(--deck-gray);
+}
+.sailing-departed .departed-info {
+    font-size: var(--text-xs);
+    color: var(--deck-gray);
+    font-style: italic;
+}
+
 /* Last updated */
 .last-updated {
     text-align: center;

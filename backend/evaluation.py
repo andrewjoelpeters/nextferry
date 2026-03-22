@@ -1,21 +1,16 @@
 """Evaluation framework for the delay prediction model.
 
-Metrics are chosen from the ferry rider's perspective. The key insight is
-that errors are asymmetric: overpredicting delay (positive error) is
-dangerous — the rider thinks the boat leaves later than it does and
-might miss it. Underpredicting (negative error) just means the rider
-arrives early.
+Three core metrics, chosen from the ferry rider's perspective:
 
-Core metrics (no hardcoded thresholds):
-- "mae": mean absolute error in minutes
-- "bias": mean signed error (positive = overpredicts delay = dangerous)
-- "error_p50/p75/p90/p95": percentiles of signed error (predicted - actual).
-   These tell you the full risk distribution — e.g. if p90 = 2.1, then
-   90% of the time the predicted departure is at most 2.1 min after actual.
-   Read off any safety threshold you want from these.
-- "coverage_70pct": % of actuals inside the [q15, q85] prediction interval
-- "ece": expected calibration error for quantile predictions
-- "baseline_mae" / "improvement_pct": vs naive "current delay = future delay"
+- "mae": mean absolute error in minutes — overall accuracy
+- "bias": mean signed error — positive = overpredicts delay = dangerous
+  (rider thinks boat leaves later than it does, might miss it)
+- "error_p90": 90th percentile of signed error — tail risk
+  (in the worst 10% of cases, how far off is the prediction?)
+
+Plus at the top level only:
+- "coverage_70pct": is the prediction interval calibrated?
+- "improvement_pct": is the model better than naive "current delay = future delay"?
 
 Usage:
     python -m backend.evaluation
@@ -41,8 +36,8 @@ TIME_OF_DAY_BUCKETS = [
     ("Evening (19–22)", 19, 22),
 ]
 
-# Prediction horizon buckets — fine-grained where it matters (5–30 min),
-# coarser further out, nothing beyond 90 min (riders don't plan that far)
+# Prediction horizon buckets — fine-grained where it matters (2–30 min),
+# coarser further out, nothing beyond 90 min
 HORIZON_BUCKETS = [
     ("2–4m", 2, 4),
     ("4–6m", 4, 6),
@@ -56,46 +51,36 @@ HORIZON_BUCKETS = [
     ("60–90m", 60, 90),
 ]
 
-# Error percentiles to report. These describe the signed error distribution
-# (predicted - actual) so positive values = overpredicting delay = risky.
-ERROR_PERCENTILES = [50, 75, 90, 95]
 
-
-def compute_metrics(errors: pd.Series, actuals: pd.Series,
-                    predictions: pd.Series,
-                    lower: pd.Series, upper: pd.Series,
+def compute_metrics(errors: pd.Series,
+                    actuals: Optional[pd.Series] = None,
+                    lower: Optional[pd.Series] = None,
+                    upper: Optional[pd.Series] = None,
                     baseline_errors: Optional[pd.Series] = None) -> Optional[dict]:
-    """Compute user-centric metrics for a group of predictions.
+    """Compute metrics for a group of predictions.
 
     errors = predicted - actual.
-    Positive error = overpredicted delay = predicted departure AFTER actual
-        = DANGEROUS (rider arrives after the boat left).
-    Negative error = underpredicted delay = predicted departure BEFORE actual
-        = safe (rider arrives early, waits a bit).
+    Positive = overpredicted delay = predicted departure AFTER actual = DANGEROUS.
+    Negative = underpredicted delay = rider arrives early = safe.
+
+    actuals/lower/upper are only needed for coverage (top-level use).
     """
     if len(errors) == 0:
         return None
 
     abs_errors = np.abs(errors)
-    within_bounds = (actuals >= lower) & (actuals <= upper)
-
-    # Expected calibration error: |observed_freq - target_freq| for q15/q85.
-    q15_observed = float((actuals < lower).mean())  # should be ~0.15
-    q85_observed = float((actuals < upper).mean())   # should be ~0.85
-    ece = round(abs(q15_observed - 0.15) + abs(q85_observed - 0.85), 3)
 
     metrics = {
         "mae": round(float(abs_errors.mean()), 2),
         "bias": round(float(errors.mean()), 2),
-        "coverage_70pct": round(float(within_bounds.mean() * 100), 1),
-        "ece": ece,
+        "error_p90": round(float(np.percentile(errors, 90)), 2),
         "n": int(len(errors)),
     }
 
-    # Error distribution percentiles (the risk profile).
-    # Positive values = how far predicted departure can be AFTER actual.
-    for p in ERROR_PERCENTILES:
-        metrics[f"error_p{p}"] = round(float(np.percentile(errors, p)), 2)
+    # Coverage — only meaningful when interval bounds are provided
+    if actuals is not None and lower is not None and upper is not None:
+        within_bounds = (actuals >= lower) & (actuals <= upper)
+        metrics["coverage_70pct"] = round(float(within_bounds.mean() * 100), 1)
 
     if baseline_errors is not None and len(baseline_errors) > 0:
         baseline_mae = float(np.abs(baseline_errors).mean())
@@ -106,18 +91,14 @@ def compute_metrics(errors: pd.Series, actuals: pd.Series,
     return metrics
 
 
-def _slice_metrics(test_df, errors, predictions, baseline_errors, groupby_col):
-    """Compute metrics for each value of groupby_col."""
+def _slice_metrics(test_df, errors, baseline_errors, groupby_col):
+    """Compute core metrics (mae, bias, p90) for each value of groupby_col."""
     result = {}
     for val, group in test_df.groupby(groupby_col):
         idx = group.index
         g_errors = errors.loc[idx]
-        g_preds = predictions.loc[idx]
         g_baseline = baseline_errors.loc[idx] if baseline_errors is not None else None
-        m = compute_metrics(
-            g_errors, group["actual_delay_minutes"], g_preds,
-            group["lower_bound"], group["upper_bound"], g_baseline
-        )
+        m = compute_metrics(g_errors, baseline_errors=g_baseline)
         if m:
             result[val] = m
     return result
@@ -136,7 +117,6 @@ def evaluate_predictions(test_df: pd.DataFrame) -> dict:
     results = {}
 
     errors = test_df["predicted_delay"] - test_df["actual_delay_minutes"]
-    predictions = test_df["predicted_delay"]
     actuals = test_df["actual_delay_minutes"]
     lower = test_df["lower_bound"]
     upper = test_df["upper_bound"]
@@ -147,91 +127,70 @@ def evaluate_predictions(test_df: pd.DataFrame) -> dict:
             test_df["current_vessel_delay_minutes"] - test_df["actual_delay_minutes"]
         )
 
-    # --- Top-line metrics ---
-    overall = compute_metrics(errors, actuals, predictions, lower, upper, baseline_errors)
+    # --- Top-line metrics (with coverage + baseline) ---
+    overall = compute_metrics(errors, actuals, lower, upper, baseline_errors)
     for k, v in overall.items():
         results[f"overall_{k}" if k != "n" else "n_test_samples"] = v
 
-    # --- Per-route ---
+    # --- Dimensional breakdowns (core three only) ---
+
     if "route_abbrev" in test_df.columns:
         results["by_route"] = _slice_metrics(
-            test_df, errors, predictions, baseline_errors, "route_abbrev"
+            test_df, errors, baseline_errors, "route_abbrev"
         )
 
-    # --- Per day of week ---
     if "day_of_week" in test_df.columns:
-        raw = _slice_metrics(test_df, errors, predictions, baseline_errors, "day_of_week")
+        raw = _slice_metrics(test_df, errors, baseline_errors, "day_of_week")
         results["by_day_of_week"] = {
             DOW_LABELS.get(k, str(k)): v for k, v in sorted(raw.items())
         }
 
-    # --- Per time of day ---
     if "hour_of_day" in test_df.columns:
         by_tod = {}
         for label, h_start, h_end in TIME_OF_DAY_BUCKETS:
             mask = (test_df["hour_of_day"] >= h_start) & (test_df["hour_of_day"] < h_end)
-            subset = test_df[mask]
-            if len(subset) == 0:
+            if mask.sum() == 0:
                 continue
-            idx = subset.index
-            g_baseline = baseline_errors.loc[idx] if baseline_errors is not None else None
-            m = compute_metrics(
-                errors.loc[idx], subset["actual_delay_minutes"],
-                predictions.loc[idx],
-                subset["lower_bound"], subset["upper_bound"], g_baseline
-            )
+            g_baseline = baseline_errors.loc[mask] if baseline_errors is not None else None
+            m = compute_metrics(errors.loc[mask], baseline_errors=g_baseline)
             if m:
                 by_tod[label] = m
         results["by_time_of_day"] = by_tod
 
-    # --- Per month ---
     if "scheduled_departure" in test_df.columns:
         try:
             months = pd.to_datetime(test_df["scheduled_departure"]).dt.strftime("%Y-%m")
             temp_df = test_df.copy()
             temp_df["_month"] = months
             results["by_month"] = _slice_metrics(
-                temp_df, errors, predictions, baseline_errors, "_month"
+                temp_df, errors, baseline_errors, "_month"
             )
         except Exception:
             pass
 
-    # --- Per prediction horizon ---
     minutes_col = test_df["minutes_until_scheduled_departure"]
     by_horizon = {}
     for label, lo, hi in HORIZON_BUCKETS:
         mask = (minutes_col >= lo) & (minutes_col < hi)
-        subset = test_df[mask]
-        if len(subset) == 0:
+        if mask.sum() == 0:
             continue
-        idx = subset.index
-        g_baseline = baseline_errors.loc[idx] if baseline_errors is not None else None
-        m = compute_metrics(
-            errors.loc[idx], subset["actual_delay_minutes"],
-            predictions.loc[idx],
-            subset["lower_bound"], subset["upper_bound"], g_baseline
-        )
+        g_baseline = baseline_errors.loc[mask] if baseline_errors is not None else None
+        m = compute_metrics(errors.loc[mask], baseline_errors=g_baseline)
         if m:
             by_horizon[label] = m
     results["by_horizon"] = by_horizon
 
-    # --- Cross-cut: route × peak/off-peak ---
     if "route_abbrev" in test_df.columns and "is_peak_hour" in test_df.columns:
         cross = {}
         for (route, peak), group in test_df.groupby(["route_abbrev", "is_peak_hour"]):
             idx = group.index
             g_baseline = baseline_errors.loc[idx] if baseline_errors is not None else None
-            m = compute_metrics(
-                errors.loc[idx], group["actual_delay_minutes"],
-                predictions.loc[idx],
-                group["lower_bound"], group["upper_bound"], g_baseline
-            )
+            m = compute_metrics(errors.loc[idx], baseline_errors=g_baseline)
             if m:
                 suffix = "peak" if peak else "off-peak"
                 cross[f"{route} ({suffix})"] = m
         results["by_route_x_peak"] = cross
 
-    # Event count
     if "sailing_event_id" in test_df.columns:
         results["n_test_events"] = int(test_df["sailing_event_id"].nunique())
 
@@ -302,14 +261,8 @@ def print_evaluation(results: dict):
 
     print(f"\n  MAE:          {results['overall_mae']} min")
     print(f"  Bias:         {results['overall_bias']:+.2f} min (positive = risky)")
+    print(f"  p90:          {results['overall_error_p90']:+.2f} min")
     print(f"  70% Coverage: {results['overall_coverage_70pct']}%")
-    print(f"  ECE:          {results['overall_ece']}")
-
-    print(f"\n  Error distribution (predicted - actual, positive = risky):")
-    for p in ERROR_PERCENTILES:
-        key = f"overall_error_p{p}"
-        if key in results:
-            print(f"    p{p}: {results[key]:+.2f} min")
 
     if "overall_baseline_mae" in results:
         print(f"\n  Baseline MAE:  {results['overall_baseline_mae']} min")
@@ -317,11 +270,11 @@ def print_evaluation(results: dict):
 
     if "by_route" in results:
         print(f"\nBy route:")
-        print(f"  {'Route':<12} {'MAE':>6} {'Bias':>7} {'p90':>7} {'p95':>7} {'N':>6}")
+        print(f"  {'Route':<12} {'MAE':>6} {'Bias':>7} {'p90':>7} {'N':>6}")
         for route, m in sorted(results["by_route"].items()):
             print(
                 f"  {route:<12} {m['mae']:>6.2f} {m['bias']:>+6.2f} "
-                f"{m['error_p90']:>+6.2f} {m['error_p95']:>+6.2f} {m['n']:>6}"
+                f"{m['error_p90']:>+6.2f} {m['n']:>6}"
             )
 
 

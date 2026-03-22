@@ -5,20 +5,14 @@ predicting on the next fold, then sliding forward. Produces a markdown
 report for experiment comparison.
 
 Usage:
-    # Run backtest with default settings (5 folds)
     python -m backend.backtest
-
-    # Run with custom folds and save report
     python -m backend.backtest --folds 8 --name "baseline_v1"
-
-    # Compare against a previous report
     python -m backend.backtest --name "new_features" --compare reports/baseline_v1.md
 """
 
 import argparse
 import json
 import logging
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -27,11 +21,10 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-from .evaluation import ERROR_PERCENTILES, compute_metrics, evaluate_predictions
+from .evaluation import compute_metrics, evaluate_predictions
 
 logger = logging.getLogger(__name__)
 
-# Default model hyperparameters — override via backtest config
 DEFAULT_HYPERPARAMS = {
     "max_iter": 200,
     "max_depth": 6,
@@ -51,7 +44,7 @@ FEATURE_COLS = [
     "turnaround_minutes",
 ]
 
-CATEGORICAL_FEATURES = [0, 1, 2]  # route_abbrev, departing_terminal_id, day_of_week
+CATEGORICAL_FEATURES = [0, 1, 2]
 TARGET_COL = "actual_delay_minutes"
 
 
@@ -103,8 +96,6 @@ def walk_forward_backtest(
 
     Splits unique sailing events into (n_folds + 1) chronological chunks.
     For fold i, trains on chunks 0..i, tests on chunk i+1.
-
-    Returns a dict with per-fold results and aggregated metrics.
     """
     params = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
 
@@ -173,12 +164,10 @@ def walk_forward_backtest(
     if not fold_results:
         return {"error": "Not enough data for walk-forward backtest"}
 
-    # Aggregate across all folds
     combined_test_df = pd.concat(all_test_dfs, ignore_index=True)
     aggregate_eval = evaluate_predictions(combined_test_df)
     aggregate_eval["n_folds"] = len(fold_results)
 
-    # Stability across folds
     def _fold_stat(key):
         vals = [f[key] for f in fold_results if key in f]
         if not vals:
@@ -189,8 +178,6 @@ def walk_forward_backtest(
         "mae": _fold_stat("overall_mae"),
         "bias": _fold_stat("overall_bias"),
         "error_p90": _fold_stat("overall_error_p90"),
-        "coverage": _fold_stat("overall_coverage_70pct"),
-        "ece": _fold_stat("overall_ece"),
     }
 
     return {
@@ -204,28 +191,26 @@ def walk_forward_backtest(
 
 
 # ---------------------------------------------------------------------------
-# Markdown report generation
+# Markdown report
 # ---------------------------------------------------------------------------
 
 def _metric_table(data: dict, key_label: str) -> list:
-    """Render a dict of {label: metrics} as a markdown table."""
-    lines = []
-    p_cols = " | ".join(f"p{p}" for p in ERROR_PERCENTILES)
-    lines.append(f"| {key_label} | MAE | Bias | {p_cols} | ECE | N |")
-    n_cols = 4 + len(ERROR_PERCENTILES) + 1  # key + mae + bias + percentiles + ece + n
-    lines.append("|" + "|".join(["---"] * n_cols) + "|")
+    """Render a dict of {label: metrics} as a markdown table.
 
+    Four data columns: MAE, Bias, p90, N.
+    """
+    lines = []
+    lines.append(f"| {key_label} | MAE | Bias | p90 | N |")
+    lines.append("|---|---|---|---|---|")
     for label, m in sorted(data.items()):
-        p_vals = " | ".join(f"{m[f'error_p{p}']:+.2f}" for p in ERROR_PERCENTILES)
         lines.append(
             f"| {label} | {m['mae']} | {m['bias']:+.2f} | "
-            f"{p_vals} | {m['ece']} | {m['n']} |"
+            f"{m['error_p90']:+.2f} | {m['n']} |"
         )
     return lines
 
 
 def _delta_str(prev_val, curr_val, lower_is_better=True):
-    """Format a delta with better/worse indicator."""
     d = curr_val - prev_val
     sign = "+" if d > 0 else ""
     better = (d < 0) if lower_is_better else (d > 0)
@@ -238,7 +223,6 @@ def generate_markdown_report(
     description: str = "",
     comparison: Optional[dict] = None,
 ) -> str:
-    """Generate a markdown-formatted report from backtest results."""
     lines = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     agg = backtest_results["aggregate"]
@@ -255,111 +239,63 @@ def generate_markdown_report(
     lines.append(f"**Walk-forward folds:** {backtest_results['n_folds']}")
     lines.append("")
 
-    # ---- TOP-LINE RESULTS ----
+    # ---- TOP-LINE ----
+    bias = agg['overall_bias']
+    bias_note = "positive = risky (overpredicts delay)" if bias > 0 else "negative = conservative"
     lines.append("## Top-Line Results")
     lines.append("")
-    lines.append("| Metric | Value | What it means |")
-    lines.append("|--------|-------|---------------|")
-    lines.append(f"| **MAE** | **{agg['overall_mae']} min** | Average prediction error |")
-    lines.append(
-        f"| Bias | {agg['overall_bias']:+.2f} min | "
-        f"{'Positive = overpredicts delay = risky' if agg['overall_bias'] > 0 else 'Negative = conservative (rider arrives early)'} |"
-    )
-    lines.append(f"| 70% Interval Coverage | {agg['overall_coverage_70pct']}% | Target: 70% |")
-    lines.append(f"| ECE | {agg['overall_ece']} | Quantile calibration (lower is better) |")
+    lines.append("| Metric | Value |")
+    lines.append("|--------|-------|")
+    lines.append(f"| **MAE** | **{agg['overall_mae']} min** |")
+    lines.append(f"| Bias | {bias:+.2f} min ({bias_note}) |")
+    lines.append(f"| p90 (tail risk) | {agg['overall_error_p90']:+.2f} min |")
+    lines.append(f"| 70% Interval Coverage | {agg['overall_coverage_70pct']}% (target: 70%) |")
     if "overall_baseline_mae" in agg:
-        lines.append(f"| Baseline MAE (flat delay) | {agg['overall_baseline_mae']} min | Naive model comparison |")
-        lines.append(f"| Improvement vs baseline | {agg['overall_improvement_pct']}% | |")
+        lines.append(f"| Baseline MAE | {agg['overall_baseline_mae']} min |")
+        lines.append(f"| Improvement vs baseline | {agg['overall_improvement_pct']}% |")
     lines.append("")
 
-    # ---- Error distribution ----
-    lines.append("## Error Distribution (predicted - actual)")
-    lines.append("")
-    lines.append("> Positive = overpredicted delay = rider might miss boat.  ")
-    lines.append("> Negative = underpredicted delay = rider arrives early (safe).")
-    lines.append("")
-    lines.append("| Percentile | Value | Interpretation |")
-    lines.append("|------------|-------|----------------|")
-    for p in ERROR_PERCENTILES:
-        val = agg[f"overall_error_p{p}"]
-        if p <= 50:
-            interp = "Typical error"
-        elif p <= 75:
-            interp = f"{p}% of predictions are below this"
-        else:
-            interp = f"Worst {100 - p}% of cases exceed this"
-        lines.append(f"| p{p} | {val:+.2f} min | {interp} |")
-    lines.append("")
-
-    # ---- Comparison (right after top-line if available) ----
+    # ---- Comparison ----
     if comparison:
         lines.extend(_comparison_section(agg, comparison))
 
-    # ---- Stability across folds ----
+    # ---- Stability ----
     lines.append("## Walk-Forward Stability")
     lines.append("")
-    lines.append("| Metric | Mean | Std Dev | Interpretation |")
-    lines.append("|--------|------|---------|----------------|")
-    for key, label, note_fn in [
-        ("mae", "MAE", lambda s: "stable" if s["std"] < 0.5 else "variable"),
-        ("bias", "Bias", lambda s: "safe (negative)" if s["mean"] < 0 and s["std"] < 0.5 else ("risky (positive)" if s["mean"] > 0.5 else "neutral")),
-        ("error_p90", "Error p90", lambda s: "stable" if s["std"] < 1 else "variable"),
-        ("coverage", "Coverage", lambda s: "calibrated" if abs(s["mean"] - 70) < 5 else "miscalibrated"),
-        ("ece", "ECE", lambda s: "well calibrated" if s["mean"] < 0.1 else "needs calibration"),
-    ]:
-        s = stab.get(key)
-        if s:
-            lines.append(f"| {label} | {s['mean']} | ±{s['std']} | {note_fn(s)} |")
-    lines.append("")
-
-    # Per-fold detail
-    lines.append("| Fold | Train | Test | MAE | Bias | p90 | Coverage |")
-    lines.append("|------|-------|------|-----|------|-----|----------|")
+    lines.append("| Fold | Train | Test | MAE | Bias | p90 |")
+    lines.append("|------|-------|------|-----|------|-----|")
     for f in backtest_results["fold_results"]:
         lines.append(
             f"| {f['fold']} | {f['n_train_events']} | {f.get('n_test_events', '?')} | "
             f"{f['overall_mae']} | {f['overall_bias']:+.2f} | "
-            f"{f['overall_error_p90']:+.2f} | {f['overall_coverage_70pct']}% |"
+            f"{f['overall_error_p90']:+.2f} |"
         )
     lines.append("")
 
-    # ---- Dimensional breakdowns ----
+    # Stability summary
+    lines.append("| Metric | Mean | Std Dev |")
+    lines.append("|--------|------|---------|")
+    for key, label in [("mae", "MAE"), ("bias", "Bias"), ("error_p90", "p90")]:
+        s = stab.get(key)
+        if s:
+            lines.append(f"| {label} | {s['mean']} | ±{s['std']} |")
+    lines.append("")
 
-    if "by_route" in agg and agg["by_route"]:
-        lines.append("## By Route")
-        lines.append("")
-        lines.extend(_metric_table(agg["by_route"], "Route"))
-        lines.append("")
-
-    if "by_day_of_week" in agg and agg["by_day_of_week"]:
-        lines.append("## By Day of Week")
-        lines.append("")
-        lines.extend(_metric_table(agg["by_day_of_week"], "Day"))
-        lines.append("")
-
-    if "by_time_of_day" in agg and agg["by_time_of_day"]:
-        lines.append("## By Time of Day")
-        lines.append("")
-        lines.extend(_metric_table(agg["by_time_of_day"], "Period"))
-        lines.append("")
-
-    if "by_month" in agg and agg["by_month"]:
-        lines.append("## By Month")
-        lines.append("")
-        lines.extend(_metric_table(agg["by_month"], "Month"))
-        lines.append("")
-
-    if "by_horizon" in agg and agg["by_horizon"]:
-        lines.append("## By Prediction Horizon")
-        lines.append("")
-        lines.extend(_metric_table(agg["by_horizon"], "Horizon"))
-        lines.append("")
-
-    if "by_route_x_peak" in agg and agg["by_route_x_peak"]:
-        lines.append("## Route x Peak vs Off-Peak")
-        lines.append("")
-        lines.extend(_metric_table(agg["by_route_x_peak"], "Route (period)"))
-        lines.append("")
+    # ---- Breakdowns ----
+    for section_key, section_title, key_label in [
+        ("by_route", "By Route", "Route"),
+        ("by_day_of_week", "By Day of Week", "Day"),
+        ("by_time_of_day", "By Time of Day", "Period"),
+        ("by_month", "By Month", "Month"),
+        ("by_horizon", "By Prediction Horizon", "Horizon"),
+        ("by_route_x_peak", "Route x Peak vs Off-Peak", "Route (period)"),
+    ]:
+        data = agg.get(section_key)
+        if data:
+            lines.append(f"## {section_title}")
+            lines.append("")
+            lines.extend(_metric_table(data, key_label))
+            lines.append("")
 
     # ---- Hyperparameters ----
     params = backtest_results["hyperparams"]
@@ -395,55 +331,32 @@ def generate_markdown_report(
 
 
 def _comparison_section(agg: dict, prev: dict) -> list:
-    """Build the comparison-vs-previous section."""
     lines = []
     lines.append("## Comparison vs Previous Run")
     lines.append("")
     lines.append("| Metric | Previous | Current | Delta |")
     lines.append("|--------|----------|---------|-------|")
 
-    comparisons = [
+    for label, key, suffix, lower_is_better in [
         ("MAE", "overall_mae", " min", True),
-        ("Bias (abs)", None, " min", True),  # special handling
+        ("p90", "overall_error_p90", " min", True),
         ("Coverage", "overall_coverage_70pct", "%", False),
-        ("ECE", "overall_ece", "", True),
-        ("Improvement vs baseline", "overall_improvement_pct", "%", False),
-    ]
-
-    for label, key, suffix, lower_is_better in comparisons:
-        if key is None:
-            p = prev.get("overall_bias")
-            c = agg.get("overall_bias")
-            if p is not None and c is not None:
-                pa, ca = abs(p), abs(c)
-                lines.append(
-                    f"| {label} | {pa:.2f}{suffix} | {ca:.2f}{suffix} | "
-                    f"{_delta_str(pa, ca, lower_is_better=True)} |"
-                )
-            continue
-
-        p = prev.get(key)
-        c = agg.get(key)
+        ("Improvement %", "overall_improvement_pct", "%", False),
+    ]:
+        p, c = prev.get(key), agg.get(key)
         if p is not None and c is not None:
             lines.append(
                 f"| {label} | {p}{suffix} | {c}{suffix} | "
                 f"{_delta_str(p, c, lower_is_better)} |"
             )
 
-    # Error percentile comparison
-    p_rows = []
-    for p in ERROR_PERCENTILES:
-        pk = f"overall_error_p{p}"
-        pv = prev.get(pk)
-        cv = agg.get(pk)
-        if pv is not None and cv is not None:
-            p_rows.append(
-                f"| Error p{p} | {pv:+.2f} min | {cv:+.2f} min | "
-                f"{_delta_str(pv, cv, lower_is_better=True)} |"
-            )
-    if p_rows:
-        for row in p_rows:
-            lines.append(row)
+    # Bias: compare absolute values (closer to zero is better)
+    pb, cb = prev.get("overall_bias"), agg.get("overall_bias")
+    if pb is not None and cb is not None:
+        lines.append(
+            f"| |Bias| | {abs(pb):.2f} min | {abs(cb):.2f} min | "
+            f"{_delta_str(abs(pb), abs(cb), lower_is_better=True)} |"
+        )
 
     # Per-route comparison
     prev_routes = prev.get("by_route", {})
@@ -537,11 +450,11 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     parser = argparse.ArgumentParser(description="Run walk-forward backtest")
-    parser.add_argument("--folds", type=int, default=5, help="Number of walk-forward folds (default: 5)")
-    parser.add_argument("--name", type=str, default="experiment", help="Experiment name for the report")
-    parser.add_argument("--description", type=str, default="", help="Description of what changed")
-    parser.add_argument("--compare", type=str, default=None, help="Path to a previous report .md to compare against")
-    parser.add_argument("--output-dir", type=str, default=None, help="Directory for report output (default: reports/)")
+    parser.add_argument("--folds", type=int, default=5)
+    parser.add_argument("--name", type=str, default="experiment")
+    parser.add_argument("--description", type=str, default="")
+    parser.add_argument("--compare", type=str, default=None)
+    parser.add_argument("--output-dir", type=str, default=None)
     parser.add_argument("--max-iter", type=int, default=None)
     parser.add_argument("--max-depth", type=int, default=None)
     parser.add_argument("--learning-rate", type=float, default=None)

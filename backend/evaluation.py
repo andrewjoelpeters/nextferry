@@ -1,17 +1,17 @@
 """Evaluation framework for the delay prediction model.
 
-The top-line metric is **rider_risk** — an asymmetric MAE that penalizes
-overprediction (positive error) more heavily than underprediction:
+The top-line metric is **pinball_loss** — an asymmetric MAE (pinball loss)
+that penalizes overprediction more heavily than underprediction:
 
-    rider_risk = mean(α · max(e, 0) + max(-e, 0))
+    pinball_loss = mean(α · max(e, 0) + max(-e, 0))
 
 where α = OVERPREDICTION_PENALTY (default 2).  When α=1 this reduces to MAE.
 When the model errs on the safe side (underpredicts delay, rider arrives
-early), rider_risk ≈ MAE.  When it errs dangerously (overpredicts delay,
-rider might miss the boat), rider_risk >> MAE (up to α × MAE).
+early), pinball_loss ≈ MAE.  When it errs dangerously (overpredicts delay,
+rider might miss the boat), pinball_loss >> MAE (up to α × MAE).
 
 Core metrics per slice:
-- "rider_risk": asymmetric MAE (the one number)
+- "pinball_loss": asymmetric MAE (the one number)
 - "bias": mean signed error — diagnostic for direction
 - "error_p90": 90th percentile of signed error — tail risk
 
@@ -66,15 +66,15 @@ HORIZON_BUCKETS = [
 ]
 
 
-def _rider_risk(errors: np.ndarray, alpha: float = OVERPREDICTION_PENALTY) -> float:
-    """Asymmetric MAE: penalize overprediction α× more than underprediction.
+def pinball_loss(errors: np.ndarray, alpha: float = OVERPREDICTION_PENALTY) -> float:
+    """Asymmetric MAE (pinball loss): penalize overprediction α× more.
 
-    rider_risk = mean(α · max(e, 0) + max(-e, 0))
+    pinball_loss = mean(α · max(e, 0) + max(-e, 0))
 
     When α=1 this is identical to MAE.
     """
-    overpred = np.maximum(errors, 0)    # positive errors (dangerous)
-    underpred = np.maximum(-errors, 0)   # negative errors (safe)
+    overpred = np.maximum(errors, 0)
+    underpred = np.maximum(-errors, 0)
     return float(np.mean(alpha * overpred + underpred))
 
 
@@ -97,7 +97,7 @@ def compute_metrics(errors: pd.Series,
     err_arr = errors.values
 
     metrics = {
-        "rider_risk": round(_rider_risk(err_arr), 2),
+        "pinball_loss": round(pinball_loss(err_arr), 2),
         "bias": round(float(errors.mean()), 2),
         "error_p90": round(float(np.percentile(err_arr, 90)), 2),
         "n": int(len(errors)),
@@ -112,10 +112,10 @@ def compute_metrics(errors: pd.Series,
         metrics["coverage_70pct"] = round(float(within_bounds.mean() * 100), 1)
 
     if baseline_errors is not None and len(baseline_errors) > 0:
-        baseline_risk = _rider_risk(baseline_errors.values)
-        metrics["baseline_rider_risk"] = round(baseline_risk, 2)
+        baseline_pl = pinball_loss(baseline_errors.values)
+        metrics["baseline_pinball_loss"] = round(baseline_pl, 2)
         metrics["improvement_pct"] = round(
-            (1 - metrics["rider_risk"] / max(baseline_risk, 0.01)) * 100, 1
+            (1 - metrics["pinball_loss"] / max(baseline_pl, 0.01)) * 100, 1
         )
     return metrics
 
@@ -288,22 +288,22 @@ def print_evaluation(results: dict):
     else:
         print()
 
-    print(f"\n  Rider Risk:   {results['overall_rider_risk']} min (α={OVERPREDICTION_PENALTY})")
+    print(f"\n  Pinball Loss: {results['overall_pinball_loss']} min (α={OVERPREDICTION_PENALTY})")
     print(f"  MAE:          {results['overall_mae']} min")
     print(f"  Bias:         {results['overall_bias']:+.2f} min (positive = risky)")
     print(f"  p90:          {results['overall_error_p90']:+.2f} min")
     print(f"  70% Coverage: {results['overall_coverage_70pct']}%")
 
-    if "overall_baseline_rider_risk" in results:
-        print(f"\n  Baseline Risk: {results['overall_baseline_rider_risk']} min")
+    if "overall_baseline_pinball_loss" in results:
+        print(f"\n  Baseline PL:   {results['overall_baseline_pinball_loss']} min")
         print(f"  Improvement:   {results['overall_improvement_pct']}%")
 
     if "by_route" in results:
         print(f"\nBy route:")
-        print(f"  {'Route':<12} {'Risk':>6} {'Bias':>7} {'p90':>7} {'N':>6}")
+        print(f"  {'Route':<12} {'PL':>6} {'Bias':>7} {'p90':>7} {'N':>6}")
         for route, m in sorted(results["by_route"].items()):
             print(
-                f"  {route:<12} {m['rider_risk']:>6.2f} {m['bias']:>+6.2f} "
+                f"  {route:<12} {m['pinball_loss']:>6.2f} {m['bias']:>+6.2f} "
                 f"{m['error_p90']:>+6.2f} {m['n']:>6}"
             )
 

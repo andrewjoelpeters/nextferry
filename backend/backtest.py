@@ -1,8 +1,14 @@
-"""Walk-forward backtesting pipeline for the delay prediction model.
+"""Walk-forward backtesting harness for delay prediction models.
 
-Simulates real-world model performance by training on data up to time T,
-predicting on the next fold, then sliding forward. Produces a markdown
-report for experiment comparison.
+This module is MODEL-AGNOSTIC. It knows nothing about features, encodings,
+or sklearn. It only knows how to:
+1. Split data into chronological folds
+2. Call model.fit(train_df) and model.predict(test_df)
+3. Score predictions with evaluation.py
+4. Write a markdown report
+
+To change the model or features, edit backtest_model.py (or pass a custom
+model_factory). Never change this file for model experiments.
 
 Usage:
     python -m backend.backtest
@@ -15,12 +21,12 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import HistGradientBoostingRegressor
 
+from .backtest_model import BacktestModel, QuantileGBTModel
 from .evaluation import (
     OVERPREDICTION_PENALTY,
     compute_metrics,
@@ -29,80 +35,23 @@ from .evaluation import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_HYPERPARAMS = {
-    "max_iter": 200,
-    "max_depth": 6,
-    "learning_rate": 0.1,
-    "random_state": 42,
-}
-
-FEATURE_COLS = [
-    "route_abbrev",
-    "departing_terminal_id",
-    "day_of_week",
-    "hour_of_day",
-    "minutes_until_scheduled_departure",
-    "current_vessel_delay_minutes",
-    "is_peak_hour",
-    "previous_sailing_fullness",
-    "turnaround_minutes",
-]
-
-CATEGORICAL_FEATURES = [0, 1, 2]
-TARGET_COL = "actual_delay_minutes"
-
-
-def _encode_features(df: pd.DataFrame):
-    """Encode categorical features and return (X array, route_mapping, terminal_mapping)."""
-    X = df[FEATURE_COLS].copy()
-    X["route_abbrev"] = X["route_abbrev"].astype("category").cat.codes
-    X["departing_terminal_id"] = X["departing_terminal_id"].astype("category").cat.codes
-    X["day_of_week"] = X["day_of_week"].astype("category").cat.codes
-
-    route_mapping = dict(
-        zip(
-            df["route_abbrev"].astype("category").cat.categories,
-            range(len(df["route_abbrev"].astype("category").cat.categories)),
-        )
-    )
-    terminal_mapping = dict(
-        zip(
-            df["departing_terminal_id"].astype("category").cat.categories,
-            range(len(df["departing_terminal_id"].astype("category").cat.categories)),
-        )
-    )
-    return X.values, route_mapping, terminal_mapping
-
-
-def _train_quantile_models(X_train, y_train, hyperparams: dict):
-    """Train the three quantile models and return them as a dict."""
-    quantiles = {"q50": 0.50, "q15": 0.15, "q85": 0.85}
-    models = {}
-    for name, quantile in quantiles.items():
-        model = HistGradientBoostingRegressor(
-            loss="quantile",
-            quantile=quantile,
-            categorical_features=CATEGORICAL_FEATURES,
-            **hyperparams,
-        )
-        model.fit(X_train, y_train)
-        models[name] = model
-    return models
-
 
 def walk_forward_backtest(
     df: pd.DataFrame,
+    model_factory: Callable[[], BacktestModel],
     n_folds: int = 5,
     min_train_events: int = 200,
-    hyperparams: Optional[dict] = None,
 ) -> dict:
     """Run walk-forward cross-validation on sailing event data.
+
+    model_factory: callable that returns a fresh BacktestModel for each fold.
+    The harness calls model.fit(train_df) then model.predict(test_df).
+    predict() must return test_df with columns: predicted_delay, lower_bound,
+    upper_bound.
 
     Splits unique sailing events into (n_folds + 1) chronological chunks.
     For fold i, trains on chunks 0..i, tests on chunk i+1.
     """
-    params = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
-
     unique_events = df["sailing_event_id"].unique()
     n_events = len(unique_events)
 
@@ -136,19 +85,12 @@ def walk_forward_backtest(
         test_mask = df["sailing_event_id"].isin(test_event_ids)
 
         train_df = df[train_mask]
-        test_df = df[test_mask].copy()
+        test_df = df[test_mask]
 
-        X_train, _, _ = _encode_features(train_df)
-        y_train = train_df[TARGET_COL].values
-
-        X_test, _, _ = _encode_features(df)
-        X_test = X_test[test_mask.values]
-
-        models = _train_quantile_models(X_train, y_train, params)
-
-        test_df["predicted_delay"] = models["q50"].predict(X_test)
-        test_df["lower_bound"] = models["q15"].predict(X_test)
-        test_df["upper_bound"] = models["q85"].predict(X_test)
+        # Model owns all feature/encoding/training logic
+        model = model_factory()
+        model.fit(train_df)
+        test_df = model.predict(test_df)
 
         fold_eval = evaluate_predictions(test_df)
         fold_eval["fold"] = fold_idx
@@ -160,7 +102,7 @@ def walk_forward_backtest(
         logger.info(
             f"Fold {fold_idx}: train={len(train_event_ids)} events, "
             f"test={fold_eval.get('n_test_events', '?')} events, "
-            f"risk={fold_eval['overall_rider_risk']}, "
+            f"PL={fold_eval['overall_pinball_loss']}, "
             f"bias={fold_eval['overall_bias']:+.2f}, "
             f"p90={fold_eval['overall_error_p90']:+.2f}"
         )
@@ -179,7 +121,7 @@ def walk_forward_backtest(
         return {"mean": round(float(np.mean(vals)), 2), "std": round(float(np.std(vals)), 2)}
 
     stability = {
-        "rider_risk": _fold_stat("overall_rider_risk"),
+        "pinball_loss": _fold_stat("overall_pinball_loss"),
         "bias": _fold_stat("overall_bias"),
         "error_p90": _fold_stat("overall_error_p90"),
     }
@@ -188,7 +130,6 @@ def walk_forward_backtest(
         "fold_results": fold_results,
         "aggregate": aggregate_eval,
         "stability": stability,
-        "hyperparams": params,
         "n_total_events": int(len(unique_events)),
         "n_folds": len(fold_results),
     }
@@ -199,16 +140,13 @@ def walk_forward_backtest(
 # ---------------------------------------------------------------------------
 
 def _metric_table(data: dict, key_label: str) -> list:
-    """Render a dict of {label: metrics} as a markdown table.
-
-    Four data columns: Rider Risk, Bias, p90, N.
-    """
+    """Render a dict of {label: metrics} as a markdown table."""
     lines = []
-    lines.append(f"| {key_label} | Rider Risk | Bias | p90 | N |")
+    lines.append(f"| {key_label} | Pinball Loss | Bias | p90 | N |")
     lines.append("|---|---|---|---|---|")
     for label, m in sorted(data.items()):
         lines.append(
-            f"| {label} | {m['rider_risk']} | {m['bias']:+.2f} | "
+            f"| {label} | {m['pinball_loss']} | {m['bias']:+.2f} | "
             f"{m['error_p90']:+.2f} | {m['n']} |"
         )
     return lines
@@ -244,29 +182,27 @@ def generate_markdown_report(
     lines.append("")
 
     # ---- TOP-LINE ----
-    risk = agg['overall_rider_risk']
+    pl = agg['overall_pinball_loss']
     mae = agg['overall_mae']
     bias = agg['overall_bias']
-    # rider_risk >= MAE always (since α>1). The gap tells you how much
-    # overprediction (dangerous error) the model has.
-    risk_ratio = round(risk / max(mae, 0.01), 2)
+    pl_ratio = round(pl / max(mae, 0.01), 2)
 
     lines.append("## Top-Line Results")
     lines.append("")
-    lines.append(f"> **Rider Risk** is an asymmetric MAE (α={OVERPREDICTION_PENALTY}): "
+    lines.append(f"> **Pinball Loss** is an asymmetric MAE (α={OVERPREDICTION_PENALTY}): "
                  f"overprediction is penalized {OVERPREDICTION_PENALTY}× more than underprediction.  ")
-    lines.append(f"> Rider Risk / MAE = {risk_ratio}× — closer to 1.0 means errors are mostly safe "
+    lines.append(f"> PL / MAE = {pl_ratio}× — closer to 1.0 means errors are mostly safe "
                  f"(underprediction); closer to {OVERPREDICTION_PENALTY}.0 means mostly dangerous.")
     lines.append("")
     lines.append("| Metric | Value |")
     lines.append("|--------|-------|")
-    lines.append(f"| **Rider Risk** | **{risk} min** (risk/MAE = {risk_ratio}×) |")
+    lines.append(f"| **Pinball Loss** | **{pl} min** (PL/MAE = {pl_ratio}×) |")
     lines.append(f"| MAE | {mae} min |")
     lines.append(f"| Bias | {bias:+.2f} min |")
     lines.append(f"| p90 (tail risk) | {agg['overall_error_p90']:+.2f} min |")
     lines.append(f"| 70% Interval Coverage | {agg['overall_coverage_70pct']}% (target: 70%) |")
-    if "overall_baseline_rider_risk" in agg:
-        lines.append(f"| Baseline Rider Risk | {agg['overall_baseline_rider_risk']} min |")
+    if "overall_baseline_pinball_loss" in agg:
+        lines.append(f"| Baseline Pinball Loss | {agg['overall_baseline_pinball_loss']} min |")
         lines.append(f"| Improvement vs baseline | {agg['overall_improvement_pct']}% |")
     lines.append("")
 
@@ -277,19 +213,19 @@ def generate_markdown_report(
     # ---- Stability ----
     lines.append("## Walk-Forward Stability")
     lines.append("")
-    lines.append("| Fold | Train | Test | Rider Risk | Bias | p90 |")
-    lines.append("|------|-------|------|------------|------|-----|")
+    lines.append("| Fold | Train | Test | Pinball Loss | Bias | p90 |")
+    lines.append("|------|-------|------|--------------|------|-----|")
     for f in backtest_results["fold_results"]:
         lines.append(
             f"| {f['fold']} | {f['n_train_events']} | {f.get('n_test_events', '?')} | "
-            f"{f['overall_rider_risk']} | {f['overall_bias']:+.2f} | "
+            f"{f['overall_pinball_loss']} | {f['overall_bias']:+.2f} | "
             f"{f['overall_error_p90']:+.2f} |"
         )
     lines.append("")
 
     lines.append("| Metric | Mean | Std Dev |")
     lines.append("|--------|------|---------|")
-    for key, label in [("rider_risk", "Rider Risk"), ("bias", "Bias"), ("error_p90", "p90")]:
+    for key, label in [("pinball_loss", "Pinball Loss"), ("bias", "Bias"), ("error_p90", "p90")]:
         s = stab.get(key)
         if s:
             lines.append(f"| {label} | {s['mean']} | ±{s['std']} |")
@@ -311,17 +247,6 @@ def generate_markdown_report(
             lines.extend(_metric_table(data, key_label))
             lines.append("")
 
-    # ---- Hyperparameters ----
-    params = backtest_results["hyperparams"]
-    lines.append("## Hyperparameters")
-    lines.append("")
-    lines.append("| Parameter | Value |")
-    lines.append("|-----------|-------|")
-    for k, v in sorted(params.items()):
-        lines.append(f"| {k} | {v} |")
-    lines.append(f"| overprediction_penalty (α) | {OVERPREDICTION_PENALTY} |")
-    lines.append("")
-
     # ---- Raw JSON ----
     lines.append("## Raw Results (JSON)")
     lines.append("")
@@ -332,7 +257,6 @@ def generate_markdown_report(
     exportable = {
         "aggregate": agg,
         "stability": stab,
-        "hyperparams": backtest_results["hyperparams"],
         "n_total_events": backtest_results["n_total_events"],
         "n_folds": backtest_results["n_folds"],
     }
@@ -353,7 +277,7 @@ def _comparison_section(agg: dict, prev: dict) -> list:
     lines.append("|--------|----------|---------|-------|")
 
     for label, key, suffix, lower_is_better in [
-        ("Rider Risk", "overall_rider_risk", " min", True),
+        ("Pinball Loss", "overall_pinball_loss", " min", True),
         ("MAE", "overall_mae", " min", True),
         ("p90", "overall_error_p90", " min", True),
         ("Coverage", "overall_coverage_70pct", "%", False),
@@ -374,17 +298,17 @@ def _comparison_section(agg: dict, prev: dict) -> list:
         lines.append("")
         lines.append("### Per-Route Comparison")
         lines.append("")
-        lines.append("| Route | Prev Risk | Curr Risk | Prev p90 | Curr p90 | Risk Delta |")
-        lines.append("|-------|-----------|-----------|----------|----------|------------|")
+        lines.append("| Route | Prev PL | Curr PL | Prev p90 | Curr p90 | PL Delta |")
+        lines.append("|-------|---------|---------|----------|----------|----------|")
         for r in all_routes:
-            pr = prev_routes.get(r, {}).get("rider_risk", "—")
-            cr = curr_routes.get(r, {}).get("rider_risk", "—")
-            pp = prev_routes.get(r, {}).get("error_p90", "—")
-            cp = curr_routes.get(r, {}).get("error_p90", "—")
-            delta = _delta_str(pr, cr) if isinstance(pr, (int, float)) and isinstance(cr, (int, float)) else "—"
-            pp_s = f"{pp:+.2f}" if isinstance(pp, (int, float)) else pp
-            cp_s = f"{cp:+.2f}" if isinstance(cp, (int, float)) else cp
-            lines.append(f"| {r} | {pr} | {cr} | {pp_s} | {cp_s} | {delta} |")
+            pp = prev_routes.get(r, {}).get("pinball_loss", "—")
+            cp = curr_routes.get(r, {}).get("pinball_loss", "—")
+            pp90 = prev_routes.get(r, {}).get("error_p90", "—")
+            cp90 = curr_routes.get(r, {}).get("error_p90", "—")
+            delta = _delta_str(pp, cp) if isinstance(pp, (int, float)) and isinstance(cp, (int, float)) else "—"
+            pp90_s = f"{pp90:+.2f}" if isinstance(pp90, (int, float)) else pp90
+            cp90_s = f"{cp90:+.2f}" if isinstance(cp90, (int, float)) else cp90
+            lines.append(f"| {r} | {pp} | {cp} | {pp90_s} | {cp90_s} | {delta} |")
 
     lines.append("")
     return lines
@@ -410,15 +334,18 @@ def parse_previous_report(report_path: str) -> Optional[dict]:
 
 
 def run_backtest(
+    model_factory: Optional[Callable[[], BacktestModel]] = None,
     n_folds: int = 5,
     experiment_name: str = "unnamed",
     description: str = "",
-    hyperparams: Optional[dict] = None,
     compare_path: Optional[str] = None,
     output_dir: Optional[str] = None,
 ) -> Optional[str]:
     """Run a full backtest and write a markdown report. Returns the report path."""
     from .ml_predictor import DelayPredictor
+
+    if model_factory is None:
+        model_factory = QuantileGBTModel
 
     predictor = DelayPredictor()
     df = predictor.build_training_data()
@@ -427,7 +354,7 @@ def run_backtest(
         return None
 
     logger.info(f"Running walk-forward backtest with {n_folds} folds...")
-    results = walk_forward_backtest(df, n_folds=n_folds, hyperparams=hyperparams)
+    results = walk_forward_backtest(df, model_factory=model_factory, n_folds=n_folds)
 
     if "error" in results:
         logger.error(results["error"])
@@ -481,11 +408,13 @@ if __name__ == "__main__":
     if args.learning_rate is not None:
         hp_overrides["learning_rate"] = args.learning_rate
 
+    factory = (lambda: QuantileGBTModel(hp_overrides)) if hp_overrides else None
+
     report_path = run_backtest(
+        model_factory=factory,
         n_folds=args.folds,
         experiment_name=args.name,
         description=args.description,
-        hyperparams=hp_overrides if hp_overrides else None,
         compare_path=args.compare,
         output_dir=args.output_dir,
     )

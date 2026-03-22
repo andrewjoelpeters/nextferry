@@ -23,10 +23,8 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 
 from .database import (
     get_connection,
-    get_previous_sailing_fullness,
     get_sailing_event_count,
     get_training_data,
-    get_turnaround_minutes,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,8 +70,11 @@ class DelayPredictor:
         """Build training dataset from sailing events and vessel snapshots.
 
         For each sailing event, generates multiple training rows at different
-        time horizons (5, 15, 30, 60, 120 min before departure), using the
-        vessel delay observable at each horizon from historical data.
+        time horizons (2-120 min before departure), using the vessel delay
+        observable at each horizon from historical data.
+
+        Uses bulk SQL queries + pandas merge_asof instead of per-row queries
+        for performance (~3 queries instead of ~3M).
         """
         events = get_training_data()
         if len(events) < MINIMUM_TRAINING_EVENTS:
@@ -83,82 +84,174 @@ class DelayPredictor:
             return None
 
         conn = get_connection()
-        rows = []
-
         try:
-            for event in events:
-                scheduled_dep = event["scheduled_departure"]
-                vessel_id = event["vessel_id"]
-                actual_delay = event["delay_minutes"]
-                departing_terminal_id = event["departing_terminal_id"] or 0
+            # --- Load events into a DataFrame ---
+            events_df = pd.DataFrame(events)
+            events_df["departing_terminal_id"] = events_df["departing_terminal_id"].fillna(0).astype(int)
+            events_df["route_abbrev"] = events_df["route_abbrev"].fillna("unknown")
+            events_df["scheduled_departure_dt"] = pd.to_datetime(
+                events_df["scheduled_departure"], format="ISO8601", utc=True
+            ).dt.tz_localize(None)
+            events_df.rename(columns={
+                "delay_minutes": "actual_delay_minutes",
+                "id": "sailing_event_id",
+            }, inplace=True)
 
-                # Get docking features (same for all horizons of this event)
-                prev_fullness = get_previous_sailing_fullness(
-                    departing_terminal_id, scheduled_dep
+            # --- Expand events × horizons ---
+            horizons = pd.DataFrame({"horizon_min": TIME_HORIZONS_MINUTES})
+            expanded = events_df.assign(key=1).merge(horizons.assign(key=1), on="key").drop(columns="key")
+            expanded["predict_time"] = expanded["scheduled_departure_dt"] - pd.to_timedelta(expanded["horizon_min"], unit="m")
+
+            # --- Bulk query 1: vessel delay snapshots ---
+            logger.info("Loading vessel delay snapshots...")
+            delays_df = pd.read_sql_query(
+                """
+                SELECT vessel_id, collected_at, scheduled_departure AS snap_sched_dep,
+                       (julianday(left_dock) - julianday(scheduled_departure)) * 24 * 60 AS snap_delay_minutes
+                FROM vessel_snapshots
+                WHERE left_dock IS NOT NULL AND scheduled_departure IS NOT NULL
+                  AND left_dock != '' AND scheduled_departure != ''
+                """,
+                conn,
+            )
+            delays_df["collected_at"] = pd.to_datetime(
+                delays_df["collected_at"], format="ISO8601", utc=True
+            ).dt.tz_localize(None)
+            delays_df.sort_values(["vessel_id", "collected_at"], inplace=True)
+            logger.info(f"Loaded {len(delays_df)} delay snapshots")
+
+            # merge_asof: for each (vessel_id, predict_time), find most recent snapshot
+            # Both sides must be sorted by the on-key within each by-group
+            expanded.sort_values("predict_time", inplace=True)
+            delays_df.sort_values("collected_at", inplace=True)
+            merged = pd.merge_asof(
+                expanded,
+                delays_df,
+                left_on="predict_time",
+                right_on="collected_at",
+                by="vessel_id",
+                direction="backward",
+            )
+
+            # Exclude snapshots from the *same* sailing (matches original query's
+            # `scheduled_departure != ?` filter) and default to 0.0
+            same_sailing = merged["snap_sched_dep"] == merged["scheduled_departure"]
+            merged.loc[same_sailing, "snap_delay_minutes"] = np.nan
+            merged["current_vessel_delay_minutes"] = merged["snap_delay_minutes"].fillna(0.0)
+
+            # --- Bulk query 2: previous sailing fullness ---
+            logger.info("Loading sailing space snapshots...")
+            fullness_df = pd.read_sql_query(
+                """
+                SELECT arriving_terminal_id, departure_time, max_space_count, drive_up_space_count
+                FROM sailing_space_snapshots
+                WHERE max_space_count > 0
+                """,
+                conn,
+            )
+            if not fullness_df.empty:
+                fullness_df["departure_time"] = pd.to_datetime(
+                    fullness_df["departure_time"], format="ISO8601", utc=True
+                ).dt.tz_localize(None)
+                fullness_df["previous_sailing_fullness"] = (
+                    1.0 - fullness_df["drive_up_space_count"] / fullness_df["max_space_count"]
                 )
-                turnaround = get_turnaround_minutes(vessel_id, scheduled_dep)
+                fullness_df = fullness_df[["arriving_terminal_id", "departure_time", "previous_sailing_fullness"]]
+                fullness_df.sort_values(["arriving_terminal_id", "departure_time"], inplace=True)
 
-                for horizon_min in TIME_HORIZONS_MINUTES:
-                    # Compute the time at which we'd be predicting
-                    # (horizon_min minutes before scheduled departure)
-                    try:
-                        sched_dt = datetime.fromisoformat(scheduled_dep)
-                        from datetime import timedelta
+                # merge_asof: match each event's (departing_terminal_id, scheduled_departure)
+                # to the most recent fullness for that terminal
+                events_for_fullness = (
+                    merged[["sailing_event_id", "departing_terminal_id", "scheduled_departure_dt"]]
+                    .drop_duplicates(subset=["sailing_event_id"])
+                    .sort_values("scheduled_departure_dt")
+                )
+                fullness_df.sort_values("departure_time", inplace=True)
+                fullness_merged = pd.merge_asof(
+                    events_for_fullness,
+                    fullness_df,
+                    left_on="scheduled_departure_dt",
+                    right_on="departure_time",
+                    left_by="departing_terminal_id",
+                    right_by="arriving_terminal_id",
+                    direction="backward",
+                )
+                merged = merged.merge(
+                    fullness_merged[["sailing_event_id", "previous_sailing_fullness"]],
+                    on="sailing_event_id",
+                    how="left",
+                )
+            else:
+                merged["previous_sailing_fullness"] = np.nan
+            logger.info("Fullness features joined")
 
-                        predict_time = sched_dt - timedelta(minutes=horizon_min)
-                        predict_time_str = predict_time.isoformat()
-                    except (ValueError, TypeError):
-                        continue
+            # --- Bulk query 3: turnaround minutes ---
+            logger.info("Loading turnaround data...")
+            turnaround_df = pd.read_sql_query(
+                """
+                SELECT vessel_id, scheduled_departure, MIN(collected_at) AS docked_at
+                FROM vessel_snapshots
+                WHERE at_dock = 1
+                  AND scheduled_departure IS NOT NULL AND scheduled_departure != ''
+                GROUP BY vessel_id, scheduled_departure
+                """,
+                conn,
+            )
+            if not turnaround_df.empty:
+                turnaround_df["docked_at"] = pd.to_datetime(
+                    turnaround_df["docked_at"], format="ISO8601", utc=True
+                ).dt.tz_localize(None)
+                turnaround_df["sched_dt"] = pd.to_datetime(
+                    turnaround_df["scheduled_departure"], format="ISO8601", utc=True
+                ).dt.tz_localize(None)
+                # Strip tzinfo to avoid naive/aware mismatch
+                turnaround_df["docked_at"] = turnaround_df["docked_at"].dt.tz_localize(None)
+                turnaround_df["sched_dt"] = turnaround_df["sched_dt"].dt.tz_localize(None)
+                turnaround_df["turnaround_minutes"] = (
+                    (turnaround_df["sched_dt"] - turnaround_df["docked_at"]).dt.total_seconds() / 60
+                ).clip(lower=0)
+                turnaround_lookup = turnaround_df[["vessel_id", "scheduled_departure", "turnaround_minutes"]]
 
-                    # Get the vessel's most recent observed delay at predict_time
-                    # from a *different* sailing (not the current one)
-                    row = conn.execute(
-                        """
-                        SELECT
-                            (julianday(left_dock) - julianday(scheduled_departure)) * 24 * 60 AS delay_minutes
-                        FROM vessel_snapshots
-                        WHERE vessel_id = ?
-                          AND collected_at <= ?
-                          AND left_dock IS NOT NULL
-                          AND scheduled_departure IS NOT NULL
-                          AND left_dock != ''
-                          AND scheduled_departure != ''
-                          AND scheduled_departure != ?
-                        ORDER BY collected_at DESC
-                        LIMIT 1
-                        """,
-                        (vessel_id, predict_time_str, scheduled_dep),
-                    ).fetchone()
+                merged = merged.merge(
+                    turnaround_lookup,
+                    on=["vessel_id", "scheduled_departure"],
+                    how="left",
+                )
+            else:
+                merged["turnaround_minutes"] = np.nan
+            logger.info("Turnaround features joined")
 
-                    current_vessel_delay = row["delay_minutes"] if row else 0.0
-
-                    rows.append(
-                        {
-                            "sailing_event_id": event["id"],
-                            "route_abbrev": event["route_abbrev"] or "unknown",
-                            "departing_terminal_id": departing_terminal_id,
-                            "day_of_week": event["day_of_week"],
-                            "hour_of_day": event["hour_of_day"],
-                            "minutes_until_scheduled_departure": horizon_min,
-                            "current_vessel_delay_minutes": current_vessel_delay,
-                            "is_peak_hour": int(is_peak_hour(event["hour_of_day"])),
-                            "previous_sailing_fullness": prev_fullness if prev_fullness is not None else np.nan,
-                            "turnaround_minutes": turnaround if turnaround is not None else np.nan,
-                            "actual_delay_minutes": actual_delay,
-                        }
-                    )
         finally:
             conn.close()
 
-        if not rows:
+        # --- Build final training DataFrame ---
+        merged["is_peak_hour"] = merged["hour_of_day"].apply(lambda h: int(is_peak_hour(h)))
+        merged.rename(columns={"horizon_min": "minutes_until_scheduled_departure"}, inplace=True)
+
+        result = merged[
+            [
+                "sailing_event_id",
+                "route_abbrev",
+                "departing_terminal_id",
+                "day_of_week",
+                "hour_of_day",
+                "minutes_until_scheduled_departure",
+                "current_vessel_delay_minutes",
+                "is_peak_hour",
+                "previous_sailing_fullness",
+                "turnaround_minutes",
+                "actual_delay_minutes",
+            ]
+        ].copy()
+
+        if result.empty:
             logger.warning("No training rows generated")
             return None
 
-        df = pd.DataFrame(rows)
         logger.info(
-            f"Built training data: {len(df)} rows from {len(events)} sailing events"
+            f"Built training data: {len(result)} rows from {len(events)} sailing events"
         )
-        return df
+        return result
 
     def train(self) -> bool:
         """Train the three quantile models. Returns True on success."""

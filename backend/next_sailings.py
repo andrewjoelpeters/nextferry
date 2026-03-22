@@ -202,6 +202,7 @@ def get_directional_schedules(
             )
         )
 
+    direction_schedules.sort(key=lambda ds: ds.departing_terminal_name)
     return direction_schedules
 
 

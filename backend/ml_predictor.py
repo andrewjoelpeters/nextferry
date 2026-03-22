@@ -135,6 +135,7 @@ class DelayPredictor:
                     rows.append(
                         {
                             "sailing_event_id": event["id"],
+                            "scheduled_departure": scheduled_dep,
                             "route_abbrev": event["route_abbrev"] or "unknown",
                             "departing_terminal_id": departing_terminal_id,
                             "day_of_week": event["day_of_week"],

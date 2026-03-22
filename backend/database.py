@@ -370,6 +370,9 @@ def get_turnaround_minutes(
         if row and row["docked_at"]:
             docked_dt = datetime.fromisoformat(row["docked_at"])
             sched_dt = datetime.fromisoformat(scheduled_departure)
+            # Strip tzinfo to avoid mixing naive/aware datetimes
+            docked_dt = docked_dt.replace(tzinfo=None)
+            sched_dt = sched_dt.replace(tzinfo=None)
             diff = (sched_dt - docked_dt).total_seconds() / 60
             return max(0, diff)
         return None

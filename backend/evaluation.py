@@ -1,16 +1,24 @@
 """Evaluation framework for the delay prediction model.
 
-Three core metrics, chosen from the ferry rider's perspective:
+The top-line metric is **rider_risk** — an asymmetric MAE that penalizes
+overprediction (positive error) more heavily than underprediction:
 
-- "mae": mean absolute error in minutes — overall accuracy
-- "bias": mean signed error — positive = overpredicts delay = dangerous
-  (rider thinks boat leaves later than it does, might miss it)
+    rider_risk = mean(α · max(e, 0) + max(-e, 0))
+
+where α = OVERPREDICTION_PENALTY (default 2).  When α=1 this reduces to MAE.
+When the model errs on the safe side (underpredicts delay, rider arrives
+early), rider_risk ≈ MAE.  When it errs dangerously (overpredicts delay,
+rider might miss the boat), rider_risk >> MAE (up to α × MAE).
+
+Core metrics per slice:
+- "rider_risk": asymmetric MAE (the one number)
+- "bias": mean signed error — diagnostic for direction
 - "error_p90": 90th percentile of signed error — tail risk
-  (in the worst 10% of cases, how far off is the prediction?)
 
-Plus at the top level only:
-- "coverage_70pct": is the prediction interval calibrated?
-- "improvement_pct": is the model better than naive "current delay = future delay"?
+Top-level only:
+- "mae": standard MAE (reference, universally understood)
+- "coverage_70pct": prediction interval calibration check
+- "improvement_pct": vs naive "current delay = future delay" baseline
 
 Usage:
     python -m backend.evaluation
@@ -23,6 +31,12 @@ import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# Overprediction is this many times worse than underprediction.
+# α=2 means a 1-min overprediction costs 2, a 1-min underprediction costs 1.
+# Grounded in domain reality: missing a ferry (overprediction) means waiting
+# 30–60 min for the next sailing, while arriving early just means waiting.
+OVERPREDICTION_PENALTY = 2
 
 # Day-of-week labels (strftime %w convention: 0=Sunday)
 DOW_LABELS = {0: "Sun", 1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat"}
@@ -52,6 +66,18 @@ HORIZON_BUCKETS = [
 ]
 
 
+def _rider_risk(errors: np.ndarray, alpha: float = OVERPREDICTION_PENALTY) -> float:
+    """Asymmetric MAE: penalize overprediction α× more than underprediction.
+
+    rider_risk = mean(α · max(e, 0) + max(-e, 0))
+
+    When α=1 this is identical to MAE.
+    """
+    overpred = np.maximum(errors, 0)    # positive errors (dangerous)
+    underpred = np.maximum(-errors, 0)   # negative errors (safe)
+    return float(np.mean(alpha * overpred + underpred))
+
+
 def compute_metrics(errors: pd.Series,
                     actuals: Optional[pd.Series] = None,
                     lower: Optional[pd.Series] = None,
@@ -68,14 +94,17 @@ def compute_metrics(errors: pd.Series,
     if len(errors) == 0:
         return None
 
-    abs_errors = np.abs(errors)
+    err_arr = errors.values
 
     metrics = {
-        "mae": round(float(abs_errors.mean()), 2),
+        "rider_risk": round(_rider_risk(err_arr), 2),
         "bias": round(float(errors.mean()), 2),
-        "error_p90": round(float(np.percentile(errors, 90)), 2),
+        "error_p90": round(float(np.percentile(err_arr, 90)), 2),
         "n": int(len(errors)),
     }
+
+    # MAE — included for reference / universally understood
+    metrics["mae"] = round(float(np.abs(err_arr).mean()), 2)
 
     # Coverage — only meaningful when interval bounds are provided
     if actuals is not None and lower is not None and upper is not None:
@@ -83,16 +112,16 @@ def compute_metrics(errors: pd.Series,
         metrics["coverage_70pct"] = round(float(within_bounds.mean() * 100), 1)
 
     if baseline_errors is not None and len(baseline_errors) > 0:
-        baseline_mae = float(np.abs(baseline_errors).mean())
-        metrics["baseline_mae"] = round(baseline_mae, 2)
+        baseline_risk = _rider_risk(baseline_errors.values)
+        metrics["baseline_rider_risk"] = round(baseline_risk, 2)
         metrics["improvement_pct"] = round(
-            (1 - metrics["mae"] / max(baseline_mae, 0.01)) * 100, 1
+            (1 - metrics["rider_risk"] / max(baseline_risk, 0.01)) * 100, 1
         )
     return metrics
 
 
 def _slice_metrics(test_df, errors, baseline_errors, groupby_col):
-    """Compute core metrics (mae, bias, p90) for each value of groupby_col."""
+    """Compute core metrics for each value of groupby_col."""
     result = {}
     for val, group in test_df.groupby(groupby_col):
         idx = group.index
@@ -259,21 +288,22 @@ def print_evaluation(results: dict):
     else:
         print()
 
-    print(f"\n  MAE:          {results['overall_mae']} min")
+    print(f"\n  Rider Risk:   {results['overall_rider_risk']} min (α={OVERPREDICTION_PENALTY})")
+    print(f"  MAE:          {results['overall_mae']} min")
     print(f"  Bias:         {results['overall_bias']:+.2f} min (positive = risky)")
     print(f"  p90:          {results['overall_error_p90']:+.2f} min")
     print(f"  70% Coverage: {results['overall_coverage_70pct']}%")
 
-    if "overall_baseline_mae" in results:
-        print(f"\n  Baseline MAE:  {results['overall_baseline_mae']} min")
+    if "overall_baseline_rider_risk" in results:
+        print(f"\n  Baseline Risk: {results['overall_baseline_rider_risk']} min")
         print(f"  Improvement:   {results['overall_improvement_pct']}%")
 
     if "by_route" in results:
         print(f"\nBy route:")
-        print(f"  {'Route':<12} {'MAE':>6} {'Bias':>7} {'p90':>7} {'N':>6}")
+        print(f"  {'Route':<12} {'Risk':>6} {'Bias':>7} {'p90':>7} {'N':>6}")
         for route, m in sorted(results["by_route"].items()):
             print(
-                f"  {route:<12} {m['mae']:>6.2f} {m['bias']:>+6.2f} "
+                f"  {route:<12} {m['rider_risk']:>6.2f} {m['bias']:>+6.2f} "
                 f"{m['error_p90']:>+6.2f} {m['n']:>6}"
             )
 

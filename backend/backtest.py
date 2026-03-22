@@ -21,7 +21,11 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-from .evaluation import compute_metrics, evaluate_predictions
+from .evaluation import (
+    OVERPREDICTION_PENALTY,
+    compute_metrics,
+    evaluate_predictions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +160,7 @@ def walk_forward_backtest(
         logger.info(
             f"Fold {fold_idx}: train={len(train_event_ids)} events, "
             f"test={fold_eval.get('n_test_events', '?')} events, "
-            f"MAE={fold_eval['overall_mae']}, "
+            f"risk={fold_eval['overall_rider_risk']}, "
             f"bias={fold_eval['overall_bias']:+.2f}, "
             f"p90={fold_eval['overall_error_p90']:+.2f}"
         )
@@ -175,7 +179,7 @@ def walk_forward_backtest(
         return {"mean": round(float(np.mean(vals)), 2), "std": round(float(np.std(vals)), 2)}
 
     stability = {
-        "mae": _fold_stat("overall_mae"),
+        "rider_risk": _fold_stat("overall_rider_risk"),
         "bias": _fold_stat("overall_bias"),
         "error_p90": _fold_stat("overall_error_p90"),
     }
@@ -197,14 +201,14 @@ def walk_forward_backtest(
 def _metric_table(data: dict, key_label: str) -> list:
     """Render a dict of {label: metrics} as a markdown table.
 
-    Four data columns: MAE, Bias, p90, N.
+    Four data columns: Rider Risk, Bias, p90, N.
     """
     lines = []
-    lines.append(f"| {key_label} | MAE | Bias | p90 | N |")
+    lines.append(f"| {key_label} | Rider Risk | Bias | p90 | N |")
     lines.append("|---|---|---|---|---|")
     for label, m in sorted(data.items()):
         lines.append(
-            f"| {label} | {m['mae']} | {m['bias']:+.2f} | "
+            f"| {label} | {m['rider_risk']} | {m['bias']:+.2f} | "
             f"{m['error_p90']:+.2f} | {m['n']} |"
         )
     return lines
@@ -240,18 +244,29 @@ def generate_markdown_report(
     lines.append("")
 
     # ---- TOP-LINE ----
+    risk = agg['overall_rider_risk']
+    mae = agg['overall_mae']
     bias = agg['overall_bias']
-    bias_note = "positive = risky (overpredicts delay)" if bias > 0 else "negative = conservative"
+    # rider_risk >= MAE always (since α>1). The gap tells you how much
+    # overprediction (dangerous error) the model has.
+    risk_ratio = round(risk / max(mae, 0.01), 2)
+
     lines.append("## Top-Line Results")
+    lines.append("")
+    lines.append(f"> **Rider Risk** is an asymmetric MAE (α={OVERPREDICTION_PENALTY}): "
+                 f"overprediction is penalized {OVERPREDICTION_PENALTY}× more than underprediction.  ")
+    lines.append(f"> Rider Risk / MAE = {risk_ratio}× — closer to 1.0 means errors are mostly safe "
+                 f"(underprediction); closer to {OVERPREDICTION_PENALTY}.0 means mostly dangerous.")
     lines.append("")
     lines.append("| Metric | Value |")
     lines.append("|--------|-------|")
-    lines.append(f"| **MAE** | **{agg['overall_mae']} min** |")
-    lines.append(f"| Bias | {bias:+.2f} min ({bias_note}) |")
+    lines.append(f"| **Rider Risk** | **{risk} min** (risk/MAE = {risk_ratio}×) |")
+    lines.append(f"| MAE | {mae} min |")
+    lines.append(f"| Bias | {bias:+.2f} min |")
     lines.append(f"| p90 (tail risk) | {agg['overall_error_p90']:+.2f} min |")
     lines.append(f"| 70% Interval Coverage | {agg['overall_coverage_70pct']}% (target: 70%) |")
-    if "overall_baseline_mae" in agg:
-        lines.append(f"| Baseline MAE | {agg['overall_baseline_mae']} min |")
+    if "overall_baseline_rider_risk" in agg:
+        lines.append(f"| Baseline Rider Risk | {agg['overall_baseline_rider_risk']} min |")
         lines.append(f"| Improvement vs baseline | {agg['overall_improvement_pct']}% |")
     lines.append("")
 
@@ -262,20 +277,19 @@ def generate_markdown_report(
     # ---- Stability ----
     lines.append("## Walk-Forward Stability")
     lines.append("")
-    lines.append("| Fold | Train | Test | MAE | Bias | p90 |")
-    lines.append("|------|-------|------|-----|------|-----|")
+    lines.append("| Fold | Train | Test | Rider Risk | Bias | p90 |")
+    lines.append("|------|-------|------|------------|------|-----|")
     for f in backtest_results["fold_results"]:
         lines.append(
             f"| {f['fold']} | {f['n_train_events']} | {f.get('n_test_events', '?')} | "
-            f"{f['overall_mae']} | {f['overall_bias']:+.2f} | "
+            f"{f['overall_rider_risk']} | {f['overall_bias']:+.2f} | "
             f"{f['overall_error_p90']:+.2f} |"
         )
     lines.append("")
 
-    # Stability summary
     lines.append("| Metric | Mean | Std Dev |")
     lines.append("|--------|------|---------|")
-    for key, label in [("mae", "MAE"), ("bias", "Bias"), ("error_p90", "p90")]:
+    for key, label in [("rider_risk", "Rider Risk"), ("bias", "Bias"), ("error_p90", "p90")]:
         s = stab.get(key)
         if s:
             lines.append(f"| {label} | {s['mean']} | ±{s['std']} |")
@@ -305,6 +319,7 @@ def generate_markdown_report(
     lines.append("|-----------|-------|")
     for k, v in sorted(params.items()):
         lines.append(f"| {k} | {v} |")
+    lines.append(f"| overprediction_penalty (α) | {OVERPREDICTION_PENALTY} |")
     lines.append("")
 
     # ---- Raw JSON ----
@@ -338,6 +353,7 @@ def _comparison_section(agg: dict, prev: dict) -> list:
     lines.append("|--------|----------|---------|-------|")
 
     for label, key, suffix, lower_is_better in [
+        ("Rider Risk", "overall_rider_risk", " min", True),
         ("MAE", "overall_mae", " min", True),
         ("p90", "overall_error_p90", " min", True),
         ("Coverage", "overall_coverage_70pct", "%", False),
@@ -350,14 +366,6 @@ def _comparison_section(agg: dict, prev: dict) -> list:
                 f"{_delta_str(p, c, lower_is_better)} |"
             )
 
-    # Bias: compare absolute values (closer to zero is better)
-    pb, cb = prev.get("overall_bias"), agg.get("overall_bias")
-    if pb is not None and cb is not None:
-        lines.append(
-            f"| |Bias| | {abs(pb):.2f} min | {abs(cb):.2f} min | "
-            f"{_delta_str(abs(pb), abs(cb), lower_is_better=True)} |"
-        )
-
     # Per-route comparison
     prev_routes = prev.get("by_route", {})
     curr_routes = agg.get("by_route", {})
@@ -366,17 +374,17 @@ def _comparison_section(agg: dict, prev: dict) -> list:
         lines.append("")
         lines.append("### Per-Route Comparison")
         lines.append("")
-        lines.append("| Route | Prev MAE | Curr MAE | Prev p90 | Curr p90 | MAE Delta |")
-        lines.append("|-------|----------|----------|----------|----------|-----------|")
+        lines.append("| Route | Prev Risk | Curr Risk | Prev p90 | Curr p90 | Risk Delta |")
+        lines.append("|-------|-----------|-----------|----------|----------|------------|")
         for r in all_routes:
-            pm = prev_routes.get(r, {}).get("mae", "—")
-            cm = curr_routes.get(r, {}).get("mae", "—")
+            pr = prev_routes.get(r, {}).get("rider_risk", "—")
+            cr = curr_routes.get(r, {}).get("rider_risk", "—")
             pp = prev_routes.get(r, {}).get("error_p90", "—")
             cp = curr_routes.get(r, {}).get("error_p90", "—")
-            delta = _delta_str(pm, cm) if isinstance(pm, (int, float)) and isinstance(cm, (int, float)) else "—"
+            delta = _delta_str(pr, cr) if isinstance(pr, (int, float)) and isinstance(cr, (int, float)) else "—"
             pp_s = f"{pp:+.2f}" if isinstance(pp, (int, float)) else pp
             cp_s = f"{cp:+.2f}" if isinstance(cp, (int, float)) else cp
-            lines.append(f"| {r} | {pm} | {cm} | {pp_s} | {cp_s} | {delta} |")
+            lines.append(f"| {r} | {pr} | {cr} | {pp_s} | {cp_s} | {delta} |")
 
     lines.append("")
     return lines

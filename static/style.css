@@ -143,6 +143,32 @@ header h1 {
     gap: var(--lg);
 }
 
+/* Direction toggle */
+.direction-toggle {
+    display: flex;
+    padding: var(--sm);
+    gap: var(--xs);
+    background: var(--wave-foam);
+}
+
+.direction-btn {
+    flex: 1;
+    padding: var(--sm) var(--md);
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--deck-gray);
+    cursor: pointer;
+    transition: all 0.2s var(--ease-out);
+}
+
+.direction-btn.active {
+    background: var(--ocean-deep);
+    color: white;
+}
+
 .terminal-card {
     border: 1px solid rgba(0, 0, 0, 0.05);
     border-radius: var(--lg);
@@ -150,31 +176,8 @@ header h1 {
     overflow: hidden;
 }
 
-.terminal-name {
-    background: var(--wave-foam);
-    padding: var(--sm) var(--md);
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--ocean-deep);
-    cursor: pointer;
-    list-style: none;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.terminal-name::-webkit-details-marker { display: none; }
-.terminal-name::marker { display: none; content: ''; }
-
-.terminal-name::after {
-    content: '\25B4'; /* up triangle when open */
-    font-size: 0.65rem;
-    color: var(--deck-gray);
-    opacity: 0.5;
-}
-
-.terminal-card:not([open]) .terminal-name::after {
-    content: '\25BE'; /* down triangle when collapsed */
+.terminal-card.direction-hidden {
+    display: none;
 }
 
 /* Sailing list */

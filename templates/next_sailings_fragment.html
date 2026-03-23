@@ -1,11 +1,15 @@
 {% for route in routes %}
-<div class="route-section">
+<div class="route-section" data-route="{{ route.route_name }}">
     <h3 class="route-title">{{ route.route_name }}</h3>
+    <div class="direction-toggle">
+        {% for schedule in route.schedules %}
+        <button class="direction-btn" data-terminal="{{ schedule.departing_terminal_name }}">From {{ schedule.departing_terminal_name }}</button>
+        {% endfor %}
+    </div>
     <div class="terminals-grid">
 
         {% for schedule in route.schedules %}
-        <details class="terminal-card">
-            <summary class="terminal-name">{{ schedule.direction_header }}</summary>
+        <div class="terminal-card" data-departing="{{ schedule.departing_terminal_name }}">
             <div class="sailings-list">
 
                 {% if schedule.sailings %}
@@ -88,7 +92,7 @@
                 {% endif %}
 
             </div>
-        </details>
+        </div>
         {% endfor %}
 
     </div>
@@ -100,3 +104,62 @@
     <p>By <a href="https://github.com/andrewjoelpeters/nextferry">@andrewjoelpeters</a></p>
     Last updated: {{ last_updated }}
 </div>
+
+<script>
+// Direction toggle: persist selection in localStorage, survive HTMX swaps
+(function() {
+    var STORAGE_KEY = 'nextferry_direction';
+
+    function getPrefs() {
+        try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+        catch(e) { return {}; }
+    }
+
+    function savePrefs(prefs) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
+    }
+
+    function applyToggles() {
+        document.querySelectorAll('.route-section').forEach(function(route) {
+            var routeName = route.dataset.route;
+            var prefs = getPrefs();
+            var selected = prefs[routeName];
+            var buttons = route.querySelectorAll('.direction-btn');
+            var cards = route.querySelectorAll('.terminal-card');
+
+            // If no preference saved, default to first terminal
+            if (!selected && buttons.length > 0) {
+                selected = buttons[0].dataset.terminal;
+            }
+
+            buttons.forEach(function(btn) {
+                btn.classList.toggle('active', btn.dataset.terminal === selected);
+            });
+
+            cards.forEach(function(card) {
+                card.classList.toggle('direction-hidden', card.dataset.departing !== selected);
+            });
+        });
+    }
+
+    // Handle toggle clicks (use event delegation for HTMX-replaced content)
+    document.addEventListener('click', function(e) {
+        var btn = e.target.closest('.direction-btn');
+        if (!btn) return;
+
+        var route = btn.closest('.route-section');
+        var routeName = route.dataset.route;
+        var terminal = btn.dataset.terminal;
+
+        var prefs = getPrefs();
+        prefs[routeName] = terminal;
+        savePrefs(prefs);
+
+        applyToggles();
+    });
+
+    // Apply on initial load and after every HTMX swap
+    applyToggles();
+    document.body.addEventListener('htmx:afterSwap', applyToggles);
+})();
+</script>

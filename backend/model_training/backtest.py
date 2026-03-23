@@ -45,6 +45,7 @@ Usage:
 
 import argparse
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
@@ -188,11 +189,15 @@ def run_backtest(
         return None
 
     logger.info(f"Running walk-forward backtest with {n_folds} folds...")
+    t0 = time.monotonic()
     results = walk_forward_backtest(df, model_factory=model_factory, n_folds=n_folds)
+    elapsed = time.monotonic() - t0
 
     if "error" in results:
         logger.error(results["error"])
         return None
+
+    results["training_time_seconds"] = round(elapsed, 1)
 
     comparison = None
     if compare_path:

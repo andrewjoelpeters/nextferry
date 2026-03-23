@@ -1,7 +1,9 @@
 import asyncio
+import hashlib
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo
 
@@ -154,10 +156,28 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 
+def _compute_asset_version() -> str:
+    """Hash local static assets to produce a short cache-busting token."""
+    h = hashlib.md5()
+    for name in sorted(["style.css", "alerts.js"]):
+        p = Path("static") / name
+        if p.exists():
+            h.update(p.read_bytes())
+    return h.hexdigest()[:8]
+
+
+ASSET_VERSION = _compute_asset_version()
+templates.env.globals["asset_version"] = ASSET_VERSION
+
+
 @app.get("/sw.js")
 async def service_worker():
     """Serve service worker from root scope for full app control"""
-    return FileResponse("static/sw.js", media_type="application/javascript")
+    return FileResponse(
+        "static/sw.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @app.get("/", response_class=HTMLResponse)

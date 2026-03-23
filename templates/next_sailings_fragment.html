@@ -69,9 +69,6 @@
                             {% if sailing.fill_risk %}
                             <span class="detail-item fill-risk fill-risk-{{ sailing.fill_risk.risk_level }}">{{ sailing.fill_risk.label }}</span>
                             {% endif %}
-                            {% if sailing.confidence_text %}
-                            <span class="detail-item confidence-range">{{ sailing.confidence_text }}</span>
-                            {% endif %}
                             {% if sailing.vessel_name and sailing.status_class != 'status-departed' and not sailing.departed %}
                             <button class="alert-btn"
                                     onclick="openAlertPicker(this)"

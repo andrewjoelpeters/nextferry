@@ -192,7 +192,7 @@
 
   window.openAlertPicker = function (btn) {
     // If a picker is already open for this button, close it
-    const existing = btn.closest('.sailing-meta').querySelector('.alert-picker');
+    const existing = btn.closest('.vessel-live-info').querySelector('.alert-picker');
     if (existing) {
       existing.remove();
       return;
@@ -275,8 +275,8 @@
       picker.appendChild(cancelBtn);
     }
 
-    btn.closest('.sailing-meta').style.position = 'relative';
-    btn.closest('.sailing-meta').appendChild(picker);
+    btn.closest('.vessel-live-info').style.position = 'relative';
+    btn.closest('.vessel-live-info').appendChild(picker);
     input.focus();
     input.select();
 

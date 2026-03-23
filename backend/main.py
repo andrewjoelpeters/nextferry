@@ -54,7 +54,7 @@ async def update_sailings_cache():
 
 async def retrain_model_daily():
     """Background task to load/train ML models, then retrain daily at 2 AM Pacific."""
-    # On startup, try to load saved models (volume first, then bundled)
+    # On startup, try to load saved models from volume
     logger.info("Attempting to load saved ML models...")
     ml_predictor.load()
     fill_predictor.load()

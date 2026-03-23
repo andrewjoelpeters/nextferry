@@ -6,7 +6,7 @@ for features, hyperparams, and categorical encoding.
 
 This module owns:
 - Data loading (build_training_data)
-- Save/load orchestration (volume → bundled fallback, legacy format support)
+- Save/load orchestration (volume models, feature-compatibility validation)
 - The predict() API surface consumed by the serving layer
 - The module-level singleton
 
@@ -31,7 +31,7 @@ from .database import (
     get_sailing_event_count,
     get_training_data,
 )
-from .model_training.backtest_model import QuantileGBTModel, is_peak_hour
+from .model_training.backtest_model import FEATURE_COLS, QuantileGBTModel, is_peak_hour
 
 logger = logging.getLogger(__name__)
 
@@ -54,11 +54,6 @@ def get_volume_model_dir() -> Path:
     model_dir = data_dir / "models"
     model_dir.mkdir(parents=True, exist_ok=True)
     return model_dir
-
-
-def get_bundled_model_dir() -> Path:
-    """Model directory shipped with the repo (fallback for fresh deploys)."""
-    return Path(__file__).resolve().parent.parent / "models"
 
 
 class DelayPredictor:
@@ -382,77 +377,41 @@ class DelayPredictor:
         logger.info(f"Models saved to {model_dir}")
 
     def _load_from_dir(self, model_dir: Path) -> bool:
-        """Attempt to load models from a directory (v2 format first, then legacy)."""
-        # Try v2 format: single model file + metadata
+        """Load a v2 model from model_dir, validating feature compatibility."""
         v2_path = model_dir / _MODEL_FILENAME
-        if v2_path.exists():
-            try:
-                self._model = QuantileGBTModel.load(v2_path)
-                meta = joblib.load(model_dir / _META_FILENAME)
-                self.last_trained = meta["last_trained"]
-                self.training_data_size = meta["training_data_size"]
-                self.last_evaluation = meta.get("last_evaluation")
-                self.is_trained = True
-                logger.info(
-                    f"Models loaded from {model_dir} (trained: {self.last_trained})"
-                )
-                return True
-            except Exception as e:
-                logger.error(f"Failed to load v2 models from {model_dir}: {e}")
-                return False
-
-        # Legacy format: 4 separate joblib files
-        return self._load_legacy(model_dir)
-
-    def _load_legacy(self, model_dir: Path) -> bool:
-        """Load from the legacy 4-file format for backward compatibility."""
-        required_files = [
-            "delay_model_q50.joblib",
-            "delay_model_q15.joblib",
-            "delay_model_q85.joblib",
-            "delay_model_meta.joblib",
-        ]
-        if not all((model_dir / f).exists() for f in required_files):
+        if not v2_path.exists():
             return False
 
         try:
-            meta = joblib.load(model_dir / "delay_model_meta.joblib")
-            self._model = QuantileGBTModel.from_legacy(
-                model_q50=joblib.load(model_dir / "delay_model_q50.joblib"),
-                model_q15=joblib.load(model_dir / "delay_model_q15.joblib"),
-                model_q85=joblib.load(model_dir / "delay_model_q85.joblib"),
-                route_mapping=meta["route_mapping"],
-                terminal_mapping=meta["terminal_mapping"],
-            )
+            model = QuantileGBTModel.load(v2_path)
+            if model._feature_cols != FEATURE_COLS:
+                logger.warning(
+                    f"Model in {model_dir} has stale features "
+                    f"({len(model._feature_cols)} vs {len(FEATURE_COLS)} expected), "
+                    f"skipping — will retrain"
+                )
+                return False
+            self._model = model
+            meta = joblib.load(model_dir / _META_FILENAME)
             self.last_trained = meta["last_trained"]
             self.training_data_size = meta["training_data_size"]
             self.last_evaluation = meta.get("last_evaluation")
             self.is_trained = True
             logger.info(
-                f"Models loaded from {model_dir} [legacy format] "
-                f"(trained: {self.last_trained})"
+                f"Models loaded from {model_dir} (trained: {self.last_trained})"
             )
             return True
         except Exception as e:
-            logger.error(f"Failed to load legacy models from {model_dir}: {e}")
+            logger.error(f"Failed to load models from {model_dir}: {e}")
             return False
 
     def load(self, path: Optional[Path] = None) -> bool:
-        """Load models from disk. Checks volume first, then bundled repo models."""
-        if path:
-            return self._load_from_dir(path)
-
-        # Prefer volume models (fresher, from daily retraining)
-        if self._load_from_dir(get_volume_model_dir()):
+        """Load models from the volume model directory."""
+        model_dir = path or get_volume_model_dir()
+        if self._load_from_dir(model_dir):
             return True
 
-        # Fall back to bundled models shipped with the repo
-        bundled = get_bundled_model_dir()
-        if self._load_from_dir(bundled):
-            logger.info("Loaded bundled models (no volume models found)")
-            return True
-
-        logger.info("No saved models found in volume or repo")
+        logger.info("No compatible saved models found")
         return False
 
 

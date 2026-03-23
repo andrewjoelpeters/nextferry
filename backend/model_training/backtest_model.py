@@ -87,6 +87,7 @@ class QuantileGBTModel:
         self.params = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
         self.models: dict = {}
         self._category_maps: dict[str, dict] = {}
+        self._feature_cols: list[str] = list(FEATURE_COLS)
 
     @property
     def is_fitted(self) -> bool:
@@ -106,7 +107,7 @@ class QuantileGBTModel:
         Unseen categories get UNSEEN_CATEGORY_CODE (-1), which
         HistGradientBoosting handles via its missing-value path.
         """
-        X = df[FEATURE_COLS].copy()
+        X = df[self._feature_cols].copy()
         for col in CATEGORICAL_COLS:
             mapping = self._category_maps[col]
             X[col] = X[col].map(mapping).fillna(UNSEEN_CATEGORY_CODE).astype(int)
@@ -189,6 +190,7 @@ class QuantileGBTModel:
                 "models": self.models,
                 "category_maps": self._category_maps,
                 "params": self.params,
+                "feature_cols": self._feature_cols,
             },
             path,
         )
@@ -202,24 +204,6 @@ class QuantileGBTModel:
         instance = cls(hyperparams=data["params"])
         instance.models = data["models"]
         instance._category_maps = data["category_maps"]
+        instance._feature_cols = data.get("feature_cols", list(FEATURE_COLS))
         return instance
 
-    @classmethod
-    def from_legacy(
-        cls,
-        model_q50,
-        model_q15,
-        model_q85,
-        route_mapping: dict,
-        terminal_mapping: dict,
-    ) -> "QuantileGBTModel":
-        """Reconstruct from the legacy 4-file save format."""
-        instance = cls()
-        instance.models = {"q50": model_q50, "q15": model_q15, "q85": model_q85}
-        instance._category_maps = {
-            "route_abbrev": route_mapping,
-            "departing_terminal_id": terminal_mapping,
-            # day_of_week was encoded via .cat.codes on ints 0-6 → identity
-            "day_of_week": {i: i for i in range(7)},
-        }
-        return instance

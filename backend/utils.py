@@ -21,7 +21,9 @@ def string_format_time(dt: datetime):
     return dt.strftime("%-I:%M %p")
 
 
-def format_time_until(scheduled_time: datetime, departed: bool = False) -> tuple[str, str]:
+def format_time_until(
+    scheduled_time: datetime, departed: bool = False
+) -> tuple[str, str]:
     if not scheduled_time:
         return "N/A", "status-unknown"
 

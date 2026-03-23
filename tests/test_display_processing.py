@@ -2,7 +2,8 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from backend.display_processing import process_routes_for_display
-from backend.serializers import DirectionalSchedule, RouteSailing, RouteSchedule
+from backend.serializers import (DirectionalSchedule, RouteSailing,
+                                 RouteSchedule)
 
 PT = ZoneInfo("America/Los_Angeles")
 

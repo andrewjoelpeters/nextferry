@@ -17,10 +17,8 @@ from typing import Optional
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import (
-    HistGradientBoostingClassifier,
-    HistGradientBoostingRegressor,
-)
+from sklearn.ensemble import (HistGradientBoostingClassifier,
+                              HistGradientBoostingRegressor)
 
 from .database import get_connection
 
@@ -138,9 +136,7 @@ class FillRiskPredictor:
                 if snap["drive_up_space_count"] == 0:
                     try:
                         snap_time = datetime.fromisoformat(snap["collected_at"])
-                        minutes_before = (
-                            dep_time - snap_time
-                        ).total_seconds() / 60
+                        minutes_before = (dep_time - snap_time).total_seconds() / 60
                         if minutes_before > 0:  # only count pre-departure fills
                             did_fill = 1
                             fill_minutes_before = minutes_before
@@ -210,9 +206,7 @@ class FillRiskPredictor:
             zip(
                 df["departing_terminal_id"].astype("category").cat.categories,
                 range(
-                    len(
-                        df["departing_terminal_id"].astype("category").cat.categories
-                    )
+                    len(df["departing_terminal_id"].astype("category").cat.categories)
                 ),
             )
         )
@@ -303,7 +297,9 @@ class FillRiskPredictor:
         if fill_prob >= 0.6:
             risk_level = "high"
             if self.regressor is not None:
-                fills_minutes_before = max(0, round(self.regressor.predict(features)[0]))
+                fills_minutes_before = max(
+                    0, round(self.regressor.predict(features)[0])
+                )
                 label = f"Often full ~{fills_minutes_before}m early"
             else:
                 label = "Often fills up"

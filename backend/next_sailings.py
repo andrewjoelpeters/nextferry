@@ -177,7 +177,9 @@ def get_next_sailings_by_boat(
             for sailing in sailings:
                 if sailing.scheduled_departure == current_vessel.scheduled_departure:
                     now = datetime.now(tz=ZoneInfo("America/Los_Angeles"))
-                    minutes_since = (now - sailing.scheduled_departure).total_seconds() / 60
+                    minutes_since = (
+                        now - sailing.scheduled_departure
+                    ).total_seconds() / 60
                     # Show departed sailing for up to 30 minutes after departure
                     if minutes_since <= 30:
                         departed_sailing = sailing.model_copy()
@@ -194,7 +196,9 @@ def get_next_sailings_by_boat(
                 next_sailings.insert(0, departed_sailing)
 
         v_id = current_vessel.vessel_id if current_vessel else None
-        next_sailings = propigate_delays(current_vessel.delay, next_sailings, vessel_id=v_id)
+        next_sailings = propigate_delays(
+            current_vessel.delay, next_sailings, vessel_id=v_id
+        )
 
         # Annotate the first sailing with live vessel state.
         # When the vessel is en route, verify the first sailing's direction matches
@@ -212,7 +216,9 @@ def get_next_sailings_by_boat(
                 first.vessel_left_dock = current_vessel.left_dock
                 first.vessel_eta = current_vessel.eta
                 if current_vessel.delay:
-                    first.vessel_delay_minutes = datetime_to_minutes(current_vessel.delay)
+                    first.vessel_delay_minutes = datetime_to_minutes(
+                        current_vessel.delay
+                    )
 
         next_sailings_by_boat[vessel_position_num] = next_sailings
 

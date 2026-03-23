@@ -2,13 +2,8 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from backend.utils import (
-    format_confidence_text,
-    format_delay_text,
-    format_time_until,
-    is_peak_hour,
-    parse_ms_date,
-)
+from backend.utils import (format_confidence_text, format_delay_text,
+                           format_time_until, is_peak_hour, parse_ms_date)
 
 PT = ZoneInfo("America/Los_Angeles")
 

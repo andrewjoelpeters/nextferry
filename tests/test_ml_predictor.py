@@ -3,11 +3,9 @@ import numpy as np
 import pandas as pd
 
 from backend.ml_predictor import DelayPredictor
-from backend.model_training.backtest_model import (
-    FEATURE_COLS,
-    QuantileGBTModel,
-    is_peak_hour,
-)
+from backend.model_training.backtest_model import (FEATURE_COLS,
+                                                   QuantileGBTModel,
+                                                   is_peak_hour)
 
 
 def _make_training_df(n: int = 200) -> pd.DataFrame:

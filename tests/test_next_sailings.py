@@ -1,18 +1,12 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from backend.next_sailings import (
-    get_directional_schedules,
-    get_next_sailings_by_boat,
-    get_route_schedule_by_boat,
-    get_route_vessels,
-)
-from backend.serializers import (
-    DirectionalSailing,
-    RawDeparture,
-    RawDirectionalSchedule,
-    Vessel,
-)
+from backend.next_sailings import (get_directional_schedules,
+                                   get_next_sailings_by_boat,
+                                   get_route_schedule_by_boat,
+                                   get_route_vessels)
+from backend.serializers import (DirectionalSailing, RawDeparture,
+                                 RawDirectionalSchedule, Vessel)
 
 PT = ZoneInfo("America/Los_Angeles")
 
@@ -160,9 +154,7 @@ class TestGetNextSailingsByBoat:
     def test_at_dock_includes_current(self):
         # Use a round timestamp so WSDOT parse round-trip is exact
         departure_time = _now().replace(second=0, microsecond=0) + timedelta(minutes=5)
-        vessel = _make_vessel(
-            at_dock=True, scheduled_departure=departure_time
-        )
+        vessel = _make_vessel(at_dock=True, scheduled_departure=departure_time)
         # The vessel's scheduled_departure went through WSDOT date parsing,
         # so use the parsed value for the sailing to ensure exact match
         parsed_departure = vessel.scheduled_departure
@@ -187,9 +179,7 @@ class TestGetNextSailingsByBoat:
 
     def test_en_route_excludes_current(self):
         departure_time = _now().replace(second=0, microsecond=0) - timedelta(minutes=5)
-        vessel = _make_vessel(
-            at_dock=False, scheduled_departure=departure_time
-        )
+        vessel = _make_vessel(at_dock=False, scheduled_departure=departure_time)
         parsed_departure = vessel.scheduled_departure
         sailings = {
             1: [

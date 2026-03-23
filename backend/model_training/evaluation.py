@@ -78,11 +78,13 @@ def pinball_loss(errors: np.ndarray, alpha: float = OVERPREDICTION_PENALTY) -> f
     return float(np.mean(alpha * overpred + underpred))
 
 
-def compute_metrics(errors: pd.Series,
-                    actuals: Optional[pd.Series] = None,
-                    lower: Optional[pd.Series] = None,
-                    upper: Optional[pd.Series] = None,
-                    baseline_errors: Optional[pd.Series] = None) -> Optional[dict]:
+def compute_metrics(
+    errors: pd.Series,
+    actuals: Optional[pd.Series] = None,
+    lower: Optional[pd.Series] = None,
+    upper: Optional[pd.Series] = None,
+    baseline_errors: Optional[pd.Series] = None,
+) -> Optional[dict]:
     """Compute metrics for a group of predictions.
 
     errors = predicted - actual.
@@ -177,10 +179,14 @@ def evaluate_predictions(test_df: pd.DataFrame) -> dict:
     if "hour_of_day" in test_df.columns:
         by_tod = {}
         for label, h_start, h_end in TIME_OF_DAY_BUCKETS:
-            mask = (test_df["hour_of_day"] >= h_start) & (test_df["hour_of_day"] < h_end)
+            mask = (test_df["hour_of_day"] >= h_start) & (
+                test_df["hour_of_day"] < h_end
+            )
             if mask.sum() == 0:
                 continue
-            g_baseline = baseline_errors.loc[mask] if baseline_errors is not None else None
+            g_baseline = (
+                baseline_errors.loc[mask] if baseline_errors is not None else None
+            )
             m = compute_metrics(errors.loc[mask], baseline_errors=g_baseline)
             if m:
                 by_tod[label] = m
@@ -213,7 +219,9 @@ def evaluate_predictions(test_df: pd.DataFrame) -> dict:
         cross = {}
         for (route, peak), group in test_df.groupby(["route_abbrev", "is_peak_hour"]):
             idx = group.index
-            g_baseline = baseline_errors.loc[idx] if baseline_errors is not None else None
+            g_baseline = (
+                baseline_errors.loc[idx] if baseline_errors is not None else None
+            )
             m = compute_metrics(errors.loc[idx], baseline_errors=g_baseline)
             if m:
                 suffix = "peak" if peak else "off-peak"
@@ -263,7 +271,9 @@ def print_evaluation(results: dict):
     else:
         print()
 
-    print(f"\n  Pinball Loss: {results['overall_pinball_loss']} min (α={OVERPREDICTION_PENALTY})")
+    print(
+        f"\n  Pinball Loss: {results['overall_pinball_loss']} min (α={OVERPREDICTION_PENALTY})"
+    )
     print(f"  MAE:          {results['overall_mae']} min")
     print(f"  Bias:         {results['overall_bias']:+.2f} min (positive = risky)")
     print(f"  p90:          {results['overall_error_p90']:+.2f} min")

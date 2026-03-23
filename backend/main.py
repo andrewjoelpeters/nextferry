@@ -254,14 +254,41 @@ async def get_predictions_data():
     """Return dashboard data as JSON for chart rendering."""
     dashboard = get_dashboard_data()
 
-    # Include model evaluation metrics if available
+    # Transform evaluation metrics into the format the frontend expects
+    evaluation = None
+    raw_eval = ml_predictor.last_evaluation
+    if raw_eval:
+        evaluation = {
+            "overall_mae": raw_eval.get("overall_mae"),
+            "overall_mean_error": raw_eval.get("overall_bias"),
+            "improvement_pct": raw_eval.get("overall_improvement_pct"),
+        }
+        # Convert by_horizon dict into error_by_horizon array
+        by_horizon = raw_eval.get("by_horizon", {})
+        if by_horizon:
+            error_by_horizon = []
+            for label, metrics in by_horizon.items():
+                # Parse midpoint from label like "2–4m" → 3
+                parts = label.rstrip("m").split("–")
+                lo, hi = float(parts[0]), float(parts[1])
+                error_by_horizon.append({
+                    "minutes_out": int((lo + hi) / 2),
+                    "mae": metrics.get("mae"),
+                    "mean_error": metrics.get("bias"),
+                    "error_p88": metrics.get("error_p90"),
+                    "error_p12": round(-abs(metrics.get("error_p90", 0)), 2)
+                        if metrics.get("error_p90") is not None else None,
+                })
+            error_by_horizon.sort(key=lambda d: d["minutes_out"])
+            evaluation["error_by_horizon"] = error_by_horizon
+
     model_info = {
         "is_trained": ml_predictor.is_trained,
         "last_trained": (
             ml_predictor.last_trained.isoformat() if ml_predictor.last_trained else None
         ),
         "training_data_size": ml_predictor.training_data_size,
-        "evaluation": ml_predictor.last_evaluation,
+        "evaluation": evaluation,
     }
 
     return {**dashboard, "model": model_info}

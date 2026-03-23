@@ -86,9 +86,8 @@ CREATE TABLE IF NOT EXISTS sailing_events (
 ```
 
 - Add `sailing_id TEXT` column (nullable for backward compat with existing rows).
-- Add an index: `CREATE INDEX IF NOT EXISTS idx_sailing_events_sailing_id ON sailing_events(sailing_id)`.
+- Add an index: `CREATE INDEX IF NOT EXISTS idx_sailing_events_sailing_id ON sailing_events(sailing_id, scheduled_departure)` — composite index supports both single-sailing lookups and date-range queries.
 - Populate on insert in `extract_sailing_events()`: compute from `scheduled_departure`, `departing_terminal_id`, `arriving_terminal_id`.
-- Backfill existing rows: `UPDATE sailing_events SET sailing_id = printf('%02d%02d', cast(strftime('%H', scheduled_departure) as int), cast(strftime('%M', scheduled_departure) as int)) || '-' || departing_terminal_id || '-' || arriving_terminal_id WHERE sailing_id IS NULL`.
 
 ### Step 3: Add helper to parse/manipulate sailing IDs
 
@@ -183,3 +182,86 @@ Not required for the initial change but a natural follow-on.
 | New `get_sailing_delay_history()` query | Small | P1 |
 | Add `sailing_id` to `sailing_space_snapshots` | Medium | P2 |
 | Unify `SpaceLookup` key to use `sailing_id` | Medium | P2 |
+
+## Migration & backfill
+
+### Schema migration
+
+SQLite doesn't support `ADD COLUMN IF NOT EXISTS`, so `database.py` should handle this in `init_db()`:
+
+```python
+# Add sailing_id column if it doesn't exist (migration)
+cursor.execute("PRAGMA table_info(sailing_events)")
+columns = {row[1] for row in cursor.fetchall()}
+if "sailing_id" not in columns:
+    cursor.execute("ALTER TABLE sailing_events ADD COLUMN sailing_id TEXT")
+```
+
+This runs on every startup and is idempotent.
+
+### Backfill script
+
+New file: `scripts/backfill_sailing_ids.py`
+
+Computes `sailing_id` from existing columns for all rows where it's NULL. Important: `scheduled_departure` is stored in Pacific time (America/Los_Angeles), so the HHMM extraction uses the value directly.
+
+```python
+"""
+Backfill sailing_id for existing sailing_events rows.
+
+Safe to run multiple times — only updates rows where sailing_id IS NULL.
+
+Usage:
+    uv run python -m scripts.backfill_sailing_ids
+"""
+
+import sqlite3
+
+DB_PATH = "data/ferry.db"
+
+
+def backfill():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    # Count rows to backfill
+    cursor.execute("""
+        SELECT COUNT(*) FROM sailing_events
+        WHERE sailing_id IS NULL
+        AND departing_terminal_id IS NOT NULL
+        AND arriving_terminal_id IS NOT NULL
+    """)
+    count = cursor.fetchone()[0]
+    print(f"Found {count} rows to backfill")
+
+    if count == 0:
+        conn.close()
+        return
+
+    # Backfill using strftime on the stored datetime string
+    cursor.execute("""
+        UPDATE sailing_events
+        SET sailing_id = strftime('%H%M', scheduled_departure)
+            || '-' || departing_terminal_id
+            || '-' || arriving_terminal_id
+        WHERE sailing_id IS NULL
+        AND departing_terminal_id IS NOT NULL
+        AND arriving_terminal_id IS NOT NULL
+    """)
+
+    conn.commit()
+    print(f"Backfilled {cursor.rowcount} rows")
+    conn.close()
+
+
+if __name__ == "__main__":
+    backfill()
+```
+
+### Deployment order
+
+1. Deploy code with nullable `sailing_id` column + migration in `init_db()`
+2. New inserts start populating `sailing_id` automatically
+3. Run backfill script on production: `uv run python -m scripts.backfill_sailing_ids`
+4. Verify: `SELECT COUNT(*) FROM sailing_events WHERE sailing_id IS NULL` → should be 0 (or only rows with NULL terminal IDs)
+5. Follow-up PR can add queries that depend on `sailing_id` being populated

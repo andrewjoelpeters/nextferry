@@ -27,6 +27,14 @@
                             <div class="sailing-row-status">
                                 <span class="departed-info">En route to {{ schedule.arriving_terminal_name }}</span>
                             </div>
+                            {% if sailing.capacity %}
+                            <div class="sailing-row-capacity">
+                                <div class="capacity-bar">
+                                    <div class="capacity-fill {% if sailing.capacity.percent > 80 %}capacity-full{% elif sailing.capacity.percent > 50 %}capacity-low{% else %}capacity-ok{% endif %}" style="width: {{ sailing.capacity.percent }}%"></div>
+                                </div>
+                                <span class="capacity-text">{{ sailing.capacity.cars_on_board }} / {{ sailing.capacity.total }} cars</span>
+                            </div>
+                            {% endif %}
                             {% else %}
                             <div class="sailing-row-main">
                                 <span class="time-until-prominent">{{ sailing.time_until }}</span>
@@ -64,7 +72,11 @@
                                 {% endif %}
                             {% endif %}
                             {% if sailing.capacity %}
+                                {% if sailing.departed %}
+                            <span class="detail-item">Cars on board: {{ sailing.capacity.cars_on_board }} / {{ sailing.capacity.total }}</span>
+                                {% else %}
                             <span class="detail-item">Capacity: {{ sailing.capacity.spaces }} / {{ sailing.capacity.total }} drive-up</span>
+                                {% endif %}
                             {% endif %}
                             {% if sailing.fill_risk %}
                             <span class="detail-item fill-risk fill-risk-{{ sailing.fill_risk.risk_level }}">{{ sailing.fill_risk.label }}</span>

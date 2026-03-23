@@ -343,9 +343,7 @@ def get_previous_sailing_fullness(
         conn.close()
 
 
-def get_turnaround_minutes(
-    vessel_id: int, scheduled_departure: str
-) -> Optional[float]:
+def get_turnaround_minutes(vessel_id: int, scheduled_departure: str) -> Optional[float]:
     """Get how many minutes before scheduled departure the vessel docked.
 
     Finds the earliest snapshot where the vessel is at_dock=1 at the departing
@@ -377,6 +375,40 @@ def get_turnaround_minutes(
             sched_dt = sched_dt.replace(tzinfo=None)
             diff = (sched_dt - docked_dt).total_seconds() / 60
             return max(0, diff)
+        return None
+    finally:
+        conn.close()
+
+
+def get_departed_sailing_space(
+    departing_terminal_id: int, departure_time: str
+) -> Optional[dict]:
+    """Get the last known space snapshot for a departed sailing.
+
+    Returns the most recent snapshot before the sailing departed,
+    giving us the actual car count on board.
+    """
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                max_space_count,
+                drive_up_space_count
+            FROM sailing_space_snapshots
+            WHERE departing_terminal_id = ?
+              AND departure_time = ?
+              AND max_space_count > 0
+            ORDER BY collected_at DESC
+            LIMIT 1
+            """,
+            (departing_terminal_id, departure_time),
+        ).fetchone()
+        if row:
+            return {
+                "max_space_count": row["max_space_count"],
+                "drive_up_space_count": row["drive_up_space_count"],
+            }
         return None
     finally:
         conn.close()

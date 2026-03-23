@@ -156,6 +156,25 @@ header h1 {
     font-size: var(--text-sm);
     font-weight: 600;
     color: var(--ocean-deep);
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.terminal-name::-webkit-details-marker { display: none; }
+.terminal-name::marker { display: none; content: ''; }
+
+.terminal-name::after {
+    content: '\25B4'; /* up triangle when open */
+    font-size: 0.65rem;
+    color: var(--deck-gray);
+    opacity: 0.5;
+}
+
+.terminal-card:not([open]) .terminal-name::after {
+    content: '\25BE'; /* down triangle when collapsed */
 }
 
 /* Sailing list */
@@ -167,7 +186,6 @@ header h1 {
 /* Sailing item: collapsible details element */
 .sailing-item {
     border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-    border-left: 6px solid transparent;
 }
 
 .sailing-summary {
@@ -184,17 +202,16 @@ header h1 {
 .sailing-summary::marker { display: none; content: ''; }
 
 /* Expand hint chevron */
-.has-details .sailing-summary::after {
-    content: 'tap for details';
-    font-size: 0.6rem;
+.has-details .sailing-row-main::after {
+    content: '\25BE'; /* small down triangle */
+    font-size: 0.65rem;
     color: var(--deck-gray);
-    opacity: 0.5;
-    text-align: center;
-    padding-top: 2px;
+    opacity: 0.4;
+    flex-shrink: 0;
 }
 
-.has-details[open] .sailing-summary::after {
-    content: '';
+.has-details[open] .sailing-row-main::after {
+    content: '\25B4'; /* small up triangle */
 }
 
 /* Row 1: countdown + times + alert */
@@ -218,9 +235,24 @@ header h1 {
     text-align: right;
 }
 
-.display-time.has-delay {
-    color: var(--danger-red);
+/* Scheduled time is the faded anchor; estimated is the actionable time */
+.display-time .scheduled-part {
+    color: var(--deck-gray);
+    opacity: 0.6;
+}
+
+.display-time .arrow-part {
+    opacity: 0.6;
+}
+
+.display-time .estimated-part {
     font-weight: 600;
+    color: var(--ocean-midnight);
+}
+
+/* Only flag notably late sailings (>5 min) in red */
+.display-time.delay-notable .estimated-part {
+    color: var(--danger-red);
 }
 
 /* Row 2: vessel status text */
@@ -261,21 +293,25 @@ header h1 {
     font-style: italic;
 }
 
-/* Alert button */
+/* Alert button — in details expand area */
 .alert-btn {
     background: none;
     border: 1px solid rgba(0, 0, 0, 0.1);
-    border-radius: 50%;
-    width: 28px;
-    height: 28px;
-    display: flex;
+    border-radius: 6px;
+    padding: 4px 8px;
+    display: inline-flex;
     align-items: center;
-    justify-content: center;
+    gap: 4px;
     cursor: pointer;
     color: var(--deck-gray);
     transition: all 0.2s ease;
-    flex-shrink: 0;
     position: relative;
+    font-size: var(--text-xs);
+    margin-top: 2px;
+}
+
+.alert-btn-label {
+    font-size: var(--text-xs);
 }
 
 .alert-btn:hover {
@@ -459,12 +495,8 @@ header h1 {
     border-top: 1px dashed rgba(0, 0, 0, 0.06);
 }
 
-/* Status indicators: color bars only */
-.status-on-time { border-left-color: var(--success-green); }
-.status-delayed { border-left-color: var(--danger-red); }
-.status-early   { border-left-color: var(--ocean-surface); }
+/* Status indicators */
 .status-departing {
-    border-left-color: var(--departing-pulse);
     background: rgba(246, 228, 92, 0.04);
 }
 .status-departed {
@@ -506,7 +538,6 @@ header h1 {
 
 /* Departed sailing: subtle but informative */
 .sailing-departed {
-    border-left-color: var(--deck-gray);
     opacity: 0.55;
     border-bottom: 1px dashed rgba(0, 0, 0, 0.08);
 }

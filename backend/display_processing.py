@@ -151,16 +151,26 @@ def process_routes_for_display(
                     sailing.delay_in_minutes is not None
                     and sailing.delay_in_minutes != 0
                 )
+                delay_minutes = sailing.delay_in_minutes or 0
                 if has_delay:
                     display_time = f"{scheduled_time_str} → {estimated_time_str}"
+                    # HTML version with styled spans for scheduled (faded) vs estimated (bold)
+                    display_time_html = (
+                        f'<span class="scheduled-part">{scheduled_time_str}</span>'
+                        f' <span class="arrow-part">→</span> '
+                        f'<span class="estimated-part">{estimated_time_str}</span>'
+                    )
                 else:
                     display_time = scheduled_time_str
+                    display_time_html = scheduled_time_str
 
                 sailing_data = {
                     "time_until": time_until,
                     "scheduled_time": scheduled_time_str,
                     "estimated_departure": estimated_time_str,
                     "display_time": display_time,
+                    "display_time_html": display_time_html,
+                    "delay_minutes": delay_minutes,
                     "delay_text": delay_text,
                     "confidence_text": confidence_text,
                     "vessel_name": sailing.vessel_name,

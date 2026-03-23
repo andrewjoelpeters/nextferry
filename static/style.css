@@ -167,15 +167,14 @@ header h1 {
 /* Sailing item: collapsible details element */
 .sailing-item {
     border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-    border-left: 4px solid transparent;
+    border-left: 6px solid transparent;
 }
 
 .sailing-summary {
-    display: grid;
-    grid-template-columns: 80px 1fr auto;
-    align-items: center;
+    display: flex;
+    flex-direction: column;
     padding: var(--md) var(--lg);
-    gap: var(--md);
+    gap: 4px;
     cursor: pointer;
     list-style: none;
 }
@@ -184,41 +183,75 @@ header h1 {
 .sailing-summary::-webkit-details-marker { display: none; }
 .sailing-summary::marker { display: none; content: ''; }
 
-/* Chevron hint on tappable status badges */
-.has-details .vessel-status::after {
-    content: ' \25BE'; /* small down triangle */
-    font-size: 0.6em;
+/* Expand hint chevron */
+.has-details .sailing-summary::after {
+    content: 'tap for details';
+    font-size: 0.6rem;
+    color: var(--deck-gray);
+    opacity: 0.5;
+    text-align: center;
+    padding-top: 2px;
 }
 
-.has-details[open] .vessel-status::after {
-    content: ' \25B4'; /* small up triangle */
+.has-details[open] .sailing-summary::after {
+    content: '';
+}
+
+/* Row 1: countdown + times + alert */
+.sailing-row-main {
+    display: flex;
+    align-items: baseline;
+    gap: var(--md);
 }
 
 .time-until-prominent {
     font-size: var(--text-xl);
     font-weight: 700;
     color: var(--ocean-deep);
+    min-width: 60px;
 }
 
-.departure-times {
-    display: flex;
-    flex-direction: column;
-    min-width: 80px;
+.display-time {
+    font-size: var(--text-sm);
+    color: var(--deck-gray);
+    flex: 1;
+    text-align: right;
 }
 
-.scheduled-time,
-.estimated-time {
+.display-time.has-delay {
+    color: var(--danger-red);
+    font-weight: 600;
+}
+
+/* Row 2: vessel status text */
+.sailing-row-status {
     font-size: var(--text-xs);
-    line-height: 1.2;
+    padding-left: 0;
 }
 
-.scheduled-time {
+.vessel-status {
+    font-size: var(--text-xs);
     color: var(--deck-gray);
 }
 
-.estimated-time {
-    color: var(--ocean-deep);
-    font-weight: 600;
+.vessel-at_dock {
+    color: var(--warning-orange);
+}
+
+.vessel-en_route {
+    color: var(--ocean-surface);
+}
+
+/* Row 3: capacity */
+.sailing-row-capacity {
+    display: flex;
+    align-items: center;
+    gap: var(--sm);
+}
+
+/* Detail items in expand area */
+.detail-item {
+    display: block;
 }
 
 .confidence-range {
@@ -226,20 +259,6 @@ header h1 {
     color: var(--deck-gray);
     font-weight: 400;
     font-style: italic;
-}
-
-.sailing-meta {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 2px;
-}
-
-.vessel-name {
-    font-size: var(--text-xs);
-    color: var(--deck-gray);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
 }
 
 /* Alert button */
@@ -423,35 +442,21 @@ header h1 {
     background: rgba(239, 68, 68, 0.1);
 }
 
-.vessel-status {
+/* Departed sailing info */
+.departed-info {
     font-size: var(--text-xs);
-    padding: 1px 6px;
-    border-radius: 3px;
-    margin-left: 6px;
-    text-transform: none;
-    letter-spacing: normal;
-}
-
-.vessel-at-dock {
-    background: rgba(255, 193, 7, 0.15);
-    color: #ffc107;
-}
-
-.vessel-in-transit {
-    background: rgba(40, 167, 69, 0.15);
-    color: #28a745;
+    color: var(--deck-gray);
+    font-style: italic;
 }
 
 .vessel-live-info {
     font-size: var(--text-xs);
     color: var(--deck-gray);
     display: flex;
-    flex-wrap: wrap;
-    gap: 2px 10px;
-    padding: 0 var(--lg) var(--md);
-    margin-left: calc(80px + var(--lg) + var(--md));
+    flex-direction: column;
+    gap: 4px;
+    padding: var(--sm) var(--lg) var(--md);
     border-top: 1px dashed rgba(0, 0, 0, 0.06);
-    padding-top: var(--sm);
 }
 
 /* Status indicators: color bars only */
@@ -476,10 +481,10 @@ header h1 {
 
 .capacity-bar {
     flex: 1;
-    height: 4px;
+    height: 6px;
     background: rgba(0, 0, 0, 0.08);
-    border-radius: 2px;
-    max-width: 60px;
+    border-radius: 3px;
+    max-width: 140px;
     overflow: hidden;
 }
 

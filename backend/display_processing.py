@@ -26,8 +26,8 @@ def _format_vessel_status(sailing) -> dict:
     fmt_time = lambda dt: dt.strftime("%I:%M %p").lstrip("0") if dt else None
 
     if sailing.vessel_at_dock:
-        # Vessel is at dock — show docked time and predicted departure
-        result = {"vessel_status": "At Dock"}
+        # Vessel is at dock — boarding/unloading
+        result = {"vessel_status": "At Dock", "vessel_status_key": "at_dock"}
         if sailing.vessel_eta:
             result["docked_at"] = fmt_time(sailing.vessel_eta)
         if sailing.scheduled_departure and sailing.vessel_delay_minutes:
@@ -37,8 +37,14 @@ def _format_vessel_status(sailing) -> dict:
             result["predicted_departure"] = fmt_time(predicted)
         return result
     else:
-        # Vessel is in transit — show departure time and delay
-        result = {"vessel_status": "In Transit"}
+        # Vessel is en route — crossing toward this terminal
+        status_text = "En route"
+        if sailing.vessel_eta:
+            status_text = f"En route · arrives ~{fmt_time(sailing.vessel_eta)}"
+        result = {
+            "vessel_status": status_text,
+            "vessel_status_key": "en_route",
+        }
         if sailing.vessel_left_dock:
             result["left_dock"] = fmt_time(sailing.vessel_left_dock)
         if sailing.vessel_delay_minutes is not None:
@@ -130,25 +136,37 @@ def process_routes_for_display(
                     except Exception as e:
                         logger.debug(f"Fill risk prediction failed: {e}")
 
+                # Build display_time: arrow notation for delays
+                scheduled_time_str = (
+                    sailing.scheduled_departure.strftime("%I:%M %p").lstrip("0")
+                    if sailing.scheduled_departure
+                    else "N/A"
+                )
+                estimated_time_str = (
+                    estimated_departure.strftime("%I:%M %p").lstrip("0")
+                    if estimated_departure
+                    else "N/A"
+                )
+                has_delay = (
+                    sailing.delay_in_minutes is not None
+                    and sailing.delay_in_minutes != 0
+                )
+                if has_delay:
+                    display_time = f"{scheduled_time_str} → {estimated_time_str}"
+                else:
+                    display_time = scheduled_time_str
+
                 sailing_data = {
                     "time_until": time_until,
-                    "scheduled_time": (
-                        sailing.scheduled_departure.strftime("%I:%M %p").lstrip("0")
-                        if sailing.scheduled_departure
-                        else "N/A"
-                    ),
-                    "estimated_departure": (
-                        estimated_departure.strftime("%I:%M %p").lstrip("0")
-                        if estimated_departure
-                        else "N/A"
-                    ),
+                    "scheduled_time": scheduled_time_str,
+                    "estimated_departure": estimated_time_str,
+                    "display_time": display_time,
                     "delay_text": delay_text,
                     "confidence_text": confidence_text,
                     "vessel_name": sailing.vessel_name,
                     "status_class": final_status,
                     "departed": sailing.departed,
-                    "has_delay": sailing.delay_in_minutes is not None
-                    and sailing.delay_in_minutes != 0,
+                    "has_delay": has_delay,
                     "vessel_info": _format_vessel_status(sailing),
                     "capacity": capacity,
                     "departing_terminal_name": schedule.departing_terminal_name,
@@ -166,6 +184,7 @@ def process_routes_for_display(
                 {
                     "departing_terminal_name": schedule.departing_terminal_name,
                     "arriving_terminal_name": schedule.arriving_terminal_name,
+                    "direction_header": f"{schedule.departing_terminal_name} → {schedule.arriving_terminal_name}",
                     "sailings": processed_sailings,
                 }
             )

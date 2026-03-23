@@ -132,6 +132,7 @@ class DelayPredictor:
             delays_df = pd.read_sql_query(
                 f"""
                 SELECT vessel_id, collected_at, scheduled_departure AS snap_sched_dep,
+                       speed AS snap_speed,
                        (julianday(left_dock) - julianday(scheduled_departure)) * 24 * 60 AS snap_delay_minutes
                 FROM vessel_snapshots
                 WHERE left_dock IS NOT NULL AND scheduled_departure IS NOT NULL
@@ -167,6 +168,7 @@ class DelayPredictor:
             same_sailing = merged["snap_sched_dep"] == merged["scheduled_departure"]
             merged.loc[same_sailing, "snap_delay_minutes"] = np.nan
             merged["current_vessel_delay_minutes"] = merged["snap_delay_minutes"].fillna(0.0)
+            merged["vessel_speed"] = merged["snap_speed"].fillna(0.0)
 
             # --- Bulk query 2: previous sailing fullness ---
             logger.info("Loading sailing space snapshots...")
@@ -260,16 +262,34 @@ class DelayPredictor:
         # --- Build final training DataFrame ---
         merged["is_peak_hour"] = merged["hour_of_day"].apply(lambda h: int(is_peak_hour(h)))
         merged.rename(columns={"horizon_min": "minutes_until_scheduled_departure"}, inplace=True)
+        merged["month"] = merged["scheduled_departure_dt"].dt.month
+        merged["is_weekend"] = merged["day_of_week"].isin([0, 6]).astype(int)  # Sun=0, Sat=6
+        merged["minutes_since_midnight"] = (
+            merged["scheduled_departure_dt"].dt.hour * 60
+            + merged["scheduled_departure_dt"].dt.minute
+        )
+        merged["delay_x_horizon"] = (
+            merged["current_vessel_delay_minutes"] * merged["minutes_until_scheduled_departure"]
+        )
+        merged["delay_squared"] = merged["current_vessel_delay_minutes"] ** 2
 
         result = merged[
             [
                 "sailing_event_id",
+                "vessel_id",
                 "route_abbrev",
                 "departing_terminal_id",
+                "arriving_terminal_id",
                 "day_of_week",
                 "hour_of_day",
+                "month",
+                "is_weekend",
+                "minutes_since_midnight",
                 "minutes_until_scheduled_departure",
                 "current_vessel_delay_minutes",
+                "vessel_speed",
+                "delay_x_horizon",
+                "delay_squared",
                 "is_peak_hour",
                 "previous_sailing_fullness",
                 "turnaround_minutes",
@@ -330,10 +350,12 @@ class DelayPredictor:
         self,
         route_abbrev: str,
         departing_terminal_id: int,
+        vessel_id: int,
         day_of_week: int,
         hour_of_day: int,
         minutes_until_scheduled_departure: float,
         current_vessel_delay_minutes: float,
+        vessel_speed: Optional[float] = None,
         previous_sailing_fullness: Optional[float] = None,
         turnaround_minutes: Optional[float] = None,
     ) -> Optional[dict]:
@@ -349,10 +371,12 @@ class DelayPredictor:
             return self._model.predict_single(
                 route_abbrev=route_abbrev,
                 departing_terminal_id=departing_terminal_id,
+                vessel_id=vessel_id,
                 day_of_week=day_of_week,
                 hour_of_day=hour_of_day,
                 minutes_until_scheduled_departure=minutes_until_scheduled_departure,
                 current_vessel_delay_minutes=current_vessel_delay_minutes,
+                vessel_speed=vessel_speed,
                 previous_sailing_fullness=previous_sailing_fullness,
                 turnaround_minutes=turnaround_minutes,
             )

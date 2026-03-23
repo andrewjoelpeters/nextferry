@@ -91,6 +91,7 @@ def propigate_delays(
     delay: Optional[timedelta],
     sailings: List[DirectionalSailing],
     vessel_id: Optional[int] = None,
+    vessel_speed: Optional[float] = None,
 ) -> List[DirectionalSailing]:
     """Apply delays to sailings, using ML predictions if available, else flat propagation."""
     if not delay and not (ml_predictor and ml_predictor.is_trained):
@@ -126,10 +127,12 @@ def propigate_delays(
                 prediction = ml_predictor.predict(
                     route_abbrev=route_abbrev,
                     departing_terminal_id=sailing.departing_terminal_id,
+                    vessel_id=vessel_id or 0,
                     day_of_week=sailing.scheduled_departure.weekday(),
                     hour_of_day=sailing.scheduled_departure.hour,
                     minutes_until_scheduled_departure=minutes_until,
                     current_vessel_delay_minutes=delay_minutes,
+                    vessel_speed=vessel_speed,
                     previous_sailing_fullness=prev_fullness,
                     turnaround_minutes=turnaround,
                 )
@@ -194,7 +197,10 @@ def get_next_sailings_by_boat(
                 next_sailings.insert(0, departed_sailing)
 
         v_id = current_vessel.vessel_id if current_vessel else None
-        next_sailings = propigate_delays(current_vessel.delay, next_sailings, vessel_id=v_id)
+        v_speed = current_vessel.speed if current_vessel else None
+        next_sailings = propigate_delays(
+            current_vessel.delay, next_sailings, vessel_id=v_id, vessel_speed=v_speed
+        )
 
         # Annotate the first sailing with live vessel state.
         # When the vessel is en route, verify the first sailing's direction matches

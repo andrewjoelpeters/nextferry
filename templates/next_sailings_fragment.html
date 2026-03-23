@@ -4,7 +4,7 @@
     <div class="terminals-grid">
 
         {% for schedule in route.schedules %}
-        <details class="terminal-card" open>
+        <details class="terminal-card">
             <summary class="terminal-name">{{ schedule.direction_header }}</summary>
             <div class="sailings-list">
 
@@ -26,7 +26,7 @@
                             {% else %}
                             <div class="sailing-row-main">
                                 <span class="time-until-prominent">{{ sailing.time_until }}</span>
-                                <span class="display-time{% if sailing.delay_minutes and sailing.delay_minutes > 5 %} delay-notable{% endif %}">{{ sailing.display_time_html | safe }}</span>
+                                <span class="display-time{% if sailing.delay_minutes and sailing.delay_minutes > 20 %} delay-severe{% elif sailing.delay_minutes and sailing.delay_minutes > 10 %} delay-significant{% elif sailing.delay_minutes and sailing.delay_minutes > 5 %} delay-moderate{% endif %}">{{ sailing.display_time_html | safe }}</span>
                             </div>
                             {% if sailing.vessel_info and sailing.vessel_info.vessel_status %}
                             <div class="sailing-row-status">

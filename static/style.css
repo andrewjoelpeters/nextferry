@@ -250,8 +250,16 @@ header h1 {
     color: var(--ocean-midnight);
 }
 
-/* Only flag notably late sailings (>5 min) in red */
-.display-time.delay-notable .estimated-part {
+/* Delay severity: yellow 5-10m, orange 10-20m, red 20m+ */
+.display-time.delay-moderate .estimated-part {
+    color: var(--warning-orange);
+}
+
+.display-time.delay-significant .estimated-part {
+    color: #ea580c; /* orange-600 */
+}
+
+.display-time.delay-severe .estimated-part {
     color: var(--danger-red);
 }
 

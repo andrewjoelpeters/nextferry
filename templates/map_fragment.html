@@ -25,6 +25,7 @@
 var map = null;
 var ferryMarkers = [];
 var mapInitialized = false;
+var ferryPositionInterval = null;
 
 function initializeFerryMap() {
     // Prevent multiple initializations
@@ -51,8 +52,18 @@ function initializeFerryMap() {
     loadFerryPositions();
     
     // Update ferry positions every 30 seconds
-    setInterval(loadFerryPositions, 30000);
-    
+    ferryPositionInterval = setInterval(loadFerryPositions, 30000);
+
+    // Clean up when HTMX removes this fragment
+    document.querySelector('.map-container').addEventListener('htmx:beforeCleanupElement', function() {
+        if (ferryPositionInterval) {
+            clearInterval(ferryPositionInterval);
+            ferryPositionInterval = null;
+        }
+        mapInitialized = false;
+        map = null;
+    });
+
     // Handle panel close button
     document.getElementById('close-panel').addEventListener('click', function() {
         document.getElementById('ferry-info-panel').classList.add('hidden');
@@ -62,25 +73,27 @@ function initializeFerryMap() {
 async function loadFerryPositions() {
     if (!map) return;
     
+    var loadingEl = document.getElementById('map-loading');
+    if (!loadingEl) return;
+
     try {
         console.log('Loading ferry positions...');
-        document.getElementById('map-loading').style.display = 'flex';
-        
+        loadingEl.style.display = 'flex';
+
         const response = await fetch('/ferry-data');
         const ferries = await response.json();
-        console.log(ferries)
-        
+
         if (ferries.error) {
             console.error('Error loading ferry data:', ferries.error);
             return;
         }
-        
+
         updateFerryMarkers(ferries);
-        document.getElementById('map-loading').style.display = 'none';
-        
+        loadingEl.style.display = 'none';
+
     } catch (error) {
         console.error('Error fetching ferry positions:', error);
-        document.getElementById('map-loading').style.display = 'none';
+        loadingEl.style.display = 'none';
     }
 }
 

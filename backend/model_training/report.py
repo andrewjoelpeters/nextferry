@@ -7,7 +7,6 @@ sklearn or touches DataFrames.
 
 import json
 from datetime import datetime
-from typing import Optional
 
 from .evaluation import OVERPREDICTION_PENALTY
 
@@ -38,7 +37,7 @@ def generate_markdown_report(
     backtest_results: dict,
     experiment_name: str = "unnamed",
     description: str = "",
-    comparison: Optional[dict] = None,
+    comparison: dict | None = None,
 ) -> str:
     """Generate a markdown report from backtest results dicts."""
     lines = []
@@ -206,7 +205,7 @@ def _comparison_section(agg: dict, prev: dict) -> list:
     return lines
 
 
-def parse_previous_report(report_path: str) -> Optional[dict]:
+def parse_previous_report(report_path: str) -> dict | None:
     """Parse the JSON block from a previous markdown report for comparison."""
     from pathlib import Path
 

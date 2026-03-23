@@ -1,10 +1,11 @@
 import asyncio
+import contextlib
 import hashlib
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Request
@@ -25,12 +26,11 @@ from .ml_predictor import predictor as ml_predictor
 from .next_sailings import CACHED_DELAYS, get_next_sailings, get_vessels_with_delays
 from .sailing_space import get_sailing_space_lookup
 from .utils import datetime_to_minutes
-from .wsdot_client import get_vessel_positions
 
 logger = logging.getLogger(__name__)
 
 # Global cache - shared by all users
-_sailings_cache: Optional[Dict[str, Any]] = None
+_sailings_cache: dict[str, Any] | None = None
 
 
 async def update_sailings_cache():
@@ -149,10 +149,8 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down background tasks")
     for task in [sailings_cache_task, collector_task, retrain_task]:
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
 
 
 app = FastAPI(lifespan=lifespan)

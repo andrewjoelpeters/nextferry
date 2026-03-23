@@ -19,7 +19,6 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import joblib
 import numpy as np
@@ -54,10 +53,10 @@ def get_volume_model_dir() -> Path:
 
 class DelayPredictor:
     def __init__(self):
-        self._model: Optional[QuantileGBTModel] = None
+        self._model: QuantileGBTModel | None = None
         self.is_trained: bool = False
-        self.last_trained: Optional[datetime] = None
-        self.last_evaluation: Optional[dict] = None
+        self.last_trained: datetime | None = None
+        self.last_evaluation: dict | None = None
         self.training_data_size: int = 0
 
     @property
@@ -74,7 +73,7 @@ class DelayPredictor:
             return {}
         return self._model._category_maps.get("departing_terminal_id", {})
 
-    def build_training_data(self) -> Optional[pd.DataFrame]:
+    def build_training_data(self) -> pd.DataFrame | None:
         """Build training dataset from sailing events and vessel snapshots.
 
         For each sailing event, generates multiple training rows at different
@@ -369,9 +368,9 @@ class DelayPredictor:
         hour_of_day: int,
         minutes_until_scheduled_departure: float,
         current_vessel_delay_minutes: float,
-        previous_sailing_fullness: Optional[float] = None,
-        turnaround_minutes: Optional[float] = None,
-    ) -> Optional[dict]:
+        previous_sailing_fullness: float | None = None,
+        turnaround_minutes: float | None = None,
+    ) -> dict | None:
         """Predict delay with confidence interval.
 
         Returns dict with predicted_delay, lower_bound, upper_bound (all in minutes),
@@ -395,7 +394,7 @@ class DelayPredictor:
             logger.error(f"Prediction failed (models may need retraining): {e}")
             return None
 
-    def save(self, path: Optional[Path] = None):
+    def save(self, path: Path | None = None):
         """Save model and metadata to disk."""
         model_dir = path or get_volume_model_dir()
         model_dir.mkdir(parents=True, exist_ok=True)
@@ -440,7 +439,7 @@ class DelayPredictor:
             logger.error(f"Failed to load models from {model_dir}: {e}")
             return False
 
-    def load(self, path: Optional[Path] = None) -> bool:
+    def load(self, path: Path | None = None) -> bool:
         """Load models from the volume model directory."""
         model_dir = path or get_volume_model_dir()
         if self._load_from_dir(model_dir):

@@ -12,7 +12,6 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import joblib
 import numpy as np
@@ -50,13 +49,13 @@ class FillRiskPredictor:
         self.classifier = None  # P(fill)
         self.regressor = None  # minutes before departure it fills (for filled sailings)
         self.is_trained: bool = False
-        self.last_trained: Optional[datetime] = None
+        self.last_trained: datetime | None = None
         self.training_data_size: int = 0
         self.fill_rate: float = 0.0  # overall % of sailings that filled
         self._route_mapping: dict = {}
         self._terminal_mapping: dict = {}
 
-    def build_training_data(self) -> Optional[pd.DataFrame]:
+    def build_training_data(self) -> pd.DataFrame | None:
         """Extract fill events from sailing_space_snapshots.
 
         For each historical sailing (departing_terminal_id, departure_time),
@@ -119,7 +118,7 @@ class FillRiskPredictor:
 
         # Build training rows
         training_rows = []
-        for key, sailing in sailings.items():
+        for _key, sailing in sailings.items():
             try:
                 dep_time = datetime.fromisoformat(sailing["departure_time"])
             except (ValueError, TypeError):
@@ -202,6 +201,7 @@ class FillRiskPredictor:
             zip(
                 df["route_abbrev"].astype("category").cat.categories,
                 range(len(df["route_abbrev"].astype("category").cat.categories)),
+                strict=True,
             )
         )
         self._terminal_mapping = dict(
@@ -210,6 +210,7 @@ class FillRiskPredictor:
                 range(
                     len(df["departing_terminal_id"].astype("category").cat.categories)
                 ),
+                strict=True,
             )
         )
 
@@ -262,7 +263,7 @@ class FillRiskPredictor:
         day_of_week: int,
         hour_of_day: int,
         max_space_count: int = 200,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Predict fill risk for a sailing.
 
         Returns:
@@ -319,7 +320,7 @@ class FillRiskPredictor:
             "label": label,
         }
 
-    def save(self, path: Optional[Path] = None):
+    def save(self, path: Path | None = None):
         model_dir = path or _get_volume_model_dir()
         model_dir.mkdir(parents=True, exist_ok=True)
 
@@ -367,7 +368,7 @@ class FillRiskPredictor:
             logger.error(f"Failed to load fill risk model from {model_dir}: {e}")
             return False
 
-    def load(self, path: Optional[Path] = None) -> bool:
+    def load(self, path: Path | None = None) -> bool:
         if path:
             return self._load_from_dir(path)
 

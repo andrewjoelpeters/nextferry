@@ -1,6 +1,5 @@
 import logging
 import os
-from typing import List
 
 import requests
 from dotenv import load_dotenv
@@ -13,7 +12,7 @@ load_dotenv()
 APIAccessCode = os.getenv("WSDOT_API_KEY")
 
 
-def get_vessel_positions() -> List[Vessel]:
+def get_vessel_positions() -> list[Vessel]:
     if not APIAccessCode:
         raise Exception("WSDOT_API_KEY environment variable is not set")
 
@@ -33,10 +32,10 @@ def get_vessel_positions() -> List[Vessel]:
         return [Vessel(**ferry) for ferry in data if ferry.get("InService")]
 
     except requests.exceptions.RequestException as e:
-        raise Exception(f"Request failed: {str(e)}")
+        raise Exception(f"Request failed: {str(e)}") from e
 
 
-def get_schedule_today(route_id) -> List[RawDirectionalSchedule]:
+def get_schedule_today(route_id) -> list[RawDirectionalSchedule]:
     url = f"https://www.wsdot.wa.gov/ferries/api/schedule/rest/scheduletoday/{route_id}/false?apiaccesscode={APIAccessCode}"
     response = requests.get(url)
 

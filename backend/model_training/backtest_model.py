@@ -145,9 +145,9 @@ class QuantileGBTModel:
         hour_of_day: int,
         minutes_until_scheduled_departure: float,
         current_vessel_delay_minutes: float,
-        previous_sailing_fullness: Optional[float] = None,
-        turnaround_minutes: Optional[float] = None,
-    ) -> Optional[dict]:
+        previous_sailing_fullness: float | None = None,
+        turnaround_minutes: float | None = None,
+    ) -> dict | None:
         """Predict delay for a single sailing.
 
         Returns dict with predicted_delay, lower_bound, upper_bound (minutes),

@@ -199,6 +199,13 @@ def process_routes_for_display(
                 }
             )
 
+        # Sort schedules so western terminals (left button) come first,
+        # eastern terminals (right button) come second.
+        EAST_TERMINALS = {"Seattle", "Edmonds"}
+        processed_schedules.sort(
+            key=lambda s: (s["departing_terminal_name"] in EAST_TERMINALS)
+        )
+
         processed_routes.append(
             {
                 "route_name": " - ".join(route.route_name),

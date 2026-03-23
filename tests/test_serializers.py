@@ -82,5 +82,7 @@ class TestDirectionalSailing:
         assert isinstance(route_sailing, RouteSailing)
         assert route_sailing.vessel_name == "Walla Walla"
         assert route_sailing.delay_in_minutes == 5
-        assert not hasattr(route_sailing, "departing_terminal_id") or \
-               "departing_terminal_id" not in route_sailing.model_fields
+        assert (
+            not hasattr(route_sailing, "departing_terminal_id")
+            or "departing_terminal_id" not in route_sailing.model_fields
+        )

@@ -13,7 +13,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .data_collector import collect_data
-from .database import get_dashboard_data, get_sailing_event_count, get_snapshot_count, init_db
+from .database import (
+    get_dashboard_data,
+    get_sailing_event_count,
+    get_snapshot_count,
+    init_db,
+)
 from .display_processing import process_routes_for_display
 from .fill_predictor import fill_predictor
 from .ml_predictor import predictor as ml_predictor
@@ -291,14 +296,19 @@ async def get_predictions_data():
                 # Parse midpoint from label like "2–4m" → 3
                 parts = label.rstrip("m").split("–")
                 lo, hi = float(parts[0]), float(parts[1])
-                error_by_horizon.append({
-                    "minutes_out": int((lo + hi) / 2),
-                    "mae": metrics.get("mae"),
-                    "mean_error": metrics.get("bias"),
-                    "error_p88": metrics.get("error_p90"),
-                    "error_p12": round(-abs(metrics.get("error_p90", 0)), 2)
-                        if metrics.get("error_p90") is not None else None,
-                })
+                error_by_horizon.append(
+                    {
+                        "minutes_out": int((lo + hi) / 2),
+                        "mae": metrics.get("mae"),
+                        "mean_error": metrics.get("bias"),
+                        "error_p88": metrics.get("error_p90"),
+                        "error_p12": (
+                            round(-abs(metrics.get("error_p90", 0)), 2)
+                            if metrics.get("error_p90") is not None
+                            else None
+                        ),
+                    }
+                )
             error_by_horizon.sort(key=lambda d: d["minutes_out"])
             evaluation["error_by_horizon"] = error_by_horizon
 

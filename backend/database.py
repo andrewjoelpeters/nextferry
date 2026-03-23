@@ -343,9 +343,7 @@ def get_previous_sailing_fullness(
         conn.close()
 
 
-def get_turnaround_minutes(
-    vessel_id: int, scheduled_departure: str
-) -> Optional[float]:
+def get_turnaround_minutes(vessel_id: int, scheduled_departure: str) -> Optional[float]:
     """Get how many minutes before scheduled departure the vessel docked.
 
     Finds the earliest snapshot where the vessel is at_dock=1 at the departing

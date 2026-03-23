@@ -7,8 +7,11 @@ from datetime import datetime
 from typing import List
 from zoneinfo import ZoneInfo
 
-from .database import (extract_sailing_events, insert_sailing_space_batch,
-                       insert_vessel_snapshots_batch)
+from .database import (
+    extract_sailing_events,
+    insert_sailing_space_batch,
+    insert_vessel_snapshots_batch,
+)
 from .serializers import FlatSailingSpace, SailingSpace, Vessel
 from .wsdot_client import get_sailing_space, get_vessel_positions
 

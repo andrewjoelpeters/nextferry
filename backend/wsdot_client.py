@@ -5,8 +5,7 @@ from typing import List
 import requests
 from dotenv import load_dotenv
 
-from .serializers import (RawDirectionalSchedule, RawRouteSchedule,
-                          TerminalSpace, Vessel)
+from .serializers import RawDirectionalSchedule, RawRouteSchedule, TerminalSpace, Vessel
 
 logger = logging.getLogger(__name__)
 

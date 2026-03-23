@@ -58,17 +58,21 @@ def generate_markdown_report(
     lines.append("")
 
     # ---- TOP-LINE ----
-    pl = agg['overall_pinball_loss']
-    mae = agg['overall_mae']
-    bias = agg['overall_bias']
+    pl = agg["overall_pinball_loss"]
+    mae = agg["overall_mae"]
+    bias = agg["overall_bias"]
     pl_ratio = round(pl / max(mae, 0.01), 2)
 
     lines.append("## Top-Line Results")
     lines.append("")
-    lines.append(f"> **Pinball Loss** is an asymmetric MAE (α={OVERPREDICTION_PENALTY}): "
-                 f"overprediction is penalized {OVERPREDICTION_PENALTY}× more than underprediction.  ")
-    lines.append(f"> PL / MAE = {pl_ratio}× — closer to 1.0 means errors are mostly safe "
-                 f"(underprediction); closer to {OVERPREDICTION_PENALTY}.0 means mostly dangerous.")
+    lines.append(
+        f"> **Pinball Loss** is an asymmetric MAE (α={OVERPREDICTION_PENALTY}): "
+        f"overprediction is penalized {OVERPREDICTION_PENALTY}× more than underprediction.  "
+    )
+    lines.append(
+        f"> PL / MAE = {pl_ratio}× — closer to 1.0 means errors are mostly safe "
+        f"(underprediction); closer to {OVERPREDICTION_PENALTY}.0 means mostly dangerous."
+    )
     lines.append("")
     lines.append("| Metric | Value |")
     lines.append("|--------|-------|")
@@ -76,9 +80,13 @@ def generate_markdown_report(
     lines.append(f"| MAE | {mae} min |")
     lines.append(f"| Bias | {bias:+.2f} min |")
     lines.append(f"| p90 (tail risk) | {agg['overall_error_p90']:+.2f} min |")
-    lines.append(f"| 70% Interval Coverage | {agg['overall_coverage_70pct']}% (target: 70%) |")
+    lines.append(
+        f"| 70% Interval Coverage | {agg['overall_coverage_70pct']}% (target: 70%) |"
+    )
     if "overall_baseline_pinball_loss" in agg:
-        lines.append(f"| Baseline Pinball Loss | {agg['overall_baseline_pinball_loss']} min |")
+        lines.append(
+            f"| Baseline Pinball Loss | {agg['overall_baseline_pinball_loss']} min |"
+        )
         lines.append(f"| Improvement vs baseline | {agg['overall_improvement_pct']}% |")
     lines.append("")
 
@@ -101,7 +109,11 @@ def generate_markdown_report(
 
     lines.append("| Metric | Mean | Std Dev |")
     lines.append("|--------|------|---------|")
-    for key, label in [("pinball_loss", "Pinball Loss"), ("bias", "Bias"), ("error_p90", "p90")]:
+    for key, label in [
+        ("pinball_loss", "Pinball Loss"),
+        ("bias", "Bias"),
+        ("error_p90", "p90"),
+    ]:
         s = stab.get(key)
         if s:
             lines.append(f"| {label} | {s['mean']} | ±{s['std']} |")
@@ -181,7 +193,11 @@ def _comparison_section(agg: dict, prev: dict) -> list:
             cp = curr_routes.get(r, {}).get("pinball_loss", "—")
             pp90 = prev_routes.get(r, {}).get("error_p90", "—")
             cp90 = curr_routes.get(r, {}).get("error_p90", "—")
-            delta = _delta_str(pp, cp) if isinstance(pp, (int, float)) and isinstance(cp, (int, float)) else "—"
+            delta = (
+                _delta_str(pp, cp)
+                if isinstance(pp, (int, float)) and isinstance(cp, (int, float))
+                else "—"
+            )
             pp90_s = f"{pp90:+.2f}" if isinstance(pp90, (int, float)) else pp90
             cp90_s = f"{cp90:+.2f}" if isinstance(cp90, (int, float)) else cp90
             lines.append(f"| {r} | {pp} | {cp} | {pp90_s} | {cp90_s} | {delta} |")

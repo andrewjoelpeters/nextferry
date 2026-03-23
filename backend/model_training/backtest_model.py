@@ -15,10 +15,10 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-
 # ---------------------------------------------------------------------------
 # Protocol — the contract between model and harness
 # ---------------------------------------------------------------------------
+
 
 @runtime_checkable
 class BacktestModel(Protocol):
@@ -36,6 +36,7 @@ class BacktestModel(Protocol):
 # ---------------------------------------------------------------------------
 # Feature helpers
 # ---------------------------------------------------------------------------
+
 
 def is_peak_hour(hour: int) -> bool:
     """Return True if the hour falls in commuter peak windows."""
@@ -165,12 +166,14 @@ class QuantileGBTModel:
                     "minutes_until_scheduled_departure": minutes_until_scheduled_departure,
                     "current_vessel_delay_minutes": current_vessel_delay_minutes,
                     "is_peak_hour": int(is_peak_hour(hour_of_day)),
-                    "previous_sailing_fullness": previous_sailing_fullness
-                    if previous_sailing_fullness is not None
-                    else np.nan,
-                    "turnaround_minutes": turnaround_minutes
-                    if turnaround_minutes is not None
-                    else np.nan,
+                    "previous_sailing_fullness": (
+                        previous_sailing_fullness
+                        if previous_sailing_fullness is not None
+                        else np.nan
+                    ),
+                    "turnaround_minutes": (
+                        turnaround_minutes if turnaround_minutes is not None else np.nan
+                    ),
                 }
             ]
         )
@@ -206,4 +209,3 @@ class QuantileGBTModel:
         instance._category_maps = data["category_maps"]
         instance._feature_cols = data.get("feature_cols", list(FEATURE_COLS))
         return instance
-

@@ -150,7 +150,10 @@ def walk_forward_backtest(
         vals = [f[key] for f in fold_results if key in f]
         if not vals:
             return None
-        return {"mean": round(float(np.mean(vals)), 2), "std": round(float(np.std(vals)), 2)}
+        return {
+            "mean": round(float(np.mean(vals)), 2),
+            "std": round(float(np.std(vals)), 2),
+        }
 
     stability = {
         "pinball_loss": _fold_stat("overall_pinball_loss"),

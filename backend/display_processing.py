@@ -2,6 +2,7 @@ import logging
 from datetime import timedelta
 
 from .config import ROUTES
+from .database import get_departed_sailing_space
 from .fill_predictor import fill_predictor
 from .serializers import RouteSchedule
 from .utils import format_confidence_text, format_delay_text, format_time_until
@@ -104,7 +105,37 @@ def process_routes_for_display(
 
                 # Look up drive-up capacity
                 capacity = None
-                if space_lookup and sailing.scheduled_departure:
+                if sailing.departed and sailing.scheduled_departure:
+                    # For departed sailings, get actual space from DB snapshots
+                    departure_iso = sailing.scheduled_departure.isoformat()
+                    space_info = get_departed_sailing_space(
+                        schedule.departing_terminal_id, departure_iso
+                    )
+                    if space_info and space_info["max_space_count"] > 0:
+                        cars_on_board = max(
+                            0,
+                            min(
+                                space_info["max_space_count"],
+                                space_info["max_space_count"]
+                                - space_info["drive_up_space_count"],
+                            ),
+                        )
+                        pct = max(
+                            0,
+                            min(
+                                100,
+                                int(
+                                    cars_on_board / space_info["max_space_count"] * 100
+                                ),
+                            ),
+                        )
+                        capacity = {
+                            "spaces": space_info["drive_up_space_count"],
+                            "total": space_info["max_space_count"],
+                            "cars_on_board": cars_on_board,
+                            "percent": pct,
+                        }
+                elif space_lookup and sailing.scheduled_departure:
                     time_key = sailing.scheduled_departure.strftime("%Y-%m-%d %H:%M")
                     space_info = space_lookup.get(
                         (schedule.departing_terminal_id, time_key)
@@ -121,9 +152,13 @@ def process_routes_for_display(
                             "percent": pct,
                         }
 
-                # Fill risk prediction
+                # Fill risk prediction (skip for departed sailings — show actual data instead)
                 fill_risk = None
-                if fill_predictor.is_trained and sailing.scheduled_departure:
+                if (
+                    not sailing.departed
+                    and fill_predictor.is_trained
+                    and sailing.scheduled_departure
+                ):
                     try:
                         fill_risk = fill_predictor.predict(
                             route_abbrev=_get_route_abbrev(

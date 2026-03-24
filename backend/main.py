@@ -23,7 +23,11 @@ from .database import (
 from .display_processing import process_routes_for_display
 from .fill_predictor import fill_predictor
 from .ml_predictor import predictor as ml_predictor
-from .next_sailings import CACHED_DELAYS, get_next_sailings, get_vessels_with_delays
+from .next_sailings import (
+    CACHED_DELAYS,
+    get_next_sailings,
+    get_vessels_with_delays,
+)
 from .sailing_space import get_sailing_space_lookup
 from .utils import datetime_to_minutes
 

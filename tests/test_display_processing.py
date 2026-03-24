@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from backend.display_processing import process_routes_for_display
@@ -96,3 +97,46 @@ class TestProcessRoutesForDisplay:
         )
         result = process_routes_for_display([route1, route2])
         assert len(result) == 2
+
+    @patch("backend.display_processing.get_departed_sailing_space")
+    def test_departed_sailing_shows_actual_capacity(self, mock_get_space):
+        mock_get_space.return_value = {
+            "max_space_count": 200,
+            "drive_up_space_count": 50,
+        }
+        sailing = _make_sailing(-10)  # departed 10 min ago
+        sailing.departed = True
+        route = _make_route([sailing])
+        result = process_routes_for_display([route])
+
+        displayed = result[0]["schedules"][0]["sailings"][0]
+        assert displayed["capacity"] is not None
+        assert displayed["capacity"]["cars_on_board"] == 150
+        assert displayed["capacity"]["total"] == 200
+        assert displayed["capacity"]["percent"] == 75
+        assert displayed["departed"] is True
+
+    @patch("backend.display_processing.get_departed_sailing_space")
+    def test_departed_sailing_no_snapshot_has_no_capacity(self, mock_get_space):
+        mock_get_space.return_value = None
+        sailing = _make_sailing(-10)
+        sailing.departed = True
+        route = _make_route([sailing])
+        result = process_routes_for_display([route])
+
+        displayed = result[0]["schedules"][0]["sailings"][0]
+        assert displayed["capacity"] is None
+
+    @patch("backend.display_processing.get_departed_sailing_space")
+    def test_departed_sailing_skips_fill_risk(self, mock_get_space):
+        mock_get_space.return_value = {
+            "max_space_count": 200,
+            "drive_up_space_count": 50,
+        }
+        sailing = _make_sailing(-10)
+        sailing.departed = True
+        route = _make_route([sailing])
+        result = process_routes_for_display([route])
+
+        displayed = result[0]["schedules"][0]["sailings"][0]
+        assert displayed["fill_risk"] is None

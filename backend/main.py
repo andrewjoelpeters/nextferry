@@ -15,7 +15,9 @@ from fastapi.templating import Jinja2Templates
 
 from .data_collector import collect_data
 from .database import (
-    get_dashboard_data,
+    get_available_routes,
+    get_busyness_heatmap,
+    get_history_data,
     get_sailing_event_count,
     get_snapshot_count,
     init_db,
@@ -268,20 +270,26 @@ async def get_sailings_tab(request: Request):
     )
 
 
-@app.get("/predictions-tab", response_class=HTMLResponse)
-async def get_predictions_tab(request: Request):
-    """Return the predictions dashboard tab content."""
+@app.get("/history-tab", response_class=HTMLResponse)
+async def get_history_tab(request: Request):
+    """Return the historical data dashboard tab content."""
+    routes = get_available_routes()
     return templates.TemplateResponse(
-        "predictions_tab_fragment.html", {"request": request}
+        "history_tab_fragment.html", {"request": request, "routes": routes}
     )
 
 
-@app.get("/predictions-data")
-async def get_predictions_data():
-    """Return dashboard data as JSON for chart rendering."""
-    dashboard = get_dashboard_data()
+@app.get("/history-data")
+async def get_history_data_endpoint(
+    route: str | None = None,
+    season: str | None = None,
+    day_type: str | None = None,
+):
+    """Return filtered historical data as JSON for chart rendering."""
+    history = get_history_data(route=route, season=season, day_type=day_type)
+    heatmap = get_busyness_heatmap(route=route, season=season)
 
-    # Transform evaluation metrics into the format the frontend expects
+    # Model performance section (kept for ML engineer error analysis)
     evaluation = None
     raw_eval = ml_predictor.last_evaluation
     if raw_eval:
@@ -290,12 +298,10 @@ async def get_predictions_data():
             "overall_mean_error": raw_eval.get("overall_bias"),
             "improvement_pct": raw_eval.get("overall_improvement_pct"),
         }
-        # Convert by_horizon dict into error_by_horizon array
         by_horizon = raw_eval.get("by_horizon", {})
         if by_horizon:
             error_by_horizon = []
             for label, metrics in by_horizon.items():
-                # Parse midpoint from label like "2–4m" → 3
                 parts = label.rstrip("m").split("–")
                 lo, hi = float(parts[0]), float(parts[1])
                 error_by_horizon.append(
@@ -323,7 +329,7 @@ async def get_predictions_data():
         "evaluation": evaluation,
     }
 
-    return {**dashboard, "model": model_info}
+    return {**history, "heatmap": heatmap, "model": model_info}
 
 
 @app.get("/debug/cache-status")

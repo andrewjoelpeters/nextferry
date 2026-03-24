@@ -542,3 +542,255 @@ def get_dashboard_data() -> dict:
         }
     finally:
         conn.close()
+
+
+# --- Historical dashboard queries ---
+
+SEASON_MONTHS = {
+    "winter": (12, 1, 2),
+    "spring": (3, 4, 5),
+    "summer": (6, 7, 8),
+    "fall": (9, 10, 11),
+}
+
+DAY_TYPE_MAP = {
+    "weekdays": (1, 2, 3, 4, 5),  # SQLite strftime %w: Mon=1..Fri=5
+    "weekends": (0, 6),  # Sun=0, Sat=6
+}
+
+
+def _build_where_clauses(
+    route: str | None,
+    season: str | None,
+    day_type: str | None,
+    date_col: str = "scheduled_departure",
+    dow_col: str = "day_of_week",
+) -> tuple[str, list]:
+    """Build WHERE clause fragments and params for history filters."""
+    clauses: list[str] = []
+    params: list = []
+
+    if route:
+        clauses.append("route_abbrev = ?")
+        params.append(route)
+
+    if season and season in SEASON_MONTHS:
+        months = SEASON_MONTHS[season]
+        placeholders = ",".join("?" * len(months))
+        clauses.append(
+            f"CAST(strftime('%m', {date_col}) AS INTEGER) IN ({placeholders})"
+        )
+        params.extend(months)
+
+    if day_type:
+        if day_type in DAY_TYPE_MAP:
+            days = DAY_TYPE_MAP[day_type]
+            placeholders = ",".join("?" * len(days))
+            clauses.append(f"{dow_col} IN ({placeholders})")
+            params.extend(days)
+        elif day_type.isdigit() and 0 <= int(day_type) <= 6:
+            clauses.append(f"{dow_col} = ?")
+            params.append(int(day_type))
+
+    return (" AND " + " AND ".join(clauses) if clauses else ""), params
+
+
+def get_history_data(
+    route: str | None = None,
+    season: str | None = None,
+    day_type: str | None = None,
+) -> dict:
+    """Return filtered historical data for the history dashboard."""
+    where_suffix, params = _build_where_clauses(route, season, day_type)
+    conn = get_connection()
+    try:
+        # Delays by hour (filtered)
+        delays_by_hour = [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT
+                    hour_of_day,
+                    COUNT(*) as count,
+                    ROUND(AVG(delay_minutes), 2) as avg_delay,
+                    ROUND(SUM(CASE WHEN delay_minutes <= 0 THEN 1.0 ELSE 0 END) / COUNT(*) * 100, 1) as on_time_pct
+                FROM sailing_events
+                WHERE 1=1 {where_suffix}
+                GROUP BY hour_of_day
+                ORDER BY hour_of_day
+                """,
+                params,
+            ).fetchall()
+        ]
+
+        # Delays by day of week (filtered)
+        delays_by_dow = [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT
+                    day_of_week,
+                    COUNT(*) as count,
+                    ROUND(AVG(delay_minutes), 2) as avg_delay,
+                    ROUND(SUM(CASE WHEN delay_minutes <= 0 THEN 1.0 ELSE 0 END) / COUNT(*) * 100, 1) as on_time_pct
+                FROM sailing_events
+                WHERE 1=1 {where_suffix}
+                GROUP BY day_of_week
+                ORDER BY day_of_week
+                """,
+                params,
+            ).fetchall()
+        ]
+
+        # Delays by route (filtered)
+        delays_by_route = [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT
+                    route_abbrev,
+                    COUNT(*) as count,
+                    ROUND(AVG(delay_minutes), 2) as avg_delay,
+                    ROUND(SUM(CASE WHEN delay_minutes <= 0 THEN 1.0 ELSE 0 END) / COUNT(*) * 100, 1) as on_time_pct
+                FROM sailing_events
+                WHERE 1=1 {where_suffix}
+                GROUP BY route_abbrev
+                ORDER BY route_abbrev
+                """,
+                params,
+            ).fetchall()
+        ]
+
+        # Delay distribution (filtered)
+        delay_distribution = [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT
+                    CAST(ROUND(delay_minutes) AS INTEGER) as delay_bin,
+                    COUNT(*) as count
+                FROM sailing_events
+                WHERE delay_minutes BETWEEN -5 AND 20 {where_suffix}
+                GROUP BY delay_bin
+                ORDER BY delay_bin
+                """,
+                params,
+            ).fetchall()
+        ]
+
+        # Daily on-time trend (filtered)
+        daily_trend = [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT
+                    DATE(scheduled_departure) as date,
+                    COUNT(*) as count,
+                    ROUND(AVG(delay_minutes), 2) as avg_delay,
+                    ROUND(SUM(CASE WHEN delay_minutes <= 0 THEN 1.0 ELSE 0 END) / COUNT(*) * 100, 1) as on_time_pct
+                FROM sailing_events
+                WHERE 1=1 {where_suffix}
+                GROUP BY DATE(scheduled_departure)
+                ORDER BY date
+                """,
+                params,
+            ).fetchall()
+        ]
+
+        # Total count (filtered)
+        event_count = conn.execute(
+            f"SELECT COUNT(*) as cnt FROM sailing_events WHERE 1=1 {where_suffix}",
+            params,
+        ).fetchone()["cnt"]
+
+        return {
+            "delays_by_hour": delays_by_hour,
+            "delays_by_dow": delays_by_dow,
+            "delays_by_route": delays_by_route,
+            "delay_distribution": delay_distribution,
+            "daily_trend": daily_trend,
+            "event_count": event_count,
+        }
+    finally:
+        conn.close()
+
+
+def get_busyness_heatmap(
+    route: str | None = None,
+    season: str | None = None,
+) -> list[dict]:
+    """Return average fill percentage by day-of-week × hour-of-day.
+
+    Uses sailing_space_snapshots to compute how full ferries typically are.
+    Returns list of {day_of_week, hour_of_day, avg_fill_pct, sailing_count}.
+    """
+    clauses: list[str] = []
+    params: list = []
+
+    if route:
+        # Map route_abbrev to terminal pairs — need to join or filter by terminal
+        # Since sailing_space_snapshots doesn't have route_abbrev, we filter
+        # by known terminal IDs for each route
+        from .config import ROUTES
+
+        terminal_ids = []
+        for r in ROUTES:
+            if r["route_name"] == route:
+                terminal_ids = r["terminals"]
+                break
+        if terminal_ids:
+            placeholders = ",".join("?" * len(terminal_ids))
+            clauses.append(f"departing_terminal_id IN ({placeholders})")
+            params.extend(terminal_ids)
+
+    if season and season in SEASON_MONTHS:
+        months = SEASON_MONTHS[season]
+        placeholders = ",".join("?" * len(months))
+        clauses.append(
+            f"CAST(strftime('%m', departure_time) AS INTEGER) IN ({placeholders})"
+        )
+        params.extend(months)
+
+    where = " AND ".join(clauses) if clauses else "1=1"
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT
+                CAST(strftime('%w', departure_time) AS INTEGER) as day_of_week,
+                CAST(strftime('%H', departure_time) AS INTEGER) as hour_of_day,
+                ROUND(AVG(
+                    CASE WHEN max_space_count > 0
+                    THEN (1.0 - (1.0 * drive_up_space_count / max_space_count)) * 100
+                    ELSE NULL END
+                ), 1) as avg_fill_pct,
+                COUNT(DISTINCT departure_time) as sailing_count
+            FROM sailing_space_snapshots
+            WHERE {where}
+            GROUP BY day_of_week, hour_of_day
+            ORDER BY day_of_week, hour_of_day
+            """,
+            params,
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_available_routes() -> list[dict]:
+    """Return distinct routes that have sailing event data."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT route_abbrev, COUNT(*) as count
+            FROM sailing_events
+            WHERE route_abbrev IS NOT NULL
+            GROUP BY route_abbrev
+            ORDER BY route_abbrev
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()

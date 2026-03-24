@@ -1,13 +1,18 @@
 import logging
 from collections import defaultdict
-from datetime import datetime
-from typing import Dict, List, Optional
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from backend.config import ROUTES
 
-from .serializers import (DirectionalSailing, DirectionalSchedule,
-                          RawDirectionalSchedule, RouteSchedule, Vessel)
+from .database import get_previous_sailing_fullness, get_turnaround_minutes
+from .serializers import (
+    DirectionalSailing,
+    DirectionalSchedule,
+    RawDirectionalSchedule,
+    RouteSchedule,
+    Vessel,
+)
 from .utils import datetime_to_minutes
 from .wsdot_client import get_schedule_today, get_vessel_positions
 
@@ -22,14 +27,14 @@ logger = logging.getLogger(__name__)
 CACHED_DELAYS = {}
 
 
-def update_cached_delay(vessel: Vessel, delay: datetime):
+def update_cached_delay(vessel: Vessel, delay: timedelta):
     for route in vessel.route_name:
         if route not in CACHED_DELAYS:
             CACHED_DELAYS[route] = {}
         CACHED_DELAYS[route][vessel.vessel_position_num] = delay
 
 
-def get_cached_delay(vessel: Vessel) -> Optional[datetime]:
+def get_cached_delay(vessel: Vessel) -> timedelta | None:
     # some vessels don't have routes assigned
     if not vessel.route_name:
         return None
@@ -59,13 +64,13 @@ def get_vessels_with_delays():
     return vessel_positions
 
 
-def get_route_vessels(vessel_positions: List[Vessel], route_config):
+def get_route_vessels(vessel_positions: list[Vessel], route_config):
     return [v for v in vessel_positions if route_config["route_name"] in v.route_name]
 
 
 def get_route_schedule_by_boat(
-    schedules: List[RawDirectionalSchedule],
-) -> Dict[int, List[DirectionalSailing]]:
+    schedules: list[RawDirectionalSchedule],
+) -> dict[int, list[DirectionalSailing]]:
     schedule_by_boat = defaultdict(list)
     for directional_schedule in schedules:
         for sailing in directional_schedule.times:
@@ -87,8 +92,11 @@ def get_route_schedule_by_boat(
 
 
 def propigate_delays(
-    delay: Optional[datetime], sailings: List[DirectionalSailing]
-) -> List[DirectionalSailing]:
+    delay: timedelta | None,
+    sailings: list[DirectionalSailing],
+    vessel_id: int | None = None,
+    vessel_speed: float | None = None,
+) -> list[DirectionalSailing]:
     """Apply delays to sailings, using ML predictions if available, else flat propagation."""
     if not delay and not (ml_predictor and ml_predictor.is_trained):
         return sailings
@@ -110,13 +118,27 @@ def propigate_delays(
                     break
 
             if route_abbrev:
+                sched_iso = sailing.scheduled_departure.isoformat()
+
+                # Look up docking features for this sailing
+                prev_fullness = get_previous_sailing_fullness(
+                    sailing.departing_terminal_id, sched_iso
+                )
+                turnaround = None
+                if vessel_id is not None:
+                    turnaround = get_turnaround_minutes(vessel_id, sched_iso)
+
                 prediction = ml_predictor.predict(
                     route_abbrev=route_abbrev,
                     departing_terminal_id=sailing.departing_terminal_id,
+                    vessel_id=vessel_id or 0,
                     day_of_week=sailing.scheduled_departure.weekday(),
                     hour_of_day=sailing.scheduled_departure.hour,
                     minutes_until_scheduled_departure=minutes_until,
                     current_vessel_delay_minutes=delay_minutes,
+                    vessel_speed=vessel_speed,
+                    previous_sailing_fullness=prev_fullness,
+                    turnaround_minutes=turnaround,
                 )
                 if prediction:
                     sailing.delay_in_minutes = round(prediction["predicted_delay"])
@@ -132,8 +154,8 @@ def propigate_delays(
 
 
 def get_next_sailings_by_boat(
-    schedule_by_boat: Dict[int, List[DirectionalSailing]], route_vessels: List[Vessel]
-) -> Dict[int, List[DirectionalSailing]]:
+    schedule_by_boat: dict[int, list[DirectionalSailing]], route_vessels: list[Vessel]
+) -> dict[int, list[DirectionalSailing]]:
     route_vessels_by_position = {
         vessel.vessel_position_num: vessel for vessel in route_vessels
     }
@@ -157,21 +179,63 @@ def get_next_sailings_by_boat(
                 if sailing.scheduled_departure >= current_vessel.scheduled_departure
             ]
         elif not current_vessel.at_dock:
+            # Include the just-departed sailing so users can see it's en route
+            departed_sailing = None
+            for sailing in sailings:
+                if sailing.scheduled_departure == current_vessel.scheduled_departure:
+                    now = datetime.now(tz=ZoneInfo("America/Los_Angeles"))
+                    minutes_since = (
+                        now - sailing.scheduled_departure
+                    ).total_seconds() / 60
+                    # Show departed sailing for up to 30 minutes after departure
+                    if minutes_since <= 30:
+                        departed_sailing = sailing.model_copy()
+                        departed_sailing.departed = True
+                    break
+
             next_sailings = [
                 sailing
                 for sailing in sailings
                 if sailing.scheduled_departure > current_vessel.scheduled_departure
             ]
 
-        next_sailings = propigate_delays(current_vessel.delay, next_sailings)
+            if departed_sailing:
+                next_sailings.insert(0, departed_sailing)
+
+        v_id = current_vessel.vessel_id if current_vessel else None
+        v_speed = current_vessel.speed if current_vessel else None
+        next_sailings = propigate_delays(
+            current_vessel.delay, next_sailings, vessel_id=v_id, vessel_speed=v_speed
+        )
+
+        # Annotate the first sailing with live vessel state.
+        # When the vessel is en route, verify the first sailing's direction matches
+        # the vessel's current direction. E.g. if the vessel departed Seattle heading
+        # to Bainbridge, only annotate a Seattle→Bainbridge sailing, not a future
+        # sailing departing from a different terminal.
+        if next_sailings and current_vessel:
+            first = next_sailings[0]
+            direction_matches = (
+                current_vessel.at_dock
+                or first.departing_terminal_id == current_vessel.departing_terminal_id
+            )
+            if direction_matches:
+                first.vessel_at_dock = current_vessel.at_dock
+                first.vessel_left_dock = current_vessel.left_dock
+                first.vessel_eta = current_vessel.eta
+                if current_vessel.delay:
+                    first.vessel_delay_minutes = datetime_to_minutes(
+                        current_vessel.delay
+                    )
+
         next_sailings_by_boat[vessel_position_num] = next_sailings
 
     return next_sailings_by_boat
 
 
 def get_directional_schedules(
-    next_sailings_by_boat: Dict[int, List[DirectionalSailing]],
-) -> List[DirectionalSchedule]:
+    next_sailings_by_boat: dict[int, list[DirectionalSailing]],
+) -> list[DirectionalSchedule]:
     direction_groups = defaultdict(list)
 
     # Flatten all sailings from all vessels and group by direction
@@ -202,12 +266,13 @@ def get_directional_schedules(
             )
         )
 
+    direction_schedules.sort(key=lambda ds: ds.departing_terminal_name)
     return direction_schedules
 
 
 def get_next_sailings_for_route(
     vessel_positions, route_config
-) -> List[DirectionalSailing]:
+) -> list[DirectionalSailing]:
     route_schedule = get_schedule_today(route_config["route_id"])
     route_vessels = get_route_vessels(vessel_positions, route_config)
     schedule_by_boat = get_route_schedule_by_boat(route_schedule)
@@ -220,7 +285,7 @@ def get_next_sailings_for_route(
     return directional_sailings
 
 
-def get_next_sailings() -> List[RouteSchedule]:
+def get_next_sailings() -> list[RouteSchedule]:
     vessel_positions = get_vessels_with_delays()
     all_next_sailings = []
     for route in ROUTES:

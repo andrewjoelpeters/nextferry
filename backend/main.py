@@ -1,8 +1,11 @@
 import asyncio
+import contextlib
+import hashlib
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Request
@@ -11,16 +14,23 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .data_collector import collect_data
-from .database import get_dashboard_data, get_sailing_event_count, get_snapshot_count, init_db
+from .database import (
+    get_dashboard_data,
+    get_sailing_event_count,
+    get_snapshot_count,
+    init_db,
+)
 from .display_processing import process_routes_for_display
+from .fill_predictor import fill_predictor
 from .ml_predictor import predictor as ml_predictor
-from .next_sailings import CACHED_DELAYS, get_next_sailings
-from .wsdot_client import get_vessel_positions
+from .next_sailings import CACHED_DELAYS, get_next_sailings, get_vessels_with_delays
+from .sailing_space import get_sailing_space_lookup
+from .utils import datetime_to_minutes
 
 logger = logging.getLogger(__name__)
 
 # Global cache - shared by all users
-_sailings_cache: Optional[Dict[str, Any]] = None
+_sailings_cache: dict[str, Any] | None = None
 
 
 async def update_sailings_cache():
@@ -31,7 +41,8 @@ async def update_sailings_cache():
         try:
             logger.info("Updating shared sailings cache")
             routes_data = get_next_sailings()
-            processed_routes = process_routes_for_display(routes_data)
+            space_lookup = get_sailing_space_lookup()
+            processed_routes = process_routes_for_display(routes_data, space_lookup)
 
             _sailings_cache = {
                 "routes": processed_routes,
@@ -49,27 +60,38 @@ async def update_sailings_cache():
 
 
 async def retrain_model_daily():
-    """Background task to load/train the ML model, then retrain daily at 2 AM Pacific."""
-    # On startup, try to load saved model (volume first, then bundled)
-    logger.info("Attempting to load saved ML model...")
-    loaded = ml_predictor.load()
+    """Background task to load/train ML models, then retrain daily at 2 AM Pacific."""
+    # On startup, try to load saved models from volume
+    logger.info("Attempting to load saved ML models...")
+    ml_predictor.load()
+    fill_predictor.load()
 
-    # If no model found anywhere, try an immediate background train
-    if not loaded:
-        logger.info("No saved model found, attempting background train...")
+    # If no models found, try an immediate background train
+    if not ml_predictor.is_trained:
+        logger.info("No delay model found, attempting background train...")
         try:
-            success = ml_predictor.train()
-            if success:
+            if ml_predictor.train():
                 ml_predictor.save()
                 logger.info(
-                    f"Initial model trained on {ml_predictor.training_data_size} rows"
+                    f"Initial delay model trained on {ml_predictor.training_data_size} rows"
                 )
             else:
-                logger.info(
-                    "Initial training skipped (insufficient data), using heuristics"
-                )
+                logger.info("Delay model training skipped (insufficient data)")
         except Exception as e:
-            logger.error(f"Initial model training failed: {e}")
+            logger.error(f"Initial delay model training failed: {e}")
+
+    if not fill_predictor.is_trained:
+        logger.info("No fill risk model found, attempting background train...")
+        try:
+            if fill_predictor.train():
+                fill_predictor.save()
+                logger.info(
+                    f"Initial fill risk model trained on {fill_predictor.training_data_size} sailings"
+                )
+            else:
+                logger.info("Fill risk training skipped (insufficient data)")
+        except Exception as e:
+            logger.error(f"Initial fill risk training failed: {e}")
 
     while True:
         try:
@@ -86,14 +108,17 @@ async def retrain_model_daily():
             await asyncio.sleep(wait_seconds)
 
             logger.info("Starting daily model retraining...")
-            success = ml_predictor.train()
-            if success:
+            if ml_predictor.train():
                 ml_predictor.save()
                 logger.info(
-                    f"Model retrained on {ml_predictor.training_data_size} rows"
+                    f"Delay model retrained on {ml_predictor.training_data_size} rows"
                 )
-            else:
-                logger.info("Model retraining skipped (insufficient data)")
+
+            if fill_predictor.train():
+                fill_predictor.save()
+                logger.info(
+                    f"Fill risk model retrained on {fill_predictor.training_data_size} sailings"
+                )
 
         except asyncio.CancelledError:
             raise
@@ -124,10 +149,8 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down background tasks")
     for task in [sailings_cache_task, collector_task, retrain_task]:
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
 
 
 app = FastAPI(lifespan=lifespan)
@@ -136,10 +159,28 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 
+def _compute_asset_version() -> str:
+    """Hash local static assets to produce a short cache-busting token."""
+    h = hashlib.md5()
+    for name in sorted(["style.css", "alerts.js"]):
+        p = Path("static") / name
+        if p.exists():
+            h.update(p.read_bytes())
+    return h.hexdigest()[:8]
+
+
+ASSET_VERSION = _compute_asset_version()
+templates.env.globals["asset_version"] = ASSET_VERSION
+
+
 @app.get("/sw.js")
 async def service_worker():
     """Serve service worker from root scope for full app control"""
-    return FileResponse("static/sw.js", media_type="application/javascript")
+    return FileResponse(
+        "static/sw.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -191,10 +232,26 @@ async def get_map_tab(request: Request):
 
 @app.get("/ferry-data")
 async def get_ferry_positions():
-    """Return ferry position data as JSON for the map"""
+    """Return enriched ferry position data as JSON for the map"""
     try:
-        ferry_data = get_vessel_positions()
-        return ferry_data
+        ferry_data = get_vessels_with_delays()
+        result = []
+        for v in ferry_data:
+            data = v.model_dump(by_alias=True)
+            # Add computed delay fields (not in WSDOT response)
+            if v.delay:
+                delay_minutes = datetime_to_minutes(v.delay)
+                data["DelayMinutes"] = delay_minutes
+                if v.scheduled_departure:
+                    predicted = v.scheduled_departure + timedelta(minutes=delay_minutes)
+                    data["PredictedDeparture"] = predicted.isoformat()
+                else:
+                    data["PredictedDeparture"] = None
+            else:
+                data["DelayMinutes"] = None
+                data["PredictedDeparture"] = None
+            result.append(data)
+        return result
     except Exception as e:
         return {"error": str(e)}
 
@@ -220,14 +277,46 @@ async def get_predictions_data():
     """Return dashboard data as JSON for chart rendering."""
     dashboard = get_dashboard_data()
 
-    # Include model evaluation metrics if available
+    # Transform evaluation metrics into the format the frontend expects
+    evaluation = None
+    raw_eval = ml_predictor.last_evaluation
+    if raw_eval:
+        evaluation = {
+            "overall_mae": raw_eval.get("overall_mae"),
+            "overall_mean_error": raw_eval.get("overall_bias"),
+            "improvement_pct": raw_eval.get("overall_improvement_pct"),
+        }
+        # Convert by_horizon dict into error_by_horizon array
+        by_horizon = raw_eval.get("by_horizon", {})
+        if by_horizon:
+            error_by_horizon = []
+            for label, metrics in by_horizon.items():
+                # Parse midpoint from label like "2–4m" → 3
+                parts = label.rstrip("m").split("–")
+                lo, hi = float(parts[0]), float(parts[1])
+                error_by_horizon.append(
+                    {
+                        "minutes_out": int((lo + hi) / 2),
+                        "mae": metrics.get("mae"),
+                        "mean_error": metrics.get("bias"),
+                        "error_p88": metrics.get("error_p90"),
+                        "error_p12": (
+                            round(-abs(metrics.get("error_p90", 0)), 2)
+                            if metrics.get("error_p90") is not None
+                            else None
+                        ),
+                    }
+                )
+            error_by_horizon.sort(key=lambda d: d["minutes_out"])
+            evaluation["error_by_horizon"] = error_by_horizon
+
     model_info = {
         "is_trained": ml_predictor.is_trained,
         "last_trained": (
             ml_predictor.last_trained.isoformat() if ml_predictor.last_trained else None
         ),
         "training_data_size": ml_predictor.training_data_size,
-        "evaluation": ml_predictor.last_evaluation,
+        "evaluation": evaluation,
     }
 
     return {**dashboard, "model": model_info}
@@ -253,12 +342,26 @@ async def debug_cache_status():
 async def debug_model_status():
     """Debug endpoint showing ML model status and evaluation metrics."""
     return {
-        "is_trained": ml_predictor.is_trained,
-        "last_trained": (
-            ml_predictor.last_trained.isoformat() if ml_predictor.last_trained else None
-        ),
-        "training_data_size": ml_predictor.training_data_size,
-        "evaluation_metrics": ml_predictor.last_evaluation,
+        "delay_model": {
+            "is_trained": ml_predictor.is_trained,
+            "last_trained": (
+                ml_predictor.last_trained.isoformat()
+                if ml_predictor.last_trained
+                else None
+            ),
+            "training_data_size": ml_predictor.training_data_size,
+            "evaluation_metrics": ml_predictor.last_evaluation,
+        },
+        "fill_risk_model": {
+            "is_trained": fill_predictor.is_trained,
+            "last_trained": (
+                fill_predictor.last_trained.isoformat()
+                if fill_predictor.last_trained
+                else None
+            ),
+            "training_data_size": fill_predictor.training_data_size,
+            "fill_rate": fill_predictor.fill_rate,
+        },
         "database": {
             "snapshot_count": get_snapshot_count(),
             "sailing_event_count": get_sailing_event_count(),

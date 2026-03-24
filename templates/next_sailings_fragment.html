@@ -1,36 +1,97 @@
 {% for route in routes %}
-<div class="route-section">
+<div class="route-section" data-route="{{ route.route_name }}">
     <h3 class="route-title">{{ route.route_name }}</h3>
-    <div class="terminals-grid">
-        
+    <div class="direction-toggle">
         {% for schedule in route.schedules %}
-        <div class="terminal-card">
-            <h4 class="terminal-name">Departing {{ schedule.departing_terminal_name }} in:</h4>
+        <button class="direction-btn" data-terminal="{{ schedule.departing_terminal_name }}">From {{ schedule.departing_terminal_name }}</button>
+        {% endfor %}
+    </div>
+    <div class="terminals-grid">
+
+        {% for schedule in route.schedules %}
+        <div class="terminal-card" data-departing="{{ schedule.departing_terminal_name }}">
             <div class="sailings-list">
-                
+
                 {% if schedule.sailings %}
                     {% for sailing in schedule.sailings %}
-                    <div class="sailing-item {{ sailing.status_class }}">
-                        <div class="time-until-prominent">{{ sailing.time_until }}</div>
-                        <div class="departure-times">
-                            <div class="scheduled-time">Scheduled: {{ sailing.scheduled_time }}</div>
-                            {% if sailing.has_delay %}
-                            <div class="estimated-time">Estimated: {{ sailing.estimated_departure }} {{ sailing.delay_text }}</div>
+                    <details class="sailing-item {{ sailing.status_class }}{% if sailing.departed %} sailing-departed{% endif %}{% if sailing.vessel_info or sailing.vessel_name or sailing.fill_risk %} has-details{% endif %}"
+                         data-vessel="{{ sailing.vessel_name or '' }}"
+                         data-terminal="{{ sailing.departing_terminal_name or '' }}"
+                         data-departure="{{ sailing.scheduled_departure_iso or '' }}">
+                        <summary class="sailing-summary">
+                            {% if sailing.departed %}
+                            <div class="sailing-row-main">
+                                <span class="time-until-prominent">{{ sailing.time_until }}</span>
+                                <span class="display-time">Departed {{ sailing.scheduled_time }}</span>
+                            </div>
+                            <div class="sailing-row-status">
+                                <span class="departed-info">En route to {{ schedule.arriving_terminal_name }}</span>
+                            </div>
+                            {% else %}
+                            <div class="sailing-row-main">
+                                <span class="time-until-prominent">{{ sailing.time_until }}</span>
+                                <span class="display-time{% if sailing.delay_minutes and sailing.delay_minutes > 20 %} delay-severe{% elif sailing.delay_minutes and sailing.delay_minutes > 10 %} delay-significant{% elif sailing.delay_minutes and sailing.delay_minutes > 5 %} delay-moderate{% endif %}">{{ sailing.display_time_html | safe }}</span>
+                            </div>
+                            {% if sailing.vessel_info and sailing.vessel_info.vessel_status %}
+                            <div class="sailing-row-status">
+                                <span class="vessel-status vessel-{{ sailing.vessel_info.vessel_status_key }}">{{ sailing.vessel_info.vessel_status }}</span>
+                            </div>
+                            {% endif %}
+                            {% if sailing.capacity %}
+                            <div class="sailing-row-capacity">
+                                <div class="capacity-bar">
+                                    <div class="capacity-fill {% if sailing.capacity.percent > 50 %}capacity-ok{% elif sailing.capacity.percent > 20 %}capacity-low{% else %}capacity-full{% endif %}" style="width: {{ sailing.capacity.percent }}%"></div>
+                                </div>
+                                <span class="capacity-text">{{ sailing.capacity.spaces }} spaces</span>
+                            </div>
+                            {% endif %}
+                            {% endif %}
+                        </summary>
+                        {% if sailing.vessel_info or sailing.vessel_name or sailing.fill_risk %}
+                        <div class="vessel-live-info">
+                            {% if sailing.vessel_name %}
+                            <span class="detail-item"><strong>{{ sailing.vessel_name }}</strong></span>
+                            {% endif %}
+                            {% if sailing.vessel_info %}
+                                {% if sailing.vessel_info.vessel_status_key == 'at_dock' %}
+                                    {% if sailing.vessel_info.predicted_departure %}
+                                    <span class="detail-item">Predicted departure: {{ sailing.vessel_info.predicted_departure }}</span>
+                                    {% endif %}
+                                {% elif sailing.vessel_info.vessel_status_key == 'en_route' %}
+                                    {% if sailing.vessel_info.left_dock %}
+                                    <span class="detail-item">Left {{ schedule.arriving_terminal_name }}: {{ sailing.vessel_info.left_dock }}{% if sailing.vessel_info.departure_delay %} ({{ sailing.vessel_info.departure_delay }}){% endif %}</span>
+                                    {% endif %}
+                                {% endif %}
+                            {% endif %}
+                            {% if sailing.capacity %}
+                            <span class="detail-item">Capacity: {{ sailing.capacity.spaces }} / {{ sailing.capacity.total }} drive-up</span>
+                            {% endif %}
+                            {% if sailing.fill_risk %}
+                            <span class="detail-item fill-risk fill-risk-{{ sailing.fill_risk.risk_level }}">{{ sailing.fill_risk.label }}</span>
+                            {% endif %}
+                            {% if sailing.vessel_name and sailing.status_class != 'status-departed' and not sailing.departed %}
+                            <button class="alert-btn"
+                                    onclick="openAlertPicker(this)"
+                                    title="Set arrival alert">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                                    <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                                </svg>
+                                <span class="alert-btn-label">Set arrival alert</span>
+                            </button>
                             {% endif %}
                         </div>
-                        {% if sailing.vessel_name %}
-                        <div class="vessel-name">{{ sailing.vessel_name }}</div>
                         {% endif %}
-                    </div>
+                    </details>
                     {% endfor %}
                 {% else %}
                     <div class="no-sailings">No upcoming sailings</div>
                 {% endif %}
-                
+
             </div>
         </div>
         {% endfor %}
-        
+
     </div>
 </div>
 {% endfor %}
@@ -40,3 +101,62 @@
     <p>By <a href="https://github.com/andrewjoelpeters/nextferry">@andrewjoelpeters</a></p>
     Last updated: {{ last_updated }}
 </div>
+
+<script>
+// Direction toggle: persist selection in localStorage, survive HTMX swaps
+(function() {
+    var STORAGE_KEY = 'nextferry_direction';
+
+    function getPrefs() {
+        try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+        catch(e) { return {}; }
+    }
+
+    function savePrefs(prefs) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
+    }
+
+    function applyToggles() {
+        document.querySelectorAll('.route-section').forEach(function(route) {
+            var routeName = route.dataset.route;
+            var prefs = getPrefs();
+            var selected = prefs[routeName];
+            var buttons = route.querySelectorAll('.direction-btn');
+            var cards = route.querySelectorAll('.terminal-card');
+
+            // If no preference saved, default to first terminal
+            if (!selected && buttons.length > 0) {
+                selected = buttons[0].dataset.terminal;
+            }
+
+            buttons.forEach(function(btn) {
+                btn.classList.toggle('active', btn.dataset.terminal === selected);
+            });
+
+            cards.forEach(function(card) {
+                card.classList.toggle('direction-hidden', card.dataset.departing !== selected);
+            });
+        });
+    }
+
+    // Handle toggle clicks (use event delegation for HTMX-replaced content)
+    document.addEventListener('click', function(e) {
+        var btn = e.target.closest('.direction-btn');
+        if (!btn) return;
+
+        var route = btn.closest('.route-section');
+        var routeName = route.dataset.route;
+        var terminal = btn.dataset.terminal;
+
+        var prefs = getPrefs();
+        prefs[routeName] = terminal;
+        savePrefs(prefs);
+
+        applyToggles();
+    });
+
+    // Apply on initial load and after every HTMX swap
+    applyToggles();
+    document.body.addEventListener('htmx:afterSwap', applyToggles);
+})();
+</script>

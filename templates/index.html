@@ -12,13 +12,15 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Next Ferry">
     <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}">
     <!-- Leaflet CSS for mapping -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <!-- Chart.js for predictions dashboard -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <!-- HTMX - this is the magic! -->
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <!-- Ferry arrival alerts -->
+    <script src="/static/alerts.js?v={{ asset_version }}" defer></script>
 </head>
 <body>
     <header>

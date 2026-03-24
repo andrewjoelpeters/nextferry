@@ -43,14 +43,6 @@ def is_peak_hour(hour: int) -> bool:
     return (6 <= hour <= 9) or (15 <= hour <= 19)
 
 
-def weekday_to_wsdot(weekday: int) -> int:
-    """Convert Python datetime.weekday() (Mon=0..Sun=6) to WSDOT/SQLite encoding (Sun=0..Sat=6).
-
-    Training data uses SQLite strftime('%w') which gives Sun=0..Sat=6.
-    This helper ensures inference matches training encoding.
-    """
-    return (weekday + 1) % 7
-
 
 # ---------------------------------------------------------------------------
 # Default implementation — quantile GBT

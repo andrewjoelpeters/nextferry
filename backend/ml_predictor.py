@@ -398,18 +398,24 @@ class DelayPredictor:
     ) -> dict | None:
         """Predict delay with confidence interval.
 
+        day_of_week uses Python weekday() convention (Mon=0..Sun=6).
+
         Returns dict with predicted_delay, lower_bound, upper_bound (all in minutes),
         or None if model is not trained.
         """
         if not self.is_trained or self._model is None:
             return None
 
+        # Training data uses SQLite strftime('%w'): Sun=0..Sat=6.
+        # Python weekday() gives Mon=0..Sun=6. Convert to match.
+        dow = day_of_week + 1 if day_of_week != 6 else 0
+
         try:
             return self._model.predict_single(
                 route_abbrev=route_abbrev,
                 departing_terminal_id=departing_terminal_id,
                 vessel_id=vessel_id,
-                day_of_week=day_of_week,
+                day_of_week=dow,
                 hour_of_day=hour_of_day,
                 minutes_until_scheduled_departure=minutes_until_scheduled_departure,
                 current_vessel_delay_minutes=current_vessel_delay_minutes,

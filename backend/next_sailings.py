@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 from backend.config import ROUTES
 
 from .database import get_previous_sailing_fullness, get_turnaround_minutes
-from .model_training.backtest_model import weekday_to_wsdot
 from .serializers import (
     DirectionalSailing,
     DirectionalSchedule,
@@ -133,7 +132,7 @@ def propigate_delays(
                     route_abbrev=route_abbrev,
                     departing_terminal_id=sailing.departing_terminal_id,
                     vessel_id=vessel_id or 0,
-                    day_of_week=weekday_to_wsdot(sailing.scheduled_departure.weekday()),
+                    day_of_week=sailing.scheduled_departure.weekday(),
                     hour_of_day=sailing.scheduled_departure.hour,
                     minutes_until_scheduled_departure=minutes_until,
                     current_vessel_delay_minutes=delay_minutes,

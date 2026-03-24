@@ -6,10 +6,18 @@ sklearn or touches DataFrames.
 """
 
 import json
+import re
 from datetime import datetime
-from typing import Optional
 
 from .evaluation import OVERPREDICTION_PENALTY
+
+
+def _natural_sort_key(key: str):
+    """Sort key that orders leading numbers numerically (e.g. '2–4m' before '10–14m')."""
+    match = re.match(r"(\d+)", key)
+    if match:
+        return (0, int(match.group(1)), key)
+    return (1, 0, key)
 
 
 def _metric_table(data: dict, key_label: str) -> list:
@@ -17,7 +25,7 @@ def _metric_table(data: dict, key_label: str) -> list:
     lines = []
     lines.append(f"| {key_label} | Pinball Loss | Bias | p90 | N |")
     lines.append("|---|---|---|---|---|")
-    for label, m in sorted(data.items()):
+    for label, m in sorted(data.items(), key=lambda x: _natural_sort_key(x[0])):
         lines.append(
             f"| {label} | {m['pinball_loss']} | {m['bias']:+.2f} | "
             f"{m['error_p90']:+.2f} | {m['n']} |"
@@ -38,7 +46,7 @@ def generate_markdown_report(
     backtest_results: dict,
     experiment_name: str = "unnamed",
     description: str = "",
-    comparison: Optional[dict] = None,
+    comparison: dict | None = None,
 ) -> str:
     """Generate a markdown report from backtest results dicts."""
     lines = []
@@ -54,7 +62,14 @@ def generate_markdown_report(
         lines.append("")
     lines.append(f"**Date:** {now}  ")
     lines.append(f"**Sailing events:** {backtest_results['n_total_events']}  ")
-    lines.append(f"**Walk-forward folds:** {backtest_results['n_folds']}")
+    lines.append(f"**Walk-forward folds:** {backtest_results['n_folds']}  ")
+    training_time = backtest_results.get("training_time_seconds")
+    if training_time is not None:
+        minutes, seconds = divmod(training_time, 60)
+        if minutes >= 1:
+            lines.append(f"**Training time:** {int(minutes)}m {int(seconds)}s")
+        else:
+            lines.append(f"**Training time:** {training_time}s")
     lines.append("")
 
     # ---- TOP-LINE ----
@@ -206,7 +221,7 @@ def _comparison_section(agg: dict, prev: dict) -> list:
     return lines
 
 
-def parse_previous_report(report_path: str) -> Optional[dict]:
+def parse_previous_report(report_path: str) -> dict | None:
     """Parse the JSON block from a previous markdown report for comparison."""
     from pathlib import Path
 

@@ -24,9 +24,13 @@ uv run pytest tests/test_ml_predictor.py -v
 # Run a single test
 uv run pytest tests/test_ml_predictor.py::test_function_name -v
 
-# Format code
-uv run black .
-uv run isort .
+# Lint and format
+uv run ruff check .        # lint
+uv run ruff check --fix .  # lint with auto-fix
+uv run ruff format .       # format
+
+# Type check
+uv run mypy backend/
 ```
 
 ## Architecture

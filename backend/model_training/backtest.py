@@ -45,9 +45,10 @@ Usage:
 
 import argparse
 import logging
+import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
@@ -171,13 +172,13 @@ def walk_forward_backtest(
 
 
 def run_backtest(
-    model_factory: Optional[Callable[[], BacktestModel]] = None,
+    model_factory: Callable[[], BacktestModel] | None = None,
     n_folds: int = 5,
     experiment_name: str = "unnamed",
     description: str = "",
-    compare_path: Optional[str] = None,
-    output_dir: Optional[str] = None,
-) -> Optional[str]:
+    compare_path: str | None = None,
+    output_dir: str | None = None,
+) -> str | None:
     """Run a full backtest and write a markdown report. Returns the report path."""
     from ..ml_predictor import DelayPredictor
 
@@ -191,11 +192,15 @@ def run_backtest(
         return None
 
     logger.info(f"Running walk-forward backtest with {n_folds} folds...")
+    t0 = time.monotonic()
     results = walk_forward_backtest(df, model_factory=model_factory, n_folds=n_folds)
+    elapsed = time.monotonic() - t0
 
     if "error" in results:
         logger.error(results["error"])
         return None
+
+    results["training_time_seconds"] = round(elapsed, 1)
 
     comparison = None
     if compare_path:

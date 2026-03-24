@@ -1,14 +1,18 @@
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from backend.config import ROUTES
 
 from .database import get_previous_sailing_fullness, get_turnaround_minutes
-from .serializers import (DirectionalSailing, DirectionalSchedule,
-                          RawDirectionalSchedule, RouteSchedule, Vessel)
+from .serializers import (
+    DirectionalSailing,
+    DirectionalSchedule,
+    RawDirectionalSchedule,
+    RouteSchedule,
+    Vessel,
+)
 from .utils import datetime_to_minutes
 from .wsdot_client import get_schedule_today, get_vessel_positions
 
@@ -30,7 +34,7 @@ def update_cached_delay(vessel: Vessel, delay: timedelta):
         CACHED_DELAYS[route][vessel.vessel_position_num] = delay
 
 
-def get_cached_delay(vessel: Vessel) -> Optional[timedelta]:
+def get_cached_delay(vessel: Vessel) -> timedelta | None:
     # some vessels don't have routes assigned
     if not vessel.route_name:
         return None
@@ -60,13 +64,13 @@ def get_vessels_with_delays():
     return vessel_positions
 
 
-def get_route_vessels(vessel_positions: List[Vessel], route_config):
+def get_route_vessels(vessel_positions: list[Vessel], route_config):
     return [v for v in vessel_positions if route_config["route_name"] in v.route_name]
 
 
 def get_route_schedule_by_boat(
-    schedules: List[RawDirectionalSchedule],
-) -> Dict[int, List[DirectionalSailing]]:
+    schedules: list[RawDirectionalSchedule],
+) -> dict[int, list[DirectionalSailing]]:
     schedule_by_boat = defaultdict(list)
     for directional_schedule in schedules:
         for sailing in directional_schedule.times:
@@ -88,10 +92,11 @@ def get_route_schedule_by_boat(
 
 
 def propigate_delays(
-    delay: Optional[timedelta],
-    sailings: List[DirectionalSailing],
-    vessel_id: Optional[int] = None,
-) -> List[DirectionalSailing]:
+    delay: timedelta | None,
+    sailings: list[DirectionalSailing],
+    vessel_id: int | None = None,
+    vessel_speed: float | None = None,
+) -> list[DirectionalSailing]:
     """Apply delays to sailings, using ML predictions if available, else flat propagation."""
     if not delay and not (ml_predictor and ml_predictor.is_trained):
         return sailings
@@ -126,10 +131,12 @@ def propigate_delays(
                 prediction = ml_predictor.predict(
                     route_abbrev=route_abbrev,
                     departing_terminal_id=sailing.departing_terminal_id,
+                    vessel_id=vessel_id or 0,
                     day_of_week=sailing.scheduled_departure.weekday(),
                     hour_of_day=sailing.scheduled_departure.hour,
                     minutes_until_scheduled_departure=minutes_until,
                     current_vessel_delay_minutes=delay_minutes,
+                    vessel_speed=vessel_speed,
                     previous_sailing_fullness=prev_fullness,
                     turnaround_minutes=turnaround,
                 )
@@ -147,8 +154,8 @@ def propigate_delays(
 
 
 def get_next_sailings_by_boat(
-    schedule_by_boat: Dict[int, List[DirectionalSailing]], route_vessels: List[Vessel]
-) -> Dict[int, List[DirectionalSailing]]:
+    schedule_by_boat: dict[int, list[DirectionalSailing]], route_vessels: list[Vessel]
+) -> dict[int, list[DirectionalSailing]]:
     route_vessels_by_position = {
         vessel.vessel_position_num: vessel for vessel in route_vessels
     }
@@ -196,8 +203,9 @@ def get_next_sailings_by_boat(
                 next_sailings.insert(0, departed_sailing)
 
         v_id = current_vessel.vessel_id if current_vessel else None
+        v_speed = current_vessel.speed if current_vessel else None
         next_sailings = propigate_delays(
-            current_vessel.delay, next_sailings, vessel_id=v_id
+            current_vessel.delay, next_sailings, vessel_id=v_id, vessel_speed=v_speed
         )
 
         # Annotate the first sailing with live vessel state.
@@ -226,8 +234,8 @@ def get_next_sailings_by_boat(
 
 
 def get_directional_schedules(
-    next_sailings_by_boat: Dict[int, List[DirectionalSailing]],
-) -> List[DirectionalSchedule]:
+    next_sailings_by_boat: dict[int, list[DirectionalSailing]],
+) -> list[DirectionalSchedule]:
     direction_groups = defaultdict(list)
 
     # Flatten all sailings from all vessels and group by direction
@@ -264,7 +272,7 @@ def get_directional_schedules(
 
 def get_next_sailings_for_route(
     vessel_positions, route_config
-) -> List[DirectionalSailing]:
+) -> list[DirectionalSailing]:
     route_schedule = get_schedule_today(route_config["route_id"])
     route_vessels = get_route_vessels(vessel_positions, route_config)
     schedule_by_boat = get_route_schedule_by_boat(route_schedule)
@@ -277,7 +285,7 @@ def get_next_sailings_for_route(
     return directional_sailings
 
 
-def get_next_sailings() -> List[RouteSchedule]:
+def get_next_sailings() -> list[RouteSchedule]:
     vessel_positions = get_vessels_with_delays()
     all_next_sailings = []
     for route in ROUTES:

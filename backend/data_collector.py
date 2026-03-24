@@ -4,11 +4,13 @@ import asyncio
 import logging
 from collections import defaultdict
 from datetime import datetime
-from typing import List
 from zoneinfo import ZoneInfo
 
-from .database import (extract_sailing_events, insert_sailing_space_batch,
-                       insert_vessel_snapshots_batch)
+from .database import (
+    extract_sailing_events,
+    insert_sailing_space_batch,
+    insert_vessel_snapshots_batch,
+)
 from .serializers import FlatSailingSpace, SailingSpace, Vessel
 from .wsdot_client import get_sailing_space, get_vessel_positions
 
@@ -35,8 +37,8 @@ def flatten_sailing_space(sailing_space: SailingSpace):
 
 
 def next_two_departures_per_route(
-    flat_items: List[FlatSailingSpace],
-) -> List[FlatSailingSpace]:
+    flat_items: list[FlatSailingSpace],
+) -> list[FlatSailingSpace]:
     grouped = defaultdict(list)
 
     for item in flat_items:
@@ -44,14 +46,14 @@ def next_two_departures_per_route(
         grouped[key].append(item)
 
     result = []
-    for key, departures in grouped.items():
+    for _key, departures in grouped.items():
         sorted_deps = sorted(departures, key=lambda x: x.departure_time)
         result.extend(sorted_deps[:2])
 
     return result
 
 
-def store_vessels_to_db(vessels: List[Vessel]):
+def store_vessels_to_db(vessels: list[Vessel]):
     """Insert vessel positions into SQLite for historical accumulation."""
     collected_at = datetime.now(ZoneInfo("America/Los_Angeles")).isoformat()
     batch = []
@@ -82,7 +84,7 @@ def store_vessels_to_db(vessels: List[Vessel]):
     insert_vessel_snapshots_batch(batch)
 
 
-def store_sailing_space_to_db(flat_items: List[FlatSailingSpace]):
+def store_sailing_space_to_db(flat_items: list[FlatSailingSpace]):
     """Insert sailing space data into SQLite."""
     collected_at = datetime.now(ZoneInfo("America/Los_Angeles")).isoformat()
     batch = []

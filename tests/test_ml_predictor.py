@@ -3,9 +3,10 @@ import numpy as np
 import pandas as pd
 
 from backend.ml_predictor import DelayPredictor
-from backend.model_training.backtest_model import (FEATURE_COLS,
-                                                   QuantileGBTModel,
-                                                   is_peak_hour)
+from backend.model_training.backtest_model import (
+    FEATURE_COLS,
+    QuantileGBTModel,
+)
 
 
 def _make_training_df(n: int = 200) -> pd.DataFrame:
@@ -13,18 +14,22 @@ def _make_training_df(n: int = 200) -> pd.DataFrame:
     rng = np.random.default_rng(42)
     routes = ["sea-bi", "ed-ki"]
     terminals = [1, 3, 7, 8]
+    vessels = [100, 200, 300]
     rows = []
     for _ in range(n):
         hour = int(rng.integers(5, 22))
+        dow = int(rng.integers(0, 7))
         rows.append(
             {
                 "route_abbrev": rng.choice(routes),
                 "departing_terminal_id": int(rng.choice(terminals)),
-                "day_of_week": int(rng.integers(0, 7)),
+                "vessel_id": int(rng.choice(vessels)),
+                "day_of_week": dow,
                 "hour_of_day": hour,
+                "is_weekend": int(dow in (0, 6)),
                 "minutes_until_scheduled_departure": float(rng.integers(5, 120)),
                 "current_vessel_delay_minutes": float(rng.normal(3, 5)),
-                "is_peak_hour": int(is_peak_hour(hour)),
+                "vessel_speed": float(rng.uniform(0, 18)),
                 "previous_sailing_fullness": float(rng.uniform(0, 1)),
                 "turnaround_minutes": float(rng.uniform(10, 40)),
                 "actual_delay_minutes": float(rng.normal(5, 8)),
@@ -84,10 +89,12 @@ class TestFeatureCompatibility:
         result = predictor.predict(
             route_abbrev="sea-bi",
             departing_terminal_id=1,
+            vessel_id=100,
             day_of_week=2,
             hour_of_day=8,
             minutes_until_scheduled_departure=30,
             current_vessel_delay_minutes=5.0,
+            vessel_speed=10.0,
             previous_sailing_fullness=0.7,
             turnaround_minutes=25.0,
         )

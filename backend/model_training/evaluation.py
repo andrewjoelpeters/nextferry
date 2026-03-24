@@ -25,7 +25,6 @@ Usage:
 """
 
 import logging
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -80,11 +79,11 @@ def pinball_loss(errors: np.ndarray, alpha: float = OVERPREDICTION_PENALTY) -> f
 
 def compute_metrics(
     errors: pd.Series,
-    actuals: Optional[pd.Series] = None,
-    lower: Optional[pd.Series] = None,
-    upper: Optional[pd.Series] = None,
-    baseline_errors: Optional[pd.Series] = None,
-) -> Optional[dict]:
+    actuals: pd.Series | None = None,
+    lower: pd.Series | None = None,
+    upper: pd.Series | None = None,
+    baseline_errors: pd.Series | None = None,
+) -> dict | None:
     """Compute metrics for a group of predictions.
 
     errors = predicted - actual.
@@ -234,7 +233,7 @@ def evaluate_predictions(test_df: pd.DataFrame) -> dict:
     return results
 
 
-def run_full_evaluation() -> Optional[dict]:
+def run_full_evaluation() -> dict | None:
     """Run a full evaluation using the current predictor and database."""
     from ..ml_predictor import DelayPredictor
 
@@ -284,7 +283,7 @@ def print_evaluation(results: dict):
         print(f"  Improvement:   {results['overall_improvement_pct']}%")
 
     if "by_route" in results:
-        print(f"\nBy route:")
+        print("\nBy route:")
         print(f"  {'Route':<12} {'PL':>6} {'Bias':>7} {'p90':>7} {'N':>6}")
         for route, m in sorted(results["by_route"].items()):
             print(

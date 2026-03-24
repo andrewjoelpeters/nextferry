@@ -19,17 +19,14 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import joblib
 import numpy as np
 import pandas as pd
 
 from .config import ROUTES
-from .database import (get_connection, get_sailing_event_count,
-                       get_training_data)
-from .model_training.backtest_model import (FEATURE_COLS, QuantileGBTModel,
-                                            is_peak_hour)
+from .database import get_connection, get_sailing_event_count, get_training_data
+from .model_training.backtest_model import FEATURE_COLS, QuantileGBTModel, is_peak_hour
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +53,10 @@ def get_volume_model_dir() -> Path:
 
 class DelayPredictor:
     def __init__(self):
-        self._model: Optional[QuantileGBTModel] = None
+        self._model: QuantileGBTModel | None = None
         self.is_trained: bool = False
-        self.last_trained: Optional[datetime] = None
-        self.last_evaluation: Optional[dict] = None
+        self.last_trained: datetime | None = None
+        self.last_evaluation: dict | None = None
         self.training_data_size: int = 0
 
     @property
@@ -76,7 +73,7 @@ class DelayPredictor:
             return {}
         return self._model._category_maps.get("departing_terminal_id", {})
 
-    def build_training_data(self) -> Optional[pd.DataFrame]:
+    def build_training_data(self) -> pd.DataFrame | None:
         """Build training dataset from sailing events and vessel snapshots.
 
         For each sailing event, generates multiple training rows at different
@@ -141,6 +138,7 @@ class DelayPredictor:
             delays_df = pd.read_sql_query(
                 f"""
                 SELECT vessel_id, collected_at, scheduled_departure AS snap_sched_dep,
+                       speed AS snap_speed,
                        (julianday(left_dock) - julianday(scheduled_departure)) * 24 * 60 AS snap_delay_minutes
                 FROM vessel_snapshots
                 WHERE left_dock IS NOT NULL AND scheduled_departure IS NOT NULL
@@ -178,6 +176,7 @@ class DelayPredictor:
             merged["current_vessel_delay_minutes"] = merged[
                 "snap_delay_minutes"
             ].fillna(0.0)
+            merged["vessel_speed"] = merged["snap_speed"].fillna(0.0)
 
             # --- Bulk query 2: previous sailing fullness ---
             logger.info("Loading sailing space snapshots...")
@@ -297,16 +296,37 @@ class DelayPredictor:
         merged.rename(
             columns={"horizon_min": "minutes_until_scheduled_departure"}, inplace=True
         )
+        merged["month"] = merged["scheduled_departure_dt"].dt.month
+        merged["is_weekend"] = (
+            merged["day_of_week"].isin([0, 6]).astype(int)
+        )  # Sun=0, Sat=6
+        merged["minutes_since_midnight"] = (
+            merged["scheduled_departure_dt"].dt.hour * 60
+            + merged["scheduled_departure_dt"].dt.minute
+        )
+        merged["delay_x_horizon"] = (
+            merged["current_vessel_delay_minutes"]
+            * merged["minutes_until_scheduled_departure"]
+        )
+        merged["delay_squared"] = merged["current_vessel_delay_minutes"] ** 2
 
         result = merged[
             [
                 "sailing_event_id",
+                "vessel_id",
                 "route_abbrev",
                 "departing_terminal_id",
+                "arriving_terminal_id",
                 "day_of_week",
                 "hour_of_day",
+                "month",
+                "is_weekend",
+                "minutes_since_midnight",
                 "minutes_until_scheduled_departure",
                 "current_vessel_delay_minutes",
+                "vessel_speed",
+                "delay_x_horizon",
+                "delay_squared",
                 "is_peak_hour",
                 "previous_sailing_fullness",
                 "turnaround_minutes",
@@ -367,14 +387,18 @@ class DelayPredictor:
         self,
         route_abbrev: str,
         departing_terminal_id: int,
+        vessel_id: int,
         day_of_week: int,
         hour_of_day: int,
         minutes_until_scheduled_departure: float,
         current_vessel_delay_minutes: float,
-        previous_sailing_fullness: Optional[float] = None,
-        turnaround_minutes: Optional[float] = None,
-    ) -> Optional[dict]:
+        vessel_speed: float | None = None,
+        previous_sailing_fullness: float | None = None,
+        turnaround_minutes: float | None = None,
+    ) -> dict | None:
         """Predict delay with confidence interval.
+
+        day_of_week uses Python weekday() convention (Mon=0..Sun=6).
 
         Returns dict with predicted_delay, lower_bound, upper_bound (all in minutes),
         or None if model is not trained.
@@ -382,14 +406,20 @@ class DelayPredictor:
         if not self.is_trained or self._model is None:
             return None
 
+        # Training data uses SQLite strftime('%w'): Sun=0..Sat=6.
+        # Python weekday() gives Mon=0..Sun=6. Convert to match.
+        dow = day_of_week + 1 if day_of_week != 6 else 0
+
         try:
             return self._model.predict_single(
                 route_abbrev=route_abbrev,
                 departing_terminal_id=departing_terminal_id,
-                day_of_week=day_of_week,
+                vessel_id=vessel_id,
+                day_of_week=dow,
                 hour_of_day=hour_of_day,
                 minutes_until_scheduled_departure=minutes_until_scheduled_departure,
                 current_vessel_delay_minutes=current_vessel_delay_minutes,
+                vessel_speed=vessel_speed,
                 previous_sailing_fullness=previous_sailing_fullness,
                 turnaround_minutes=turnaround_minutes,
             )
@@ -397,7 +427,7 @@ class DelayPredictor:
             logger.error(f"Prediction failed (models may need retraining): {e}")
             return None
 
-    def save(self, path: Optional[Path] = None):
+    def save(self, path: Path | None = None):
         """Save model and metadata to disk."""
         model_dir = path or get_volume_model_dir()
         model_dir.mkdir(parents=True, exist_ok=True)
@@ -442,7 +472,7 @@ class DelayPredictor:
             logger.error(f"Failed to load models from {model_dir}: {e}")
             return False
 
-    def load(self, path: Optional[Path] = None) -> bool:
+    def load(self, path: Path | None = None) -> bool:
         """Load models from the volume model directory."""
         model_dir = path or get_volume_model_dir()
         if self._load_from_dir(model_dir):

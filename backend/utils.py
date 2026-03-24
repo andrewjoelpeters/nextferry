@@ -1,17 +1,16 @@
 import re
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 
-def parse_ms_date(value: Optional[str]) -> Optional[datetime]:
+def parse_ms_date(value: str | None) -> datetime | None:
     if value is None:
         return None
     match = re.match(r"/Date\((\d+)([-+]\d{4})?\)/", value)
     if match:
         timestamp = int(match.group(1)) / 1000  # milliseconds to seconds
         # Convert from UTC to Pacific Time
-        return datetime.fromtimestamp(timestamp, tz=timezone.utc).astimezone(
+        return datetime.fromtimestamp(timestamp, tz=UTC).astimezone(
             ZoneInfo("America/Los_Angeles")
         )
     return value
@@ -70,9 +69,7 @@ def datetime_to_minutes(dt: timedelta) -> int:
     return int(dt.total_seconds() // 60)
 
 
-def format_confidence_text(
-    lower_bound: Optional[int], upper_bound: Optional[int]
-) -> str:
+def format_confidence_text(lower_bound: int | None, upper_bound: int | None) -> str:
     """Format the confidence interval as display text, e.g. '(+1 to +5m)'."""
     if lower_bound is None or upper_bound is None:
         return ""

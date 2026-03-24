@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta
-from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -12,34 +11,34 @@ class Vessel(BaseModel):
     vessel_name: str = Field(alias="VesselName")
     # Mmsi: Optional[int]
 
-    departing_terminal_id: Optional[int] = Field(alias="DepartingTerminalID")
-    departing_terminal_name: Optional[str] = Field(alias="DepartingTerminalName")
-    departing_terminal_abbrev: Optional[str] = Field(alias="DepartingTerminalAbbrev")
+    departing_terminal_id: int | None = Field(alias="DepartingTerminalID")
+    departing_terminal_name: str | None = Field(alias="DepartingTerminalName")
+    departing_terminal_abbrev: str | None = Field(alias="DepartingTerminalAbbrev")
 
-    arriving_terminal_id: Optional[int] = Field(alias="ArrivingTerminalID")
-    arriving_terminal_name: Optional[str] = Field(alias="ArrivingTerminalName")
-    arriving_terminal_abbrev: Optional[str] = Field(alias="ArrivingTerminalAbbrev")
+    arriving_terminal_id: int | None = Field(alias="ArrivingTerminalID")
+    arriving_terminal_name: str | None = Field(alias="ArrivingTerminalName")
+    arriving_terminal_abbrev: str | None = Field(alias="ArrivingTerminalAbbrev")
 
-    latitude: Optional[float] = Field(alias="Latitude")
-    longitude: Optional[float] = Field(alias="Longitude")
-    speed: Optional[float] = Field(alias="Speed")
-    heading: Optional[int] = Field(alias="Heading")
+    latitude: float | None = Field(alias="Latitude")
+    longitude: float | None = Field(alias="Longitude")
+    speed: float | None = Field(alias="Speed")
+    heading: int | None = Field(alias="Heading")
 
     in_service: bool = Field(alias="InService")
     at_dock: bool = Field(alias="AtDock")
 
-    left_dock: Optional[datetime] = Field(alias="LeftDock")
-    eta: Optional[datetime] = Field(alias="Eta")
-    scheduled_departure: Optional[datetime] = Field(alias="ScheduledDeparture")
-    timestamp: Optional[datetime] = Field(alias="TimeStamp")
+    left_dock: datetime | None = Field(alias="LeftDock")
+    eta: datetime | None = Field(alias="Eta")
+    scheduled_departure: datetime | None = Field(alias="ScheduledDeparture")
+    timestamp: datetime | None = Field(alias="TimeStamp")
 
     # delay as timedelta, added in next_sailings.py (not provided by WSDOT)
-    delay: Optional[timedelta] = None
+    delay: timedelta | None = None
 
     # EtaBasis: Optional[str]
-    route_name: List[str] = Field(alias="OpRouteAbbrev")
+    route_name: list[str] = Field(alias="OpRouteAbbrev")
 
-    vessel_position_num: Optional[int] = Field(alias="VesselPositionNum")
+    vessel_position_num: int | None = Field(alias="VesselPositionNum")
 
     # SortSeq: Optional[int]
     # ManagedBy: Optional[int]
@@ -62,7 +61,7 @@ class Vessel(BaseModel):
 
 
 class RawDeparture(BaseModel):
-    scheduled_departure: Optional[datetime] = Field(alias="DepartingTime")
+    scheduled_departure: datetime | None = Field(alias="DepartingTime")
     # arriving_time: Optional[datetime] = Field(alias="ArrivingTime")
     vessel_name: str = Field(alias="VesselName")
     vessel_position_num: int = Field(alias="VesselPositionNum")
@@ -84,7 +83,7 @@ class RawDirectionalSchedule(BaseModel):
     arriving_terminal_id: int = Field(alias="ArrivingTerminalID")
     arriving_terminal_name: str = Field(alias="ArrivingTerminalName")
     sailing_notes: str = Field(alias="SailingNotes")
-    times: List[RawDeparture] = Field(alias="Times")
+    times: list[RawDeparture] = Field(alias="Times")
     # Annotations: List[str]
     # AnnotationsIVR: List[str]
 
@@ -97,7 +96,7 @@ class RawRouteSchedule(BaseModel):
     # ScheduleStart: Optional[datetime]
     # ScheduleEnd: Optional[datetime]
     # AllRoutes: List[int]
-    terminal_combos: List[RawDirectionalSchedule] = Field(..., alias="TerminalCombos")
+    terminal_combos: list[RawDirectionalSchedule] = Field(..., alias="TerminalCombos")
 
 
 # -- Sailing Space Endpoint --
@@ -109,7 +108,7 @@ class ArrivalTerminal(BaseModel):
     # vessel_id: int = Field(alias="VesselID")
     # vessel_name: str = Field(alias="VesselName")
     # display_reservable_space: bool = Field(alias="DisplayReservableSpace")
-    reservable_space_count: Optional[int] = Field(alias="ReservableSpaceCount")
+    reservable_space_count: int | None = Field(alias="ReservableSpaceCount")
     # reservable_space_hex_color: Optional[str] = Field(alias="ReservableSpaceHexColor")
     # display_drive_up_space: bool = Field(alias="DisplayDriveUpSpace")
     drive_up_space_count: int = Field(alias="DriveUpSpaceCount")
@@ -119,12 +118,12 @@ class ArrivalTerminal(BaseModel):
 
 
 class SailingSpace(BaseModel):
-    departure: Optional[datetime] = Field(alias="Departure")
+    departure: datetime | None = Field(alias="Departure")
     is_cancelled: bool = Field(alias="IsCancelled")
     vessel_id: int = Field(alias="VesselID")
     vessel_name: str = Field(alias="VesselName")
     max_space_count: int = Field(alias="MaxSpaceCount")
-    space_for_arrival_terminals: List[ArrivalTerminal] = Field(
+    space_for_arrival_terminals: list[ArrivalTerminal] = Field(
         alias="SpaceForArrivalTerminals"
     )
 
@@ -141,7 +140,7 @@ class TerminalSpace(BaseModel):
     terminal_name: str = Field(alias="TerminalName")
     # terminal_abbrev: str = Field(alias="TerminalAbbrev")
     # sort_seq: int = Field(alias="SortSeq")
-    departing_spaces: List[SailingSpace] = Field(alias="DepartingSpaces")
+    departing_spaces: list[SailingSpace] = Field(alias="DepartingSpaces")
     # is_no_fare_collected: Optional[bool] = Field(alias="IsNoFareCollected")
     # no_fare_collected_msg: Optional[str] = Field(alias="NoFareCollectedMsg")
 
@@ -150,18 +149,18 @@ class TerminalSpace(BaseModel):
 
 
 class RouteSailing(BaseModel):
-    scheduled_departure: Optional[datetime]
-    delay_in_minutes: Optional[int] = None
-    delay_lower_bound: Optional[int] = None
-    delay_upper_bound: Optional[int] = None
+    scheduled_departure: datetime | None
+    delay_in_minutes: int | None = None
+    delay_lower_bound: int | None = None
+    delay_upper_bound: int | None = None
     vessel_name: str
     vessel_position_num: int
     departed: bool = False
     # Live vessel state for the current/next sailing
-    vessel_at_dock: Optional[bool] = None
-    vessel_left_dock: Optional[datetime] = None
-    vessel_eta: Optional[datetime] = None
-    vessel_delay_minutes: Optional[int] = None
+    vessel_at_dock: bool | None = None
+    vessel_left_dock: datetime | None = None
+    vessel_eta: datetime | None = None
+    vessel_delay_minutes: int | None = None
 
 
 class DirectionalSailing(RouteSailing):
@@ -195,13 +194,13 @@ class DirectionalSchedule(BaseModel):
     departing_terminal_name: str
     arriving_terminal_id: int
     arriving_terminal_name: str
-    times: List[RouteSailing]
+    times: list[RouteSailing]
 
 
 class RouteSchedule(BaseModel):
-    route_name: List[str]
+    route_name: list[str]
     route_id: int
-    schedules: List[DirectionalSchedule]
+    schedules: list[DirectionalSchedule]
 
 
 class FlatSailingSpace(BaseModel):
@@ -214,7 +213,7 @@ class FlatSailingSpace(BaseModel):
     arriving_terminal_name: str = Field(alias="ArrivingTerminalName")
     max_space_count: int = Field(None, alias="MaxSpaceCount")
     drive_up_space_count: int = Field(None, alias="DriveUpSpaceCount")
-    reservable_space_count: Optional[int] = Field(None, alias="ReservableSpaceCount")
+    reservable_space_count: int | None = Field(None, alias="ReservableSpaceCount")
 
     class Config:
         populate_by_name = True

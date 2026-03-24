@@ -1,6 +1,5 @@
 import logging
 from datetime import timedelta
-from typing import Dict, List, Optional, Tuple
 
 from .config import ROUTES
 from .database import get_departed_sailing_space
@@ -24,7 +23,8 @@ def _format_vessel_status(sailing) -> dict:
     if sailing.vessel_at_dock is None:
         return {}
 
-    fmt_time = lambda dt: dt.strftime("%I:%M %p").lstrip("0") if dt else None
+    def fmt_time(dt):
+        return dt.strftime("%I:%M %p").lstrip("0") if dt else None
 
     if sailing.vessel_at_dock:
         # Vessel is at dock — boarding/unloading
@@ -62,8 +62,8 @@ def _format_vessel_status(sailing) -> dict:
 
 
 def process_routes_for_display(
-    routes_data: List[RouteSchedule],
-    space_lookup: Optional[Dict[Tuple[int, str], dict]] = None,
+    routes_data: list[RouteSchedule],
+    space_lookup: dict[tuple[int, str], dict] | None = None,
 ):
     processed_routes = []
     for route in routes_data:
@@ -112,11 +112,23 @@ def process_routes_for_display(
                         schedule.departing_terminal_id, departure_iso
                     )
                     if space_info and space_info["max_space_count"] > 0:
-                        cars_on_board = (
-                            space_info["max_space_count"]
-                            - space_info["drive_up_space_count"]
+                        cars_on_board = max(
+                            0,
+                            min(
+                                space_info["max_space_count"],
+                                space_info["max_space_count"]
+                                - space_info["drive_up_space_count"],
+                            ),
                         )
-                        pct = int(cars_on_board / space_info["max_space_count"] * 100)
+                        pct = max(
+                            0,
+                            min(
+                                100,
+                                int(
+                                    cars_on_board / space_info["max_space_count"] * 100
+                                ),
+                            ),
+                        )
                         capacity = {
                             "spaces": space_info["drive_up_space_count"],
                             "total": space_info["max_space_count"],
@@ -226,7 +238,7 @@ def process_routes_for_display(
         # eastern terminals (right button) come second.
         EAST_TERMINALS = {"Seattle", "Edmonds"}
         processed_schedules.sort(
-            key=lambda s: (s["departing_terminal_name"] in EAST_TERMINALS)
+            key=lambda s: s["departing_terminal_name"] in EAST_TERMINALS
         )
 
         processed_routes.append(

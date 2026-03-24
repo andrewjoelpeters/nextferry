@@ -33,6 +33,42 @@ def _make_route(sailings, departing="Seattle", arriving="Bainbridge"):
     )
 
 
+class TestFormatVesselStatus:
+    def test_docked_duration_shown_when_at_dock(self):
+        """When a vessel is at dock, docked_duration should be computed from vessel_eta."""
+        from backend.display_processing import _format_vessel_status
+
+        sailing = _make_sailing(30)
+        sailing.vessel_at_dock = True
+        sailing.vessel_eta = datetime.now(PT) - timedelta(minutes=15)
+
+        result = _format_vessel_status(sailing)
+        assert result["vessel_status_key"] == "at_dock"
+        assert result["docked_duration"] in ("14m", "15m", "16m")
+
+    def test_docked_duration_hours(self):
+        """Docked duration should show hours when >= 60 minutes."""
+        from backend.display_processing import _format_vessel_status
+
+        sailing = _make_sailing(30)
+        sailing.vessel_at_dock = True
+        sailing.vessel_eta = datetime.now(PT) - timedelta(minutes=75)
+
+        result = _format_vessel_status(sailing)
+        assert "1h" in result["docked_duration"]
+
+    def test_no_docked_duration_without_eta(self):
+        """No docked_duration when vessel_eta is None."""
+        from backend.display_processing import _format_vessel_status
+
+        sailing = _make_sailing(30)
+        sailing.vessel_at_dock = True
+        sailing.vessel_eta = None
+
+        result = _format_vessel_status(sailing)
+        assert "docked_duration" not in result
+
+
 class TestProcessRoutesForDisplay:
     def test_basic_processing(self):
         route = _make_route([_make_sailing(30)])

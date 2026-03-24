@@ -5,5 +5,4 @@
 */__pycache__/*
 .DS_Store
 data/
-reports/
 backend/model_training/__pycache__/

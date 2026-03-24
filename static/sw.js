@@ -1,7 +1,6 @@
-const CACHE_NAME = 'nextferry-v2';
+const CACHE_NAME = 'nextferry-v3';
 const SHELL_ASSETS = [
   '/',
-  '/static/style.css',
   '/static/icons/icon-192.png',
   '/static/icons/icon-512.png',
 ];

@@ -1,7 +1,6 @@
 """Fetch live sailing space data and build a lookup for display."""
 
 import logging
-from typing import Dict, Optional, Tuple
 
 from .wsdot_client import get_sailing_space
 
@@ -9,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 # Key: (departing_terminal_id, departure_time_iso) -> {drive_up_space_count, max_space_count}
-SpaceLookup = Dict[Tuple[int, str], dict]
+SpaceLookup = dict[tuple[int, str], dict]
 
 
 def get_sailing_space_lookup() -> SpaceLookup:

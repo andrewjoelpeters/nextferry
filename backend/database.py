@@ -5,12 +5,10 @@ import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
-from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
-_db_path: Optional[Path] = None
+_db_path: Path | None = None
 
 
 def get_db_path() -> Path:
@@ -112,21 +110,21 @@ def insert_vessel_snapshot(
     collected_at: str,
     vessel_id: int,
     vessel_name: str,
-    route_abbrev: Optional[str],
-    departing_terminal_id: Optional[int],
-    departing_terminal_name: Optional[str],
-    arriving_terminal_id: Optional[int],
-    arriving_terminal_name: Optional[str],
-    latitude: Optional[float],
-    longitude: Optional[float],
-    speed: Optional[float],
-    heading: Optional[int],
+    route_abbrev: str | None,
+    departing_terminal_id: int | None,
+    departing_terminal_name: str | None,
+    arriving_terminal_id: int | None,
+    arriving_terminal_name: str | None,
+    latitude: float | None,
+    longitude: float | None,
+    speed: float | None,
+    heading: int | None,
     in_service: bool,
     at_dock: bool,
-    left_dock: Optional[str],
-    eta: Optional[str],
-    scheduled_departure: Optional[str],
-    vessel_position_num: Optional[int],
+    left_dock: str | None,
+    eta: str | None,
+    scheduled_departure: str | None,
+    vessel_position_num: int | None,
 ):
     """Insert a vessel snapshot, ignoring duplicates."""
     conn = get_connection()
@@ -256,7 +254,7 @@ def extract_sailing_events():
         conn.close()
 
 
-def get_training_data() -> List[dict]:
+def get_training_data() -> list[dict]:
     """Return all sailing events as dicts for ML training."""
     conn = get_connection()
     try:
@@ -272,14 +270,14 @@ def get_training_data() -> List[dict]:
             """
         )
         columns = [desc[0] for desc in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        return [dict(zip(columns, row, strict=False)) for row in cursor.fetchall()]
     finally:
         conn.close()
 
 
 def get_vessel_delay_at_time(
     vessel_id: int, query_time: str, scheduled_departure: str
-) -> Optional[float]:
+) -> float | None:
     """Get the most recent observed delay for a vessel at a given time.
 
     Looks at the vessel's most recent snapshot before query_time where
@@ -312,7 +310,7 @@ def get_vessel_delay_at_time(
 
 def get_previous_sailing_fullness(
     departing_terminal_id: int, scheduled_departure: str
-) -> Optional[float]:
+) -> float | None:
     """Get the fullness (0.0-1.0) of the inbound sailing that brought the boat to this terminal.
 
     Looks at the most recent sailing_space_snapshot for a departure FROM the
@@ -343,9 +341,7 @@ def get_previous_sailing_fullness(
         conn.close()
 
 
-def get_turnaround_minutes(
-    vessel_id: int, scheduled_departure: str
-) -> Optional[float]:
+def get_turnaround_minutes(vessel_id: int, scheduled_departure: str) -> float | None:
     """Get how many minutes before scheduled departure the vessel docked.
 
     Finds the earliest snapshot where the vessel is at_dock=1 at the departing

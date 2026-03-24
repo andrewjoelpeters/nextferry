@@ -8,17 +8,17 @@ implementation). The harness never changes.
 """
 
 from pathlib import Path
-from typing import Optional, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-
 # ---------------------------------------------------------------------------
 # Protocol — the contract between model and harness
 # ---------------------------------------------------------------------------
+
 
 @runtime_checkable
 class BacktestModel(Protocol):
@@ -37,9 +37,19 @@ class BacktestModel(Protocol):
 # Feature helpers
 # ---------------------------------------------------------------------------
 
+
 def is_peak_hour(hour: int) -> bool:
     """Return True if the hour falls in commuter peak windows."""
     return (6 <= hour <= 9) or (15 <= hour <= 19)
+
+
+def weekday_to_wsdot(weekday: int) -> int:
+    """Convert Python datetime.weekday() (Mon=0..Sun=6) to WSDOT/SQLite encoding (Sun=0..Sat=6).
+
+    Training data uses SQLite strftime('%w') which gives Sun=0..Sat=6.
+    This helper ensures inference matches training encoding.
+    """
+    return (weekday + 1) % 7
 
 
 # ---------------------------------------------------------------------------
@@ -135,8 +145,12 @@ class QuantileGBTModel:
         X_test = self._encode(test_df)
         out = test_df.copy()
         out["predicted_delay"] = self.models["q50"].predict(X_test)
-        out["lower_bound"] = self.models.get("q15", self.models.get("q10")).predict(X_test)
-        out["upper_bound"] = self.models.get("q85", self.models.get("q90")).predict(X_test)
+        out["lower_bound"] = self.models.get("q15", self.models.get("q10")).predict(
+            X_test
+        )
+        out["upper_bound"] = self.models.get("q85", self.models.get("q90")).predict(
+            X_test
+        )
         return out
 
     def predict_single(
@@ -148,10 +162,10 @@ class QuantileGBTModel:
         hour_of_day: int,
         minutes_until_scheduled_departure: float,
         current_vessel_delay_minutes: float,
-        vessel_speed: Optional[float] = None,
-        previous_sailing_fullness: Optional[float] = None,
-        turnaround_minutes: Optional[float] = None,
-    ) -> Optional[dict]:
+        vessel_speed: float | None = None,
+        previous_sailing_fullness: float | None = None,
+        turnaround_minutes: float | None = None,
+    ) -> dict | None:
         """Predict delay for a single sailing.
 
         Returns dict with predicted_delay, lower_bound, upper_bound (minutes),
@@ -171,13 +185,15 @@ class QuantileGBTModel:
                     "is_weekend": int(day_of_week in (0, 6)),
                     "minutes_until_scheduled_departure": minutes_until_scheduled_departure,
                     "current_vessel_delay_minutes": current_vessel_delay_minutes,
-                    "vessel_speed": vessel_speed if vessel_speed is not None else 0.0,
-                    "previous_sailing_fullness": previous_sailing_fullness
-                    if previous_sailing_fullness is not None
-                    else np.nan,
-                    "turnaround_minutes": turnaround_minutes
-                    if turnaround_minutes is not None
-                    else np.nan,
+                    "vessel_speed": (vessel_speed if vessel_speed is not None else 0.0),
+                    "previous_sailing_fullness": (
+                        previous_sailing_fullness
+                        if previous_sailing_fullness is not None
+                        else np.nan
+                    ),
+                    "turnaround_minutes": (
+                        turnaround_minutes if turnaround_minutes is not None else np.nan
+                    ),
                 }
             ]
         )
@@ -205,7 +221,7 @@ class QuantileGBTModel:
         )
 
     @classmethod
-    def load(cls, path: Path) -> Optional["QuantileGBTModel"]:
+    def load(cls, path: Path) -> "QuantileGBTModel | None":
         """Load model from a v2 joblib file. Returns None if file doesn't exist."""
         if not path.exists():
             return None
@@ -215,4 +231,3 @@ class QuantileGBTModel:
         instance._category_maps = data["category_maps"]
         instance._feature_cols = data.get("feature_cols", list(FEATURE_COLS))
         return instance
-

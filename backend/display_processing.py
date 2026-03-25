@@ -1,5 +1,6 @@
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from .config import ROUTES
 from .database import get_departed_sailing_space
@@ -31,6 +32,18 @@ def _format_vessel_status(sailing) -> dict:
         result = {"vessel_status": "At Dock", "vessel_status_key": "at_dock"}
         if sailing.vessel_eta:
             result["docked_at"] = fmt_time(sailing.vessel_eta)
+            now = datetime.now(ZoneInfo("America/Los_Angeles"))
+            eta = sailing.vessel_eta
+            if eta.tzinfo is None:
+                eta = eta.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
+            minutes_docked = int((now - eta).total_seconds() / 60)
+            if minutes_docked >= 0:
+                if minutes_docked < 60:
+                    result["docked_duration"] = f"{minutes_docked}m"
+                else:
+                    hours = minutes_docked // 60
+                    mins = minutes_docked % 60
+                    result["docked_duration"] = f"{hours}h {mins}m"
         if sailing.scheduled_departure and sailing.vessel_delay_minutes:
             predicted = sailing.scheduled_departure + timedelta(
                 minutes=sailing.vessel_delay_minutes

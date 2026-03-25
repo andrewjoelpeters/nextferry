@@ -44,10 +44,13 @@ def _format_vessel_status(sailing) -> dict:
                     hours = minutes_docked // 60
                     mins = minutes_docked % 60
                     result["docked_duration"] = f"{hours}h {mins}m"
-        if sailing.scheduled_departure and sailing.vessel_delay_minutes:
-            predicted = sailing.scheduled_departure + timedelta(
-                minutes=sailing.vessel_delay_minutes
-            )
+        delay = (
+            sailing.delay_in_minutes
+            if sailing.delay_in_minutes
+            else sailing.vessel_delay_minutes
+        )
+        if sailing.scheduled_departure and delay:
+            predicted = sailing.scheduled_departure + timedelta(minutes=delay)
             result["predicted_departure"] = fmt_time(predicted)
         return result
     else:

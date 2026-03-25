@@ -228,6 +228,20 @@ def get_next_sailings_by_boat(
                         current_vessel.delay
                     )
 
+        # If vessel is en route, annotate the first opposite-direction sailing
+        # with inbound vessel info (the vessel is crossing toward that terminal)
+        if current_vessel and not current_vessel.at_dock:
+            for s in next_sailings:
+                if (
+                    not s.departed
+                    and s.departing_terminal_id != current_vessel.departing_terminal_id
+                ):
+                    s.inbound_vessel_name = current_vessel.vessel_name
+                    s.inbound_vessel_left_dock = current_vessel.left_dock
+                    s.inbound_vessel_eta = current_vessel.eta
+                    s.inbound_vessel_from_terminal = current_vessel.departing_terminal_name
+                    break
+
         next_sailings_by_boat[vessel_position_num] = next_sailings
 
     return next_sailings_by_boat

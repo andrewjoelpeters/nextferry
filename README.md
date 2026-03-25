@@ -1,6 +1,6 @@
-# VesselWatch
+# Next Ferry
 
-VesselWatch is a simple web app that provides real-time information and delay prediction for Washington State Ferries. It's mostly written in Python and uses a FastAPI backend, and HTMX for the front-end. Check it out at [here]([url](https://whens-the-ferry-production.up.railway.app/)).
+Next Ferry is a simple web app that provides real-time information and delay prediction for Washington State Ferries. It's mostly written in Python and uses a FastAPI backend, and HTMX for the front-end. Check it out at [here]([url](https://whens-the-ferry-production.up.railway.app/)).
 
 ## Features
 
@@ -20,8 +20,8 @@ VesselWatch is a simple web app that provides real-time information and delay pr
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/your-username/vesselwatch.git
-   cd vesselwatch
+   git clone https://github.com/andrewjoelpeters/nextferry.git
+   cd nextferry
    ```
 
 2. **Install dependencies:**

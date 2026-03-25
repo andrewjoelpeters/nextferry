@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-VesselWatch — a real-time Washington State Ferries tracking and delay prediction web app. Python 3.13, FastAPI backend, HTMX frontend, scikit-learn ML models. Deployed on Railway.
+Next Ferry — a real-time Washington State Ferries tracking and delay prediction web app. Python 3.13, FastAPI backend, HTMX frontend, scikit-learn ML models. Deployed on Railway.
 
 ## Commands
 

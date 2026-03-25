@@ -12,17 +12,23 @@ load_dotenv()
 APIAccessCode = os.getenv("WSDOT_API_KEY")
 
 
+WSDOT_BASE = "https://www.wsdot.wa.gov/ferries/api"
+
+
+def _wsdot_headers() -> dict:
+    return {"Authorization": APIAccessCode}
+
+
 def get_vessel_positions() -> list[Vessel]:
     if not APIAccessCode:
         raise Exception("WSDOT_API_KEY environment variable is not set")
 
-    url = f"https://www.wsdot.wa.gov/ferries/api/vessels/rest/vessellocations?apiaccesscode={APIAccessCode}"
+    url = f"{WSDOT_BASE}/vessels/rest/vessellocations"
 
     try:
-        response = requests.get(url)
+        response = requests.get(url, headers=_wsdot_headers())
 
         if not response.ok:
-            # Include more details about the error
             raise Exception(
                 f"HTTP error! status: {response.status_code}, response: {response.text}, url: {url}"
             )
@@ -36,8 +42,8 @@ def get_vessel_positions() -> list[Vessel]:
 
 
 def get_schedule_today(route_id) -> list[RawDirectionalSchedule]:
-    url = f"https://www.wsdot.wa.gov/ferries/api/schedule/rest/scheduletoday/{route_id}/false?apiaccesscode={APIAccessCode}"
-    response = requests.get(url)
+    url = f"{WSDOT_BASE}/schedule/rest/scheduletoday/{route_id}/false"
+    response = requests.get(url, headers=_wsdot_headers())
 
     if not response.ok:
         raise Exception(f"HTTP error! status: {response.status_code}")
@@ -49,8 +55,8 @@ def get_schedule_today(route_id) -> list[RawDirectionalSchedule]:
 
 
 def get_sailing_space():
-    url = f"https://www.wsdot.wa.gov/ferries/api/terminals/rest/terminalsailingspace?apiaccesscode={APIAccessCode}"
-    response = requests.get(url)
+    url = f"{WSDOT_BASE}/terminals/rest/terminalsailingspace"
+    response = requests.get(url, headers=_wsdot_headers())
 
     if not response.ok:
         raise Exception(f"HTTP error! status: {response.status_code}")

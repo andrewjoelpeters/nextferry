@@ -52,6 +52,41 @@
         <div id="model-content" class="dashboard-grid" style="margin-top: var(--md)">
         </div>
     </details>
+
+    <!-- Time Travel: Historical Replay & Error Analysis -->
+    <details class="model-details" id="time-travel-section" style="margin-top: var(--lg)">
+        <summary class="model-summary">Time Travel — Historical Replay &amp; Error Analysis</summary>
+        <div id="time-travel-content" style="margin-top: var(--md)">
+            <div class="tt-controls">
+                <div class="tt-picker-row">
+                    <div class="filter-group">
+                        <label for="tt-date">Date</label>
+                        <input type="date" id="tt-date"
+                            {% if date_range.min_date %}min="{{ date_range.min_date }}"{% endif %}
+                            {% if date_range.max_date %}max="{{ date_range.max_date }}"{% endif %}
+                            {% if date_range.max_date %}value="{{ date_range.max_date }}"{% endif %}
+                        >
+                    </div>
+                    <div class="filter-group">
+                        <label for="tt-time">Time</label>
+                        <input type="time" id="tt-time" value="17:00" step="900">
+                    </div>
+                    <div class="filter-group" style="justify-content: flex-end">
+                        <label>&nbsp;</label>
+                        <button id="tt-go" class="tt-button" onclick="loadTimeTravel()">Go</button>
+                    </div>
+                </div>
+                {% if date_range.days_with_data %}
+                <div class="stat-meta">{{ date_range.days_with_data }} days of data available
+                    {% if date_range.min_date %}({{ date_range.min_date }} to {{ date_range.max_date }}){% endif %}
+                </div>
+                {% else %}
+                <div class="stat-meta">No vessel snapshot data available yet.</div>
+                {% endif %}
+            </div>
+            <div id="tt-results"></div>
+        </div>
+    </details>
 </div>
 
 <script>
@@ -556,4 +591,164 @@
         }
     }
 })();
+
+// --- Time Travel ---
+function loadTimeTravel() {
+    const dateEl = document.getElementById('tt-date');
+    const timeEl = document.getElementById('tt-time');
+    const results = document.getElementById('tt-results');
+    if (!dateEl.value || !timeEl.value) {
+        results.innerHTML = '<div class="stat-meta">Please select a date and time.</div>';
+        return;
+    }
+    const timestamp = dateEl.value + 'T' + timeEl.value + ':00';
+    results.innerHTML = '<div class="loading-state"><div>Loading snapshot...</div></div>';
+
+    fetch('/time-travel-data?timestamp=' + encodeURIComponent(timestamp))
+        .then(r => r.json())
+        .then(data => renderTimeTravel(data, results))
+        .catch(() => {
+            results.innerHTML = '<div class="stat-meta">Failed to load time travel data.</div>';
+        });
+}
+
+function renderTimeTravel(data, container) {
+    if (!data.vessels || data.vessels.length === 0) {
+        container.innerHTML = '<div class="stat-meta">No vessel data found at this time.</div>';
+        return;
+    }
+
+    const ROUTE_LABELS = { 'sea-bi': 'Seattle \u2013 Bainbridge', 'ed-king': 'Kingston \u2013 Edmonds' };
+    const fmtTime = (iso) => {
+        if (!iso) return '\u2013';
+        try {
+            const d = new Date(iso);
+            return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        } catch { return iso; }
+    };
+    const fmtDelay = (min) => {
+        if (min === null || min === undefined) return '\u2013';
+        const sign = min >= 0 ? '+' : '';
+        return sign + min.toFixed(1) + ' min';
+    };
+
+    // Summary: how many predictions, how many within bounds
+    const withPred = data.vessels.filter(v => v.predicted_delay !== undefined && v.actual_delay_minutes !== undefined);
+    let summaryHtml = '';
+    if (withPred.length > 0) {
+        const withinBounds = withPred.filter(v => v.within_bounds).length;
+        const avgError = (withPred.reduce((s, v) => s + Math.abs(v.prediction_error), 0) / withPred.length).toFixed(1);
+        summaryHtml = `
+            <div class="summary-stats" style="margin-bottom: var(--md)">
+                <div class="summary-stat">
+                    <div class="summary-stat-value">${withPred.length}</div>
+                    <div class="summary-stat-label">Predictions</div>
+                </div>
+                <div class="summary-stat">
+                    <div class="summary-stat-value">${avgError} min</div>
+                    <div class="summary-stat-label">Avg |Error|</div>
+                </div>
+                <div class="summary-stat">
+                    <div class="summary-stat-value">${Math.round(withinBounds / withPred.length * 100)}%</div>
+                    <div class="summary-stat-label">Within CI</div>
+                </div>
+            </div>`;
+    }
+
+    if (!data.model_trained) {
+        summaryHtml += '<div class="stat-meta" style="margin-bottom: var(--md)">Model not trained — predictions unavailable. Only actual outcomes shown.</div>';
+    }
+
+    // Vessel cards
+    let cardsHtml = '<div class="tt-cards">';
+    for (const v of data.vessels) {
+        const routeLabel = ROUTE_LABELS[v.route_abbrev] || v.route_abbrev || 'Unknown route';
+        const status = v.at_dock ? 'At Dock' : (v.speed > 0 ? `Underway ${v.speed.toFixed(1)} kn` : 'In Transit');
+        const direction = [v.departing_terminal_name, v.arriving_terminal_name].filter(Boolean).join(' \u2192 ') || '';
+
+        // Prediction vs actual comparison
+        let predActualHtml = '';
+        if (v.predicted_delay !== undefined || v.actual_delay_minutes !== undefined) {
+            predActualHtml = '<div class="tt-comparison">';
+
+            if (v.actual_delay_minutes !== undefined) {
+                const delayClass = v.actual_delay_minutes <= 0 ? 'tt-on-time' : (v.actual_delay_minutes >= 5 ? 'tt-late' : 'tt-minor');
+                predActualHtml += `
+                    <div class="tt-metric">
+                        <div class="tt-metric-label">Actual</div>
+                        <div class="tt-metric-value ${delayClass}">${fmtDelay(v.actual_delay_minutes)}</div>
+                    </div>`;
+            }
+
+            if (v.predicted_delay !== undefined) {
+                predActualHtml += `
+                    <div class="tt-metric">
+                        <div class="tt-metric-label">Predicted</div>
+                        <div class="tt-metric-value">${fmtDelay(v.predicted_delay)}</div>
+                        <div class="tt-metric-sub">[${fmtDelay(v.predicted_lower)} to ${fmtDelay(v.predicted_upper)}]</div>
+                    </div>`;
+            }
+
+            if (v.prediction_error !== undefined) {
+                const errClass = Math.abs(v.prediction_error) <= 2 ? 'tt-on-time' : (Math.abs(v.prediction_error) >= 5 ? 'tt-late' : 'tt-minor');
+                const boundsIcon = v.within_bounds ? '\u2705' : '\u274C';
+                predActualHtml += `
+                    <div class="tt-metric">
+                        <div class="tt-metric-label">Error ${boundsIcon}</div>
+                        <div class="tt-metric-value ${errClass}">${fmtDelay(v.prediction_error)}</div>
+                    </div>`;
+            }
+
+            predActualHtml += '</div>';
+        }
+
+        // Capacity
+        let capHtml = '';
+        if (v.capacity) {
+            const fillClass = v.capacity.fill_pct >= 80 ? 'tt-late' : (v.capacity.fill_pct >= 50 ? 'tt-minor' : 'tt-on-time');
+            capHtml = `
+                <div class="tt-capacity">
+                    <div class="tt-cap-bar-bg">
+                        <div class="tt-cap-bar-fill ${fillClass}" style="width:${Math.min(100, v.capacity.fill_pct)}%"></div>
+                    </div>
+                    <span class="tt-cap-text">${v.capacity.fill_pct}% full (${v.capacity.max_spaces - v.capacity.drive_up_spaces}/${v.capacity.max_spaces} spaces)</span>
+                </div>`;
+        }
+
+        cardsHtml += `
+        <div class="tt-card">
+            <div class="tt-card-header">
+                <div class="tt-vessel-name">${v.vessel_name}</div>
+                <div class="tt-vessel-status">${status}</div>
+            </div>
+            <div class="tt-card-body">
+                <div class="tt-route">${routeLabel}</div>
+                ${direction ? '<div class="tt-direction">' + direction + '</div>' : ''}
+                ${v.scheduled_departure ? '<div class="tt-sched">Scheduled: ' + fmtTime(v.scheduled_departure) + (v.left_dock ? ' \u2022 Departed: ' + fmtTime(v.left_dock) : '') + '</div>' : '<div class="tt-sched">No upcoming sailing</div>'}
+                ${predActualHtml}
+                ${capHtml}
+            </div>
+        </div>`;
+    }
+    cardsHtml += '</div>';
+
+    // Sailings timeline (all sailings in the window)
+    let timelineHtml = '';
+    if (data.all_sailings && data.all_sailings.length > 0) {
+        timelineHtml = '<div class="tt-timeline"><div class="tt-timeline-title">All Sailings in Window</div><table class="tt-timeline-table"><thead><tr><th>Vessel</th><th>Route</th><th>Sched</th><th>Actual</th><th>Delay</th></tr></thead><tbody>';
+        for (const s of data.all_sailings) {
+            const delayClass = s.delay_minutes <= 0 ? 'tt-on-time' : (s.delay_minutes >= 5 ? 'tt-late' : 'tt-minor');
+            timelineHtml += `<tr>
+                <td>${s.vessel_name}</td>
+                <td>${ROUTE_LABELS[s.route_abbrev] || s.route_abbrev || ''}</td>
+                <td>${fmtTime(s.scheduled_departure)}</td>
+                <td>${fmtTime(s.actual_departure)}</td>
+                <td class="${delayClass}">${fmtDelay(s.delay_minutes)}</td>
+            </tr>`;
+        }
+        timelineHtml += '</tbody></table></div>';
+    }
+
+    container.innerHTML = summaryHtml + cardsHtml + timelineHtml;
+}
 </script>

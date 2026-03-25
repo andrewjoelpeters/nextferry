@@ -794,3 +794,179 @@ def get_available_routes() -> list[dict]:
         return [dict(row) for row in rows]
     finally:
         conn.close()
+
+
+# --- Time Travel queries ---
+
+
+def get_data_date_range() -> dict:
+    """Return the min/max dates we have vessel snapshot data for."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                MIN(DATE(collected_at)) as min_date,
+                MAX(DATE(collected_at)) as max_date,
+                COUNT(DISTINCT DATE(collected_at)) as days_with_data
+            FROM vessel_snapshots
+            """
+        ).fetchone()
+        if row and row["min_date"]:
+            return {
+                "min_date": row["min_date"],
+                "max_date": row["max_date"],
+                "days_with_data": row["days_with_data"],
+            }
+        return {"min_date": None, "max_date": None, "days_with_data": 0}
+    finally:
+        conn.close()
+
+
+def get_time_travel_data(timestamp: str) -> dict:
+    """Return vessel states, sailing outcomes, and capacity at a given moment.
+
+    Args:
+        timestamp: ISO 8601 datetime string (e.g. "2024-11-07T20:00:00")
+
+    Returns dict with:
+        - vessels: list of vessel states at that moment
+        - sailings: upcoming sailings from that moment with actual outcomes
+        - capacity: capacity snapshots near that time
+    """
+    conn = get_connection()
+    try:
+        # 1. Get each vessel's most recent snapshot at or before the timestamp
+        vessels = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT
+                    vs.vessel_id, vs.vessel_name, vs.route_abbrev,
+                    vs.departing_terminal_id, vs.departing_terminal_name,
+                    vs.arriving_terminal_id, vs.arriving_terminal_name,
+                    vs.latitude, vs.longitude, vs.speed, vs.heading,
+                    vs.in_service, vs.at_dock, vs.left_dock, vs.eta,
+                    vs.scheduled_departure, vs.collected_at
+                FROM vessel_snapshots vs
+                INNER JOIN (
+                    SELECT vessel_id, MAX(collected_at) as max_collected
+                    FROM vessel_snapshots
+                    WHERE collected_at <= ?
+                    GROUP BY vessel_id
+                ) latest ON vs.vessel_id = latest.vessel_id
+                    AND vs.collected_at = latest.max_collected
+                WHERE vs.in_service = 1
+                ORDER BY vs.vessel_name
+                """,
+                (timestamp,),
+            ).fetchall()
+        ]
+
+        # 2. Find sailing events near this timestamp (window: 2 hours before to
+        #    4 hours after) so we can show what happened with those sailings.
+        sailings = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT
+                    vessel_id, vessel_name, route_abbrev,
+                    departing_terminal_id, arriving_terminal_id,
+                    scheduled_departure, actual_departure,
+                    delay_minutes, day_of_week, hour_of_day
+                FROM sailing_events
+                WHERE scheduled_departure BETWEEN
+                    datetime(?, '-2 hours') AND datetime(?, '+4 hours')
+                ORDER BY scheduled_departure
+                """,
+                (timestamp, timestamp),
+            ).fetchall()
+        ]
+
+        # 3. Get capacity snapshots near this timestamp (closest snapshot per sailing)
+        capacity = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT
+                    departing_terminal_id, departing_terminal_name,
+                    arriving_terminal_id, arriving_terminal_name,
+                    departure_time, vessel_name, vessel_id,
+                    max_space_count, drive_up_space_count,
+                    collected_at
+                FROM sailing_space_snapshots
+                WHERE collected_at = (
+                    SELECT MAX(s2.collected_at)
+                    FROM sailing_space_snapshots s2
+                    WHERE s2.departing_terminal_id = sailing_space_snapshots.departing_terminal_id
+                      AND s2.departure_time = sailing_space_snapshots.departure_time
+                      AND s2.collected_at <= ?
+                )
+                AND departure_time >= ?
+                AND departure_time <= datetime(?, '+4 hours')
+                ORDER BY departure_time
+                """,
+                (timestamp, timestamp, timestamp),
+            ).fetchall()
+        ]
+
+        # 4. For prediction replay: get each vessel's previous sailing delay
+        #    (the "current_vessel_delay_minutes" the model would have seen)
+        vessel_delays = {}
+        for v in vessels:
+            if v["scheduled_departure"]:
+                row = conn.execute(
+                    """
+                    SELECT
+                        (julianday(left_dock) - julianday(scheduled_departure)) * 24 * 60
+                            AS delay_minutes
+                    FROM vessel_snapshots
+                    WHERE vessel_id = ?
+                      AND collected_at <= ?
+                      AND left_dock IS NOT NULL
+                      AND scheduled_departure IS NOT NULL
+                      AND left_dock != '' AND scheduled_departure != ''
+                      AND scheduled_departure != ?
+                    ORDER BY collected_at DESC
+                    LIMIT 1
+                    """,
+                    (v["vessel_id"], timestamp, v["scheduled_departure"]),
+                ).fetchone()
+                if row:
+                    vessel_delays[v["vessel_id"]] = row["delay_minutes"]
+
+        # 5. Get turnaround minutes for vessels at dock
+        vessel_turnarounds = {}
+        for v in vessels:
+            if v["at_dock"] and v["scheduled_departure"]:
+                row = conn.execute(
+                    """
+                    SELECT MIN(collected_at) as docked_at
+                    FROM vessel_snapshots
+                    WHERE vessel_id = ?
+                      AND at_dock = 1
+                      AND scheduled_departure = ?
+                      AND collected_at <= ?
+                    """,
+                    (v["vessel_id"], v["scheduled_departure"], timestamp),
+                ).fetchone()
+                if row and row["docked_at"]:
+                    try:
+                        docked_dt = datetime.fromisoformat(row["docked_at"])
+                        ts_dt = datetime.fromisoformat(timestamp)
+                        docked_dt = docked_dt.replace(tzinfo=None)
+                        ts_dt = ts_dt.replace(tzinfo=None)
+                        mins = (ts_dt - docked_dt).total_seconds() / 60
+                        vessel_turnarounds[v["vessel_id"]] = max(0, mins)
+                    except (ValueError, TypeError):
+                        pass
+
+        return {
+            "vessels": vessels,
+            "sailings": sailings,
+            "capacity": capacity,
+            "vessel_delays": vessel_delays,
+            "vessel_turnarounds": vessel_turnarounds,
+        }
+    finally:
+        conn.close()

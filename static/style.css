@@ -1009,3 +1009,218 @@ header h1 {
 .model-summary:hover {
     background: #f8fafc;
 }
+
+/* --- Time Travel --- */
+
+.tt-controls {
+    margin-bottom: var(--lg);
+}
+
+.tt-picker-row {
+    display: flex;
+    gap: var(--md);
+    flex-wrap: wrap;
+    padding: var(--md);
+    background: white;
+    border-radius: 1rem;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    margin-bottom: var(--sm);
+}
+
+.tt-picker-row input[type="date"],
+.tt-picker-row input[type="time"] {
+    padding: 8px 12px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 0.5rem;
+    font-size: var(--text-sm);
+    color: var(--ocean-deep);
+}
+
+.tt-button {
+    padding: 8px 20px;
+    background: var(--ocean-deep);
+    color: white;
+    border: none;
+    border-radius: 0.5rem;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.tt-button:hover {
+    background: var(--ocean-surface);
+}
+
+.tt-cards {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--md);
+    margin-bottom: var(--lg);
+}
+
+@media (min-width: 640px) {
+    .tt-cards {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+.tt-card {
+    background: white;
+    border-radius: 1rem;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    overflow: hidden;
+}
+
+.tt-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--sm) var(--md);
+    background: var(--ocean-deep);
+    color: white;
+}
+
+.tt-vessel-name {
+    font-weight: 600;
+    font-size: var(--text-sm);
+}
+
+.tt-vessel-status {
+    font-size: var(--text-xs);
+    opacity: 0.85;
+}
+
+.tt-card-body {
+    padding: var(--md);
+}
+
+.tt-route {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--ocean-deep);
+    margin-bottom: 2px;
+}
+
+.tt-direction {
+    font-size: var(--text-xs);
+    color: var(--deck-gray);
+    margin-bottom: var(--sm);
+}
+
+.tt-sched {
+    font-size: var(--text-xs);
+    color: var(--deck-gray);
+    margin-bottom: var(--sm);
+}
+
+.tt-comparison {
+    display: flex;
+    gap: var(--md);
+    flex-wrap: wrap;
+    padding: var(--sm);
+    background: #f8fafc;
+    border-radius: 0.5rem;
+    margin-bottom: var(--sm);
+}
+
+.tt-metric {
+    text-align: center;
+    flex: 1;
+    min-width: 60px;
+}
+
+.tt-metric-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--deck-gray);
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.tt-metric-value {
+    font-size: var(--text-sm);
+    font-weight: 700;
+}
+
+.tt-metric-sub {
+    font-size: 10px;
+    color: var(--deck-gray);
+}
+
+.tt-on-time { color: var(--success-green); }
+.tt-minor { color: var(--ocean-surface); }
+.tt-late { color: var(--danger-red); }
+
+.tt-capacity {
+    margin-top: var(--xs);
+}
+
+.tt-cap-bar-bg {
+    height: 6px;
+    background: #e2e8f0;
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 4px;
+}
+
+.tt-cap-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s;
+}
+
+.tt-cap-bar-fill.tt-on-time { background: var(--success-green); }
+.tt-cap-bar-fill.tt-minor { background: #eab308; }
+.tt-cap-bar-fill.tt-late { background: var(--danger-red); }
+
+.tt-cap-text {
+    font-size: 10px;
+    color: var(--deck-gray);
+}
+
+.tt-timeline {
+    background: white;
+    border-radius: 1rem;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    overflow: hidden;
+}
+
+.tt-timeline-title {
+    background: var(--ocean-deep);
+    color: white;
+    padding: var(--sm) var(--md);
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+
+.tt-timeline-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-xs);
+}
+
+.tt-timeline-table th {
+    text-align: left;
+    padding: var(--sm) var(--md);
+    font-weight: 600;
+    color: var(--deck-gray);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    font-size: 10px;
+}
+
+.tt-timeline-table td {
+    padding: var(--sm) var(--md);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+}
+
+.tt-timeline-table tr:last-child td {
+    border-bottom: none;
+}
+
+.tt-timeline-table tr:hover {
+    background: #f8fafc;
+}

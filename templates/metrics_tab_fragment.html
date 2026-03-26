@@ -1,0 +1,306 @@
+<!-- User Metrics Dashboard Tab -->
+<div class="dashboard-container">
+    <div id="metrics-content" class="dashboard-grid">
+        <div class="loading-state">
+            <div>Loading metrics data...</div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const OCEAN_DEEP = '#1e3a8a';
+    const OCEAN_SURFACE = '#3b82f6';
+    const SUCCESS_GREEN = '#10b981';
+    const DECK_GRAY = '#64748b';
+    const CHART_COLORS = [OCEAN_DEEP, OCEAN_SURFACE, SUCCESS_GREEN, '#8b5cf6', '#f59e0b', '#ef4444', '#06b6d4'];
+
+    const chartDefaults = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                backgroundColor: 'rgba(10, 22, 40, 0.9)',
+                titleFont: { size: 13 },
+                bodyFont: { size: 12 },
+                cornerRadius: 8,
+                padding: 10,
+            },
+        },
+        scales: {
+            x: {
+                grid: { display: false },
+                ticks: { color: DECK_GRAY, font: { size: 11 } },
+            },
+            y: {
+                grid: { color: 'rgba(0,0,0,0.05)' },
+                ticks: { color: DECK_GRAY, font: { size: 11 } },
+            },
+        },
+    };
+
+    function mergeOpts(overrides) {
+        return JSON.parse(JSON.stringify({...chartDefaults, ...overrides}));
+    }
+
+    fetch('/metrics-data')
+        .then(r => r.json())
+        .then(data => render(data))
+        .catch(() => {
+            document.getElementById('metrics-content').innerHTML =
+                '<div class="loading-state"><div>Unable to load metrics data.</div></div>';
+        });
+
+    function render(data) {
+        const container = document.getElementById('metrics-content');
+        let html = '';
+
+        // Summary stats
+        html += `
+        <div class="dash-card dash-card-wide">
+            <div class="dash-card-header">Traffic Summary (Last ${data.period_days} Days)</div>
+            <div class="dash-card-body" style="display: flex; gap: var(--xl); flex-wrap: wrap;">
+                <div style="text-align: center; flex: 1; min-width: 120px;">
+                    <div style="font-size: var(--text-2xl, 1.5rem); font-weight: 700; color: var(--ocean-deep, ${OCEAN_DEEP});">
+                        ${data.total_views.toLocaleString()}
+                    </div>
+                    <div class="stat-meta">Page Views</div>
+                </div>
+                <div style="text-align: center; flex: 1; min-width: 120px;">
+                    <div style="font-size: var(--text-2xl, 1.5rem); font-weight: 700; color: var(--ocean-deep, ${OCEAN_DEEP});">
+                        ${data.unique_visitors.toLocaleString()}
+                    </div>
+                    <div class="stat-meta">Unique Visitors</div>
+                </div>
+                <div style="text-align: center; flex: 1; min-width: 120px;">
+                    <div style="font-size: var(--text-2xl, 1.5rem); font-weight: 700; color: var(--ocean-deep, ${OCEAN_DEEP});">
+                        ${data.unique_visitors > 0 ? (data.total_views / data.unique_visitors).toFixed(1) : '0'}
+                    </div>
+                    <div class="stat-meta">Views / Visitor</div>
+                </div>
+            </div>
+        </div>`;
+
+        // Daily traffic chart
+        if (data.daily_traffic.length > 0) {
+            html += `
+            <div class="dash-card dash-card-wide">
+                <div class="dash-card-header">Daily Traffic</div>
+                <div class="dash-card-body"><div class="chart-wrap"><canvas id="chart-daily-traffic"></canvas></div></div>
+            </div>`;
+        }
+
+        // Device breakdown
+        if (data.device_breakdown.length > 0) {
+            html += `
+            <div class="dash-card">
+                <div class="dash-card-header">Devices</div>
+                <div class="dash-card-body"><div class="chart-wrap"><canvas id="chart-devices"></canvas></div></div>
+            </div>`;
+        }
+
+        // Browser breakdown
+        if (data.browser_breakdown.length > 0) {
+            html += `
+            <div class="dash-card">
+                <div class="dash-card-header">Browsers</div>
+                <div class="dash-card-body"><div class="chart-wrap"><canvas id="chart-browsers"></canvas></div></div>
+            </div>`;
+        }
+
+        // OS breakdown
+        if (data.os_breakdown.length > 0) {
+            html += `
+            <div class="dash-card">
+                <div class="dash-card-header">Operating Systems</div>
+                <div class="dash-card-body"><div class="chart-wrap"><canvas id="chart-os"></canvas></div></div>
+            </div>`;
+        }
+
+        // Hourly traffic
+        if (data.hourly_traffic.length > 0) {
+            html += `
+            <div class="dash-card">
+                <div class="dash-card-header">Traffic by Hour</div>
+                <div class="dash-card-body"><div class="chart-wrap"><canvas id="chart-hourly"></canvas></div></div>
+            </div>`;
+        }
+
+        // Top pages
+        if (data.views_by_path.length > 0) {
+            html += `
+            <div class="dash-card dash-card-wide">
+                <div class="dash-card-header">Top Pages</div>
+                <div class="dash-card-body"><div class="chart-wrap"><canvas id="chart-pages"></canvas></div></div>
+            </div>`;
+        }
+
+        container.innerHTML = html;
+
+        // --- Render charts ---
+
+        // Daily traffic
+        if (data.daily_traffic.length > 0) {
+            const daily = data.daily_traffic.slice(-30);
+            new Chart(document.getElementById('chart-daily-traffic'), {
+                type: 'line',
+                data: {
+                    labels: daily.map(d => {
+                        const dt = new Date(d.date + 'T00:00:00');
+                        return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    }),
+                    datasets: [
+                        {
+                            label: 'Page Views',
+                            data: daily.map(d => d.views),
+                            borderColor: OCEAN_SURFACE,
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 2,
+                            pointHoverRadius: 5,
+                        },
+                        {
+                            label: 'Unique Visitors',
+                            data: daily.map(d => d.visitors),
+                            borderColor: OCEAN_DEEP,
+                            backgroundColor: 'rgba(30, 58, 138, 0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 2,
+                            pointHoverRadius: 5,
+                        },
+                    ],
+                },
+                options: {
+                    ...mergeOpts({}),
+                    plugins: {
+                        ...chartDefaults.plugins,
+                        legend: { display: true, position: 'top', labels: { usePointStyle: true, boxWidth: 6, boxHeight: 6, font: { size: 11 } } },
+                    },
+                },
+            });
+        }
+
+        // Device breakdown (doughnut)
+        if (data.device_breakdown.length > 0) {
+            new Chart(document.getElementById('chart-devices'), {
+                type: 'doughnut',
+                data: {
+                    labels: data.device_breakdown.map(d => d.device_type),
+                    datasets: [{
+                        data: data.device_breakdown.map(d => d.visitors),
+                        backgroundColor: CHART_COLORS.slice(0, data.device_breakdown.length),
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: true, position: 'bottom', labels: { font: { size: 11 }, padding: 12 } },
+                        tooltip: chartDefaults.plugins.tooltip,
+                    },
+                },
+            });
+        }
+
+        // Browser breakdown (doughnut)
+        if (data.browser_breakdown.length > 0) {
+            const browsers = data.browser_breakdown.slice(0, 6);
+            new Chart(document.getElementById('chart-browsers'), {
+                type: 'doughnut',
+                data: {
+                    labels: browsers.map(d => d.browser),
+                    datasets: [{
+                        data: browsers.map(d => d.visitors),
+                        backgroundColor: CHART_COLORS.slice(0, browsers.length),
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: true, position: 'bottom', labels: { font: { size: 11 }, padding: 12 } },
+                        tooltip: chartDefaults.plugins.tooltip,
+                    },
+                },
+            });
+        }
+
+        // OS breakdown (horizontal bar)
+        if (data.os_breakdown.length > 0) {
+            const osList = data.os_breakdown.slice(0, 6);
+            new Chart(document.getElementById('chart-os'), {
+                type: 'bar',
+                data: {
+                    labels: osList.map(d => d.os),
+                    datasets: [{
+                        data: osList.map(d => d.visitors),
+                        backgroundColor: CHART_COLORS.slice(0, osList.length),
+                        borderRadius: 6,
+                    }],
+                },
+                options: {
+                    ...mergeOpts({}),
+                    indexAxis: 'y',
+                    scales: {
+                        x: { ...chartDefaults.scales.x, title: { display: true, text: 'Visitors', color: DECK_GRAY } },
+                        y: { ...chartDefaults.scales.y, grid: { display: false } },
+                    },
+                },
+            });
+        }
+
+        // Hourly traffic (bar)
+        if (data.hourly_traffic.length > 0) {
+            new Chart(document.getElementById('chart-hourly'), {
+                type: 'bar',
+                data: {
+                    labels: data.hourly_traffic.map(d => d.hour + ':00'),
+                    datasets: [{
+                        data: data.hourly_traffic.map(d => d.views),
+                        backgroundColor: data.hourly_traffic.map(d =>
+                            ((d.hour >= 6 && d.hour <= 9) || (d.hour >= 15 && d.hour <= 19))
+                                ? OCEAN_DEEP : OCEAN_SURFACE
+                        ),
+                        borderRadius: 4,
+                    }],
+                },
+                options: {
+                    ...mergeOpts({}),
+                    scales: {
+                        ...chartDefaults.scales,
+                        y: { ...chartDefaults.scales.y, title: { display: true, text: 'Page Views', color: DECK_GRAY } },
+                    },
+                },
+            });
+        }
+
+        // Top pages (horizontal bar)
+        if (data.views_by_path.length > 0) {
+            const PATH_LABELS = { '/': 'Home', '/sailings-tab': 'Sailings', '/map-tab': 'Map', '/predictions-tab': 'Predictions', '/metrics-tab': 'Metrics' };
+            const pages = data.views_by_path.slice(0, 8);
+            new Chart(document.getElementById('chart-pages'), {
+                type: 'bar',
+                data: {
+                    labels: pages.map(d => PATH_LABELS[d.path] || d.path),
+                    datasets: [{
+                        data: pages.map(d => d.views),
+                        backgroundColor: OCEAN_SURFACE,
+                        borderRadius: 6,
+                    }],
+                },
+                options: {
+                    ...mergeOpts({}),
+                    indexAxis: 'y',
+                    scales: {
+                        x: { ...chartDefaults.scales.x, title: { display: true, text: 'Page Views', color: DECK_GRAY } },
+                        y: { ...chartDefaults.scales.y, grid: { display: false } },
+                    },
+                },
+            });
+        }
+    }
+})();
+</script>

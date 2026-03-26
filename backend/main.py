@@ -16,12 +16,14 @@ from fastapi.templating import Jinja2Templates
 from .data_collector import collect_data
 from .database import (
     get_dashboard_data,
+    get_metrics_data,
     get_sailing_event_count,
     get_snapshot_count,
     init_db,
 )
 from .display_processing import process_routes_for_display
 from .fill_predictor import fill_predictor
+from .metrics import track_request
 from .ml_predictor import predictor as ml_predictor
 from .next_sailings import (
     CACHED_DELAYS,
@@ -158,6 +160,21 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    """Track page views for user metrics."""
+    response = await call_next(request)
+    if response.status_code == 200:
+        track_request(
+            path=request.url.path,
+            client_ip=request.client.host if request.client else "unknown",
+            user_agent_str=request.headers.get("user-agent", ""),
+            referrer=request.headers.get("referer"),
+        )
+    return response
+
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
@@ -324,6 +341,18 @@ async def get_predictions_data():
     }
 
     return {**dashboard, "model": model_info}
+
+
+@app.get("/metrics-tab", response_class=HTMLResponse)
+async def get_metrics_tab(request: Request):
+    """Return the user metrics dashboard tab content."""
+    return templates.TemplateResponse("metrics_tab_fragment.html", {"request": request})
+
+
+@app.get("/metrics-data")
+async def get_metrics_data_endpoint(days: int = 30):
+    """Return user metrics as JSON."""
+    return get_metrics_data(days=days)
 
 
 @app.get("/debug/cache-status")

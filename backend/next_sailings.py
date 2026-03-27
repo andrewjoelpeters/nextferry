@@ -21,6 +21,11 @@ try:
 except ImportError:
     ml_predictor = None
 
+try:
+    from .dock_predictor import dock_predictor
+except ImportError:
+    dock_predictor = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -153,6 +158,59 @@ def propigate_delays(
     return sailings
 
 
+def _apply_dock_prediction(
+    sailing: DirectionalSailing, vessel: Vessel
+) -> None:
+    """Override delay prediction for the current at-dock sailing using the dock model.
+
+    Falls back to flat delay propagation (vessel's cached delay) if the dock
+    model isn't available.
+    """
+    now = datetime.now(tz=ZoneInfo("America/Los_Angeles"))
+
+    # Compute minutes_at_dock from vessel.eta (arrival/dock time)
+    minutes_at_dock = 0.0
+    if vessel.eta:
+        eta = vessel.eta
+        if eta.tzinfo is None:
+            eta = eta.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
+        minutes_at_dock = max(0, (now - eta).total_seconds() / 60)
+
+    time_diff = sailing.scheduled_departure - now
+    minutes_until = max(0, time_diff.total_seconds() / 60)
+
+    delay_minutes = datetime_to_minutes(vessel.delay) if vessel.delay else 0
+
+    route_abbrev = None
+    for route in ROUTES:
+        if sailing.departing_terminal_id in route["terminals"]:
+            route_abbrev = route["route_name"]
+            break
+
+    if dock_predictor and dock_predictor.is_trained and route_abbrev:
+        prediction = dock_predictor.predict(
+            route_abbrev=route_abbrev,
+            departing_terminal_id=sailing.departing_terminal_id,
+            vessel_id=vessel.vessel_id,
+            day_of_week=sailing.scheduled_departure.weekday(),
+            hour_of_day=sailing.scheduled_departure.hour,
+            minutes_until_scheduled_departure=minutes_until,
+            minutes_at_dock=minutes_at_dock,
+            current_vessel_delay_minutes=delay_minutes,
+        )
+        if prediction:
+            sailing.delay_in_minutes = round(prediction["predicted_delay"])
+            sailing.delay_lower_bound = round(prediction["lower_bound"])
+            sailing.delay_upper_bound = round(prediction["upper_bound"])
+            return
+
+    # Fallback: use the vessel's actual cached delay (flat propagation)
+    if vessel.delay:
+        sailing.delay_in_minutes = delay_minutes
+        sailing.delay_lower_bound = None
+        sailing.delay_upper_bound = None
+
+
 def get_next_sailings_by_boat(
     schedule_by_boat: dict[int, list[DirectionalSailing]], route_vessels: list[Vessel]
 ) -> dict[int, list[DirectionalSailing]]:
@@ -227,6 +285,11 @@ def get_next_sailings_by_boat(
                     first.vessel_delay_minutes = datetime_to_minutes(
                         current_vessel.delay
                     )
+
+                # For at-dock vessels, use the dock predictor instead of
+                # the en-route ML model for the current sailing.
+                if current_vessel.at_dock and first.scheduled_departure:
+                    _apply_dock_prediction(first, current_vessel)
 
         next_sailings_by_boat[vessel_position_num] = next_sailings
 

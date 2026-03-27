@@ -21,6 +21,7 @@ from .database import (
     init_db,
 )
 from .display_processing import process_routes_for_display
+from .dock_predictor import dock_predictor
 from .fill_predictor import fill_predictor
 from .ml_predictor import predictor as ml_predictor
 from .next_sailings import (
@@ -69,6 +70,7 @@ async def retrain_model_daily():
     logger.info("Attempting to load saved ML models...")
     ml_predictor.load()
     fill_predictor.load()
+    dock_predictor.load()
 
     # If no models found, try an immediate background train
     if not ml_predictor.is_trained:
@@ -83,6 +85,19 @@ async def retrain_model_daily():
                 logger.info("Delay model training skipped (insufficient data)")
         except Exception as e:
             logger.error(f"Initial delay model training failed: {e}")
+
+    if not dock_predictor.is_trained:
+        logger.info("No at-dock model found, attempting background train...")
+        try:
+            if dock_predictor.train():
+                dock_predictor.save()
+                logger.info(
+                    f"Initial at-dock model trained on {dock_predictor.training_data_size} rows"
+                )
+            else:
+                logger.info("At-dock model training skipped (insufficient data)")
+        except Exception as e:
+            logger.error(f"Initial at-dock model training failed: {e}")
 
     if not fill_predictor.is_trained:
         logger.info("No fill risk model found, attempting background train...")
@@ -122,6 +137,12 @@ async def retrain_model_daily():
                 fill_predictor.save()
                 logger.info(
                     f"Fill risk model retrained on {fill_predictor.training_data_size} sailings"
+                )
+
+            if dock_predictor.train():
+                dock_predictor.save()
+                logger.info(
+                    f"At-dock model retrained on {dock_predictor.training_data_size} rows"
                 )
 
         except asyncio.CancelledError:

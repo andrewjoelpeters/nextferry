@@ -224,15 +224,9 @@ def get_next_sailings_by_boat(
                 first.vessel_left_dock = current_vessel.left_dock
                 first.vessel_eta = current_vessel.eta
                 if current_vessel.delay:
-                    actual_delay = datetime_to_minutes(current_vessel.delay)
-                    first.vessel_delay_minutes = actual_delay
-                    # For the current sailing, use the actual vessel delay
-                    # instead of the ML prediction — the observed delay is
-                    # more accurate than the model for the immediate departure.
-                    if current_vessel.at_dock:
-                        first.delay_in_minutes = actual_delay
-                        first.delay_lower_bound = None
-                        first.delay_upper_bound = None
+                    first.vessel_delay_minutes = datetime_to_minutes(
+                        current_vessel.delay
+                    )
 
         next_sailings_by_boat[vessel_position_num] = next_sailings
 

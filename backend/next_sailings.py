@@ -225,9 +225,7 @@ def propigate_delays(
     return sailings
 
 
-def _apply_dock_prediction(
-    sailing: DirectionalSailing, vessel: Vessel
-) -> None:
+def _apply_dock_prediction(sailing: DirectionalSailing, vessel: Vessel) -> None:
     """Predict departure delay for the current at-dock sailing.
 
     Two-model architecture:
@@ -312,7 +310,9 @@ def _apply_dock_prediction(
         vessel_name=vessel.vessel_name,
         sailing=sailing,
         source="fallback_flat",
-        inputs={"current_vessel_delay_minutes": delay_minutes if vessel.delay else None},
+        inputs={
+            "current_vessel_delay_minutes": delay_minutes if vessel.delay else None
+        },
         prediction=None,
         fallback_reason=(
             "model not trained"
@@ -338,9 +338,7 @@ def _get_incoming_fullness(sailing: DirectionalSailing) -> float | None:
     """
     try:
         sched_iso = sailing.scheduled_departure.isoformat()
-        return get_previous_sailing_fullness(
-            sailing.departing_terminal_id, sched_iso
-        )
+        return get_previous_sailing_fullness(sailing.departing_terminal_id, sched_iso)
     except Exception:
         return None
 

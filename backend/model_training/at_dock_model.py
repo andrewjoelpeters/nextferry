@@ -103,13 +103,11 @@ class AtDockGBTModel:
     def predict(self, test_df: pd.DataFrame) -> pd.DataFrame:
         X_test = self._encode(test_df)
         out = test_df.copy()
+        lower_model = self.models.get("q15") or self.models["q10"]
+        upper_model = self.models.get("q85") or self.models["q90"]
         out["predicted_delay"] = self.models["q50"].predict(X_test)
-        out["lower_bound"] = self.models.get("q15", self.models.get("q10")).predict(
-            X_test
-        )
-        out["upper_bound"] = self.models.get("q85", self.models.get("q90")).predict(
-            X_test
-        )
+        out["lower_bound"] = lower_model.predict(X_test)
+        out["upper_bound"] = upper_model.predict(X_test)
         return out
 
     def predict_single(
@@ -152,13 +150,13 @@ class AtDockGBTModel:
             ]
         )
 
-        lower_model = self.models.get("q15") or self.models.get("q10")
-        upper_model = self.models.get("q85") or self.models.get("q90")
+        lower = self.models.get("q15") or self.models["q10"]
+        upper = self.models.get("q85") or self.models["q90"]
         X = self._encode(row)
         return {
             "predicted_delay": round(float(self.models["q50"].predict(X)[0]), 1),
-            "lower_bound": round(float(lower_model.predict(X)[0]), 1),
-            "upper_bound": round(float(upper_model.predict(X)[0]), 1),
+            "lower_bound": round(float(lower.predict(X)[0]), 1),
+            "upper_bound": round(float(upper.predict(X)[0]), 1),
         }
 
     def save(self, path) -> None:

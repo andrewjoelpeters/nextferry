@@ -163,7 +163,9 @@ class DockPredictor:
                 first_dock, on=["vessel_id", "scheduled_departure"], how="left"
             )
             merged["minutes_at_dock"] = (
-                (merged["collected_at_dt"] - merged["first_docked_at"]).dt.total_seconds()
+                (
+                    merged["collected_at_dt"] - merged["first_docked_at"]
+                ).dt.total_seconds()
                 / 60
             ).clip(lower=0)
 
@@ -260,8 +262,7 @@ class DockPredictor:
                 ).dt.tz_localize(None)
                 inbound_df["inbound_fullness"] = (
                     1.0
-                    - inbound_df["drive_up_space_count"]
-                    / inbound_df["max_space_count"]
+                    - inbound_df["drive_up_space_count"] / inbound_df["max_space_count"]
                 )
 
                 # For each inbound sailing, keep only the last snapshot
@@ -341,17 +342,21 @@ class DockPredictor:
                 delays_df.sort_values("collected_at_dt", inplace=True)
                 merged = pd.merge_asof(
                     merged,
-                    delays_df[["vessel_id", "collected_at_dt", "snap_sched_dep",
-                               "snap_delay_minutes"]],
+                    delays_df[
+                        [
+                            "vessel_id",
+                            "collected_at_dt",
+                            "snap_sched_dep",
+                            "snap_delay_minutes",
+                        ]
+                    ],
                     on="collected_at_dt",
                     by="vessel_id",
                     direction="backward",
                     suffixes=("", "_delay"),
                 )
                 # Exclude same-sailing snapshots
-                same_sailing = (
-                    merged["snap_sched_dep"] == merged["scheduled_departure"]
-                )
+                same_sailing = merged["snap_sched_dep"] == merged["scheduled_departure"]
                 merged.loc[same_sailing, "snap_delay_minutes"] = np.nan
                 merged["current_vessel_delay_minutes"] = merged[
                     "snap_delay_minutes"
@@ -475,6 +480,8 @@ class DockPredictor:
             return None
 
     def save(self, path: Path | None = None):
+        if self._model is None:
+            return
         model_dir = path or get_volume_model_dir()
         model_dir.mkdir(parents=True, exist_ok=True)
         self._model.save(model_dir / _MODEL_FILENAME)
@@ -497,6 +504,9 @@ class DockPredictor:
 
         try:
             model = AtDockGBTModel.load(model_path)
+            if model is None:
+                logger.warning("Failed to load at-dock model from disk")
+                return False
             if model._feature_cols != AT_DOCK_FEATURE_COLS:
                 logger.warning(
                     f"At-dock model has stale features "

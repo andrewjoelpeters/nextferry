@@ -249,17 +249,14 @@ def _feature_importance_section(feature_importance: dict) -> list:
         lines.append("### By Route")
         lines.append("")
         # Side-by-side header
-        lines.append(
-            "| Feature | " + " | ".join(route_keys) + " |"
-        )
+        lines.append("| Feature | " + " | ".join(route_keys) + " |")
         lines.append("|---|" + "|".join(["---"] * len(route_keys)) + "|")
 
         # Build lookup: route -> {feature: importance}
         route_maps = {}
         for route in route_keys:
             route_maps[route] = {
-                f["feature"]: f["importance"]
-                for f in feature_importance[route]
+                f["feature"]: f["importance"] for f in feature_importance[route]
             }
 
         # Use overall ordering

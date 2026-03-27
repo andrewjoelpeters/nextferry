@@ -27,9 +27,7 @@ from .report import generate_markdown_report
 logger = logging.getLogger(__name__)
 
 
-def _compute_feature_importance(
-    df, n_repeats: int = 5
-) -> dict:
+def _compute_feature_importance(df, n_repeats: int = 5) -> dict:
     """Compute permutation importance overall and per route."""
     results = {}
 
@@ -51,8 +49,7 @@ def _compute_feature_importance(
             key=lambda x: -x[1],
         )
         return [
-            {"feature": feat, "importance": round(float(imp), 4)}
-            for feat, imp in pairs
+            {"feature": feat, "importance": round(float(imp), 4)} for feat, imp in pairs
         ]
 
     results["overall"] = _importance(df)
@@ -158,14 +155,8 @@ def run_at_dock_backtest(
         f"{'Pinball Loss':<25} {ba['overall_pinball_loss']:>14.2f} "
         f"{ga['overall_pinball_loss']:>14.2f}"
     )
-    print(
-        f"{'MAE':<25} {ba['overall_mae']:>14.2f} "
-        f"{ga['overall_mae']:>14.2f}"
-    )
-    print(
-        f"{'Bias':<25} {ba['overall_bias']:>+14.2f} "
-        f"{ga['overall_bias']:>+14.2f}"
-    )
+    print(f"{'MAE':<25} {ba['overall_mae']:>14.2f} {ga['overall_mae']:>14.2f}")
+    print(f"{'Bias':<25} {ba['overall_bias']:>+14.2f} {ga['overall_bias']:>+14.2f}")
     print(
         f"{'p90 (tail risk)':<25} {ba['overall_error_p90']:>+14.2f} "
         f"{ga['overall_error_p90']:>+14.2f}"

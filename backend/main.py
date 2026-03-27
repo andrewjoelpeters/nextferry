@@ -21,10 +21,12 @@ from .database import (
     init_db,
 )
 from .display_processing import process_routes_for_display
+from .dock_predictor import dock_predictor
 from .fill_predictor import fill_predictor
 from .ml_predictor import predictor as ml_predictor
 from .next_sailings import (
     CACHED_DELAYS,
+    get_last_predictions,
     get_next_sailings,
     get_vessels_with_delays,
 )
@@ -69,6 +71,7 @@ async def retrain_model_daily():
     logger.info("Attempting to load saved ML models...")
     ml_predictor.load()
     fill_predictor.load()
+    dock_predictor.load()
 
     # If no models found, try an immediate background train
     if not ml_predictor.is_trained:
@@ -83,6 +86,19 @@ async def retrain_model_daily():
                 logger.info("Delay model training skipped (insufficient data)")
         except Exception as e:
             logger.error(f"Initial delay model training failed: {e}")
+
+    if not dock_predictor.is_trained:
+        logger.info("No at-dock model found, attempting background train...")
+        try:
+            if dock_predictor.train():
+                dock_predictor.save()
+                logger.info(
+                    f"Initial at-dock model trained on {dock_predictor.training_data_size} rows"
+                )
+            else:
+                logger.info("At-dock model training skipped (insufficient data)")
+        except Exception as e:
+            logger.error(f"Initial at-dock model training failed: {e}")
 
     if not fill_predictor.is_trained:
         logger.info("No fill risk model found, attempting background train...")
@@ -122,6 +138,12 @@ async def retrain_model_daily():
                 fill_predictor.save()
                 logger.info(
                     f"Fill risk model retrained on {fill_predictor.training_data_size} sailings"
+                )
+
+            if dock_predictor.train():
+                dock_predictor.save()
+                logger.info(
+                    f"At-dock model retrained on {dock_predictor.training_data_size} rows"
                 )
 
         except asyncio.CancelledError:
@@ -356,6 +378,16 @@ async def debug_model_status():
             "training_data_size": ml_predictor.training_data_size,
             "evaluation_metrics": ml_predictor.last_evaluation,
         },
+        "dock_model": {
+            "is_trained": dock_predictor.is_trained,
+            "last_trained": (
+                dock_predictor.last_trained.isoformat()
+                if dock_predictor.last_trained
+                else None
+            ),
+            "training_data_size": dock_predictor.training_data_size,
+            "evaluation_metrics": dock_predictor.last_evaluation,
+        },
         "fill_risk_model": {
             "is_trained": fill_predictor.is_trained,
             "last_trained": (
@@ -371,3 +403,17 @@ async def debug_model_status():
             "sailing_event_count": get_sailing_event_count(),
         },
     }
+
+
+@app.get("/debug/predictions")
+async def debug_predictions():
+    """Show the most recent predictions for all vessels on active routes.
+
+    Each vessel entry contains every sailing prediction from the last cache
+    cycle (~30s), including:
+    - source: which model made the prediction (dock_model, en_route_model,
+      fallback_flat)
+    - inputs: the full feature dict passed to the model
+    - prediction: the model output (delay, lower_bound, upper_bound)
+    """
+    return get_last_predictions()

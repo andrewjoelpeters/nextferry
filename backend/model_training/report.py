@@ -150,6 +150,11 @@ def generate_markdown_report(
             lines.extend(_metric_table(data, key_label))
             lines.append("")
 
+    # ---- Feature Importance ----
+    feature_importance = backtest_results.get("feature_importance")
+    if feature_importance:
+        lines.extend(_feature_importance_section(feature_importance))
+
     # ---- Raw JSON ----
     lines.append("## Raw Results (JSON)")
     lines.append("")
@@ -218,6 +223,52 @@ def _comparison_section(agg: dict, prev: dict) -> list:
             lines.append(f"| {r} | {pp} | {cp} | {pp90_s} | {cp90_s} | {delta} |")
 
     lines.append("")
+    return lines
+
+
+def _feature_importance_section(feature_importance: dict) -> list:
+    """Render permutation importance tables (overall + per route)."""
+    lines = []
+    lines.append("## Feature Importance (Permutation)")
+    lines.append("")
+
+    overall = feature_importance.get("overall", [])
+    if overall:
+        max_imp = max(f["importance"] for f in overall) if overall else 1
+        lines.append("| Feature | Importance | |")
+        lines.append("|---|---|---|")
+        for f in overall:
+            bar_len = int(f["importance"] / max_imp * 20) if max_imp > 0 else 0
+            bar = "█" * bar_len
+            lines.append(f"| {f['feature']} | {f['importance']:.4f} | {bar} |")
+        lines.append("")
+
+    # Per-route tables
+    route_keys = [k for k in sorted(feature_importance) if k != "overall"]
+    if route_keys:
+        lines.append("### By Route")
+        lines.append("")
+        # Side-by-side header
+        lines.append("| Feature | " + " | ".join(route_keys) + " |")
+        lines.append("|---|" + "|".join(["---"] * len(route_keys)) + "|")
+
+        # Build lookup: route -> {feature: importance}
+        route_maps = {}
+        for route in route_keys:
+            route_maps[route] = {
+                f["feature"]: f["importance"] for f in feature_importance[route]
+            }
+
+        # Use overall ordering
+        for f in overall:
+            feat = f["feature"]
+            vals = []
+            for route in route_keys:
+                v = route_maps[route].get(feat, 0.0)
+                vals.append(f"{v:.4f}")
+            lines.append(f"| {feat} | " + " | ".join(vals) + " |")
+        lines.append("")
+
     return lines
 
 

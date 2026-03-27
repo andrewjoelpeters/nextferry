@@ -13,11 +13,55 @@ import logging
 import time
 from pathlib import Path
 
-from .at_dock_model import AtDockGBTModel, FlatDelayBaseline
+from sklearn.inspection import permutation_importance
+
+from .at_dock_model import (
+    AT_DOCK_FEATURE_COLS,
+    AT_DOCK_TARGET_COL,
+    AtDockGBTModel,
+    FlatDelayBaseline,
+)
 from .backtest import walk_forward_backtest
 from .report import generate_markdown_report
 
 logger = logging.getLogger(__name__)
+
+
+def _compute_feature_importance(
+    df, n_repeats: int = 5
+) -> dict:
+    """Compute permutation importance overall and per route."""
+    results = {}
+
+    def _importance(subset_df) -> list[dict]:
+        model = AtDockGBTModel()
+        model.fit(subset_df)
+        X = model._encode(subset_df)
+        y = subset_df[AT_DOCK_TARGET_COL].values
+        r = permutation_importance(
+            model.models["q50"],
+            X,
+            y,
+            n_repeats=n_repeats,
+            random_state=42,
+            scoring="neg_mean_absolute_error",
+        )
+        pairs = sorted(
+            zip(AT_DOCK_FEATURE_COLS, r.importances_mean, strict=True),
+            key=lambda x: -x[1],
+        )
+        return [
+            {"feature": feat, "importance": round(float(imp), 4)}
+            for feat, imp in pairs
+        ]
+
+    results["overall"] = _importance(df)
+
+    for route in sorted(df["route_abbrev"].unique()):
+        route_df = df[df["route_abbrev"] == route]
+        results[route] = _importance(route_df)
+
+    return results
 
 
 def run_at_dock_backtest(
@@ -78,6 +122,11 @@ def run_at_dock_backtest(
         return None
 
     gbt_results["training_time_seconds"] = round(gbt_time, 1)
+
+    # --- Feature importance (train on all data, permutation importance) ---
+    logger.info("Computing feature importance...")
+    feature_importance = _compute_feature_importance(df)
+    gbt_results["feature_importance"] = feature_importance
 
     # Use baseline aggregate as comparison
 

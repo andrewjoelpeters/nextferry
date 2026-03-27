@@ -236,6 +236,86 @@ class DockPredictor:
                 merged["current_fullness"] = np.nan
             logger.info("Fullness features joined")
 
+            # --- Incoming vehicle fullness (how full was the inbound trip?) ---
+            # For a vessel at dock at terminal X, the inbound trip is the most
+            # recent sailing that ARRIVED at X (arriving_terminal_id = X).
+            # Its final fullness snapshot approximates how many cars needed to
+            # unload, which affects turnaround time and delay propagation.
+            logger.info("Loading inbound fullness...")
+            inbound_df = pd.read_sql_query(
+                """
+                SELECT arriving_terminal_id, departure_time, collected_at,
+                       max_space_count, drive_up_space_count
+                FROM sailing_space_snapshots
+                WHERE max_space_count > 0
+                """,
+                conn,
+            )
+            if not inbound_df.empty:
+                inbound_df["collected_at_dt"] = pd.to_datetime(
+                    inbound_df["collected_at"], format="ISO8601", utc=True
+                ).dt.tz_localize(None)
+                inbound_df["departure_time_dt"] = pd.to_datetime(
+                    inbound_df["departure_time"], format="ISO8601", utc=True
+                ).dt.tz_localize(None)
+                inbound_df["inbound_fullness"] = (
+                    1.0
+                    - inbound_df["drive_up_space_count"]
+                    / inbound_df["max_space_count"]
+                )
+
+                # For each inbound sailing, keep only the last snapshot
+                # (closest to departure = best estimate of final load)
+                last_snap = (
+                    inbound_df.sort_values("collected_at_dt")
+                    .groupby(["arriving_terminal_id", "departure_time"])
+                    .last()
+                    .reset_index()
+                )
+
+                # For each at-dock row, find the most recent inbound sailing
+                # arriving at this terminal before the vessel docked
+                inbound_parts = []
+                for terminal_id in merged["departing_terminal_id"].unique():
+                    m_term = merged.loc[
+                        merged["departing_terminal_id"] == terminal_id
+                    ].sort_values("collected_at_dt")
+                    i_term = last_snap.loc[
+                        last_snap["arriving_terminal_id"] == terminal_id
+                    ].sort_values("departure_time_dt")
+                    if i_term.empty:
+                        continue
+                    matched = pd.merge_asof(
+                        m_term[["sailing_event_id", "collected_at_dt", "collected_at"]],
+                        i_term[["departure_time_dt", "inbound_fullness"]].rename(
+                            columns={"departure_time_dt": "collected_at_dt"}
+                        ),
+                        on="collected_at_dt",
+                        direction="backward",
+                    )
+                    inbound_parts.append(
+                        matched[
+                            ["sailing_event_id", "collected_at", "inbound_fullness"]
+                        ]
+                    )
+
+                if inbound_parts:
+                    inbound_result = pd.concat(inbound_parts, ignore_index=True)
+                    merged = merged.merge(
+                        inbound_result,
+                        on=["sailing_event_id", "collected_at"],
+                        how="left",
+                    )
+                    merged.rename(
+                        columns={"inbound_fullness": "incoming_vehicle_fullness"},
+                        inplace=True,
+                    )
+                else:
+                    merged["incoming_vehicle_fullness"] = np.nan
+            else:
+                merged["incoming_vehicle_fullness"] = np.nan
+            logger.info("Inbound fullness features joined")
+
             # --- Previous vessel delay (from a different sailing) ---
             logger.info("Loading previous vessel delays...")
             delays_df = pd.read_sql_query(
@@ -305,6 +385,7 @@ class DockPredictor:
                 "minutes_until_scheduled_departure",
                 "minutes_at_dock",
                 "current_fullness",
+                "incoming_vehicle_fullness",
                 "current_vessel_delay_minutes",
                 "actual_delay_minutes",
             ]
@@ -367,6 +448,7 @@ class DockPredictor:
         minutes_until_scheduled_departure: float,
         minutes_at_dock: float,
         current_fullness: float | None = None,
+        incoming_vehicle_fullness: float | None = None,
         current_vessel_delay_minutes: float = 0.0,
     ) -> dict | None:
         if not self.is_trained or self._model is None:
@@ -385,6 +467,7 @@ class DockPredictor:
                 minutes_until_scheduled_departure=minutes_until_scheduled_departure,
                 minutes_at_dock=minutes_at_dock,
                 current_fullness=current_fullness,
+                incoming_vehicle_fullness=incoming_vehicle_fullness,
                 current_vessel_delay_minutes=current_vessel_delay_minutes,
             )
         except ValueError as e:

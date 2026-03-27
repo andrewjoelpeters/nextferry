@@ -27,6 +27,7 @@ AT_DOCK_FEATURE_COLS = [
     "minutes_until_scheduled_departure",
     "minutes_at_dock",
     "current_fullness",
+    "incoming_vehicle_fullness",
     "current_vessel_delay_minutes",
 ]
 
@@ -121,6 +122,7 @@ class AtDockGBTModel:
         minutes_until_scheduled_departure: float,
         minutes_at_dock: float,
         current_fullness: float | None = None,
+        incoming_vehicle_fullness: float | None = None,
         current_vessel_delay_minutes: float = 0.0,
     ) -> dict | None:
         if not self.is_fitted:
@@ -139,6 +141,11 @@ class AtDockGBTModel:
                     "minutes_at_dock": minutes_at_dock,
                     "current_fullness": (
                         current_fullness if current_fullness is not None else np.nan
+                    ),
+                    "incoming_vehicle_fullness": (
+                        incoming_vehicle_fullness
+                        if incoming_vehicle_fullness is not None
+                        else np.nan
                     ),
                     "current_vessel_delay_minutes": current_vessel_delay_minutes,
                 }

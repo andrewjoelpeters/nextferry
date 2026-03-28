@@ -100,6 +100,22 @@ def init_db():
                 ON sailing_space_snapshots(arriving_terminal_id, departure_time);
             CREATE INDEX IF NOT EXISTS idx_sailing_space_departing_departure
                 ON sailing_space_snapshots(departing_terminal_id, departure_time, collected_at);
+
+            CREATE TABLE IF NOT EXISTS page_views (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                path TEXT NOT NULL,
+                visitor_hash TEXT NOT NULL,
+                device_type TEXT,
+                browser TEXT,
+                os TEXT,
+                referrer TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_page_views_timestamp
+                ON page_views(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_page_views_visitor
+                ON page_views(visitor_hash, timestamp);
             """
         )
         conn.commit()
@@ -539,6 +555,162 @@ def get_dashboard_data() -> dict:
             "delay_distribution": delay_distribution,
             "daily_trend": daily_trend,
             "event_count": event_count,
+        }
+    finally:
+        conn.close()
+
+
+def insert_page_view(
+    timestamp: str,
+    path: str,
+    visitor_hash: str,
+    device_type: str | None,
+    browser: str | None,
+    os: str | None,
+    referrer: str | None,
+):
+    """Insert a page view record."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO page_views (
+                timestamp, path, visitor_hash, device_type, browser, os, referrer
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (timestamp, path, visitor_hash, device_type, browser, os, referrer),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_metrics_data(days: int = 30) -> dict:
+    """Return aggregated user metrics for the last N days."""
+    conn = get_connection()
+    try:
+        cutoff = f"DATE('now', '-{days} days')"
+
+        # Total page views and unique visitors
+        totals = conn.execute(
+            f"""
+            SELECT
+                COUNT(*) as total_views,
+                COUNT(DISTINCT visitor_hash) as unique_visitors
+            FROM page_views
+            WHERE timestamp >= {cutoff}
+            """
+        ).fetchone()
+
+        # Views by path
+        views_by_path = [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT path, COUNT(*) as views, COUNT(DISTINCT visitor_hash) as visitors
+                FROM page_views
+                WHERE timestamp >= {cutoff}
+                GROUP BY path
+                ORDER BY views DESC
+                """
+            ).fetchall()
+        ]
+
+        # Device breakdown
+        device_breakdown = [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT
+                    COALESCE(device_type, 'Unknown') as device_type,
+                    COUNT(*) as views,
+                    COUNT(DISTINCT visitor_hash) as visitors
+                FROM page_views
+                WHERE timestamp >= {cutoff}
+                GROUP BY device_type
+                ORDER BY views DESC
+                """
+            ).fetchall()
+        ]
+
+        # Browser breakdown
+        browser_breakdown = [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT
+                    COALESCE(browser, 'Unknown') as browser,
+                    COUNT(*) as views,
+                    COUNT(DISTINCT visitor_hash) as visitors
+                FROM page_views
+                WHERE timestamp >= {cutoff}
+                GROUP BY browser
+                ORDER BY views DESC
+                """
+            ).fetchall()
+        ]
+
+        # OS breakdown
+        os_breakdown = [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT
+                    COALESCE(os, 'Unknown') as os,
+                    COUNT(*) as views,
+                    COUNT(DISTINCT visitor_hash) as visitors
+                FROM page_views
+                WHERE timestamp >= {cutoff}
+                GROUP BY os
+                ORDER BY views DESC
+                """
+            ).fetchall()
+        ]
+
+        # Daily traffic
+        daily_traffic = [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT
+                    DATE(timestamp) as date,
+                    COUNT(*) as views,
+                    COUNT(DISTINCT visitor_hash) as visitors
+                FROM page_views
+                WHERE timestamp >= {cutoff}
+                GROUP BY DATE(timestamp)
+                ORDER BY date
+                """
+            ).fetchall()
+        ]
+
+        # Hourly traffic pattern
+        hourly_traffic = [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT
+                    CAST(strftime('%H', timestamp) AS INTEGER) as hour,
+                    COUNT(*) as views,
+                    COUNT(DISTINCT visitor_hash) as visitors
+                FROM page_views
+                WHERE timestamp >= {cutoff}
+                GROUP BY hour
+                ORDER BY hour
+                """
+            ).fetchall()
+        ]
+
+        return {
+            "period_days": days,
+            "total_views": totals["total_views"],
+            "unique_visitors": totals["unique_visitors"],
+            "views_by_path": views_by_path,
+            "device_breakdown": device_breakdown,
+            "browser_breakdown": browser_breakdown,
+            "os_breakdown": os_breakdown,
+            "daily_traffic": daily_traffic,
+            "hourly_traffic": hourly_traffic,
         }
     finally:
         conn.close()

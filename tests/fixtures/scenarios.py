@@ -243,6 +243,162 @@ def vessel_edmonds_kingston() -> dict:
     }
 
 
+def vessel_en_route_severe_delay(
+    delay_minutes: int = 25,
+    departed_minutes_ago: int = 5,
+) -> dict:
+    """Vessel en route with severe delay (25 min) - triggers .delay-severe CSS class."""
+    now = _now()
+    sched = (now - timedelta(minutes=departed_minutes_ago + delay_minutes)).replace(
+        second=0, microsecond=0
+    )
+    left = sched + timedelta(minutes=delay_minutes)
+    return {
+        "VesselID": 70,
+        "VesselName": "Walla Walla",
+        "DepartingTerminalID": 3,
+        "DepartingTerminalName": "Seattle",
+        "DepartingTerminalAbbrev": "SEA",
+        "ArrivingTerminalID": 7,
+        "ArrivingTerminalName": "Bainbridge Island",
+        "ArrivingTerminalAbbrev": "BI",
+        "Latitude": 47.6200,
+        "Longitude": -122.4100,
+        "Speed": 15.0,
+        "Heading": 280,
+        "InService": True,
+        "AtDock": False,
+        "LeftDock": _wsdot_date(left),
+        "Eta": _wsdot_date(now + timedelta(minutes=20)),
+        "ScheduledDeparture": _wsdot_date(sched),
+        "TimeStamp": _wsdot_date(now),
+        "OpRouteAbbrev": ["sea-bi"],
+        "VesselPositionNum": 1,
+        "SortSeq": 1,
+        "ManagedBy": 0,
+        "VesselWatchShutID": 0,
+        "VesselWatchShutMsg": "",
+        "VesselWatchShutFlag": "",
+        "VesselWatchStatus": "",
+        "VesselWatchMsg": "",
+        "EtaBasis": "",
+    }
+
+
+def vessel_en_route_bainbridge_to_seattle(
+    delay_minutes: int = 3,
+    departed_minutes_ago: int = 8,
+) -> dict:
+    """Second vessel en route from Bainbridge to Seattle (position 2)."""
+    now = _now()
+    sched = (now - timedelta(minutes=departed_minutes_ago + delay_minutes)).replace(
+        second=0, microsecond=0
+    )
+    left = sched + timedelta(minutes=delay_minutes)
+    return {
+        "VesselID": 62,
+        "VesselName": "Spokane",
+        "DepartingTerminalID": 7,
+        "DepartingTerminalName": "Bainbridge Island",
+        "DepartingTerminalAbbrev": "BI",
+        "ArrivingTerminalID": 3,
+        "ArrivingTerminalName": "Seattle",
+        "ArrivingTerminalAbbrev": "SEA",
+        "Latitude": 47.6300,
+        "Longitude": -122.4500,
+        "Speed": 14.0,
+        "Heading": 90,
+        "InService": True,
+        "AtDock": False,
+        "LeftDock": _wsdot_date(left),
+        "Eta": _wsdot_date(now + timedelta(minutes=20)),
+        "ScheduledDeparture": _wsdot_date(sched),
+        "TimeStamp": _wsdot_date(now),
+        "OpRouteAbbrev": ["sea-bi"],
+        "VesselPositionNum": 2,
+        "SortSeq": 2,
+        "ManagedBy": 0,
+        "VesselWatchShutID": 0,
+        "VesselWatchShutMsg": "",
+        "VesselWatchShutFlag": "",
+        "VesselWatchStatus": "",
+        "VesselWatchMsg": "",
+        "EtaBasis": "",
+    }
+
+
+def vessel_just_departed_seattle() -> dict:
+    """Vessel that just left Seattle 1 minute ago, on time (0 delay)."""
+    now = _now()
+    departed = (now - timedelta(minutes=1)).replace(second=0, microsecond=0)
+    return {
+        "VesselID": 70,
+        "VesselName": "Walla Walla",
+        "DepartingTerminalID": 3,
+        "DepartingTerminalName": "Seattle",
+        "DepartingTerminalAbbrev": "SEA",
+        "ArrivingTerminalID": 7,
+        "ArrivingTerminalName": "Bainbridge Island",
+        "ArrivingTerminalAbbrev": "BI",
+        "Latitude": 47.6050,
+        "Longitude": -122.3500,
+        "Speed": 5.0,
+        "Heading": 270,
+        "InService": True,
+        "AtDock": False,
+        "LeftDock": _wsdot_date(departed),
+        "Eta": _wsdot_date(now + timedelta(minutes=33)),
+        "ScheduledDeparture": _wsdot_date(departed),
+        "TimeStamp": _wsdot_date(now),
+        "OpRouteAbbrev": ["sea-bi"],
+        "VesselPositionNum": 1,
+        "SortSeq": 1,
+        "ManagedBy": 0,
+        "VesselWatchShutID": 0,
+        "VesselWatchShutMsg": "",
+        "VesselWatchShutFlag": "",
+        "VesselWatchStatus": "",
+        "VesselWatchMsg": "",
+        "EtaBasis": "",
+    }
+
+
+def vessel_arriving_bainbridge() -> dict:
+    """Vessel about to arrive at Bainbridge (4 min from dock), on time."""
+    now = _now()
+    departed = (now - timedelta(minutes=30)).replace(second=0, microsecond=0)
+    return {
+        "VesselID": 70,
+        "VesselName": "Walla Walla",
+        "DepartingTerminalID": 3,
+        "DepartingTerminalName": "Seattle",
+        "DepartingTerminalAbbrev": "SEA",
+        "ArrivingTerminalID": 7,
+        "ArrivingTerminalName": "Bainbridge Island",
+        "ArrivingTerminalAbbrev": "BI",
+        "Latitude": 47.6220,
+        "Longitude": -122.5000,
+        "Speed": 10.0,
+        "Heading": 270,
+        "InService": True,
+        "AtDock": False,
+        "LeftDock": _wsdot_date(departed),
+        "Eta": _wsdot_date(now + timedelta(minutes=4)),
+        "ScheduledDeparture": _wsdot_date(departed),
+        "TimeStamp": _wsdot_date(now),
+        "OpRouteAbbrev": ["sea-bi"],
+        "VesselPositionNum": 1,
+        "SortSeq": 1,
+        "ManagedBy": 0,
+        "VesselWatchShutID": 0,
+        "VesselWatchShutMsg": "",
+        "VesselWatchShutFlag": "",
+        "VesselWatchStatus": "",
+        "VesselWatchMsg": "",
+        "EtaBasis": "",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Schedule data (WSDOT scheduletoday format)
 # ---------------------------------------------------------------------------
@@ -436,4 +592,65 @@ def scenario_multi_route():
             vessel_edmonds_kingston(),
         ],
         "schedules": {5: schedule_sea_bi(), 6: schedule_ed_king()},
+    }
+
+
+def scenario_severe_delay():
+    """Vessel severely delayed (25 min) - tests delay-severe CSS styling."""
+    return {
+        "vessels": [
+            vessel_en_route_severe_delay(),
+            vessel_at_dock_bainbridge(),
+        ],
+        "schedules": {5: schedule_sea_bi()},
+    }
+
+
+def scenario_both_en_route():
+    """Both boats en route simultaneously - no dock model should fire."""
+    return {
+        "vessels": [
+            vessel_en_route_seattle_to_bainbridge(delay_minutes=5),
+            vessel_en_route_bainbridge_to_seattle(),
+        ],
+        "schedules": {5: schedule_sea_bi()},
+    }
+
+
+def scenario_just_departed():
+    """Vessel just departed (< 2 min ago) - tests 'Just left' display."""
+    return {
+        "vessels": [
+            vessel_just_departed_seattle(),
+            vessel_at_dock_bainbridge(),
+        ],
+        "schedules": {5: schedule_sea_bi()},
+    }
+
+
+def scenario_arriving():
+    """Vessel about to arrive (4 min from dock) - tests ETA display."""
+    return {
+        "vessels": [
+            vessel_arriving_bainbridge(),
+            vessel_at_dock_bainbridge(),
+        ],
+        "schedules": {5: schedule_sea_bi()},
+    }
+
+
+def scenario_late_night():
+    """Late night with no future sailings - tests empty schedule handling."""
+    return {
+        "vessels": [vessel_at_dock_seattle(departure_offset_minutes=-600)],
+        "schedules": {5: schedule_sea_bi()},
+    }
+
+
+def scenario_with_capacity():
+    """Normal scenario but with sailing space data available."""
+    return {
+        "vessels": [vessel_at_dock_seattle(), vessel_at_dock_bainbridge()],
+        "schedules": {5: schedule_sea_bi()},
+        "has_capacity": True,
     }

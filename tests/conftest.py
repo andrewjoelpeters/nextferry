@@ -13,9 +13,14 @@ from fastapi.testclient import TestClient
 from backend.next_sailings import CACHED_DELAYS
 from backend.serializers import RawRouteSchedule, Vessel
 from tests.fixtures.scenarios import (
+    scenario_arriving,
+    scenario_both_en_route,
+    scenario_just_departed,
+    scenario_late_night,
     scenario_multi_route,
     scenario_null_fields,
     scenario_one_en_route_one_docked,
+    scenario_severe_delay,
     scenario_two_boats_at_dock,
 )
 
@@ -194,4 +199,54 @@ def client_en_route_with_ml():
         scenario_one_en_route_one_docked(), ml_trained=True, dock_trained=True
     )
     yield client, mock_ml, mock_dock
+    _cleanup_patches(patches)
+
+
+@pytest.fixture()
+def client_severe_delay():
+    """Client with a vessel delayed 25 minutes."""
+    client, patches, _, _ = _make_client(scenario_severe_delay())
+    yield client
+    _cleanup_patches(patches)
+
+
+@pytest.fixture()
+def client_both_en_route():
+    """Client with both vessels en route (neither at dock)."""
+    client, patches, _, _ = _make_client(scenario_both_en_route())
+    yield client
+    _cleanup_patches(patches)
+
+
+@pytest.fixture()
+def client_both_en_route_with_ml():
+    """Client with both vessels en route + trained ML models."""
+    client, patches, mock_ml, mock_dock = _make_client(
+        scenario_both_en_route(), ml_trained=True, dock_trained=True
+    )
+    yield client, mock_ml, mock_dock
+    _cleanup_patches(patches)
+
+
+@pytest.fixture()
+def client_just_departed():
+    """Client with a vessel that just departed (< 2 min ago)."""
+    client, patches, _, _ = _make_client(scenario_just_departed())
+    yield client
+    _cleanup_patches(patches)
+
+
+@pytest.fixture()
+def client_arriving():
+    """Client with a vessel about to arrive (4 min from dock)."""
+    client, patches, _, _ = _make_client(scenario_arriving())
+    yield client
+    _cleanup_patches(patches)
+
+
+@pytest.fixture()
+def client_late_night():
+    """Client with no future sailings (late night scenario)."""
+    client, patches, _, _ = _make_client(scenario_late_night())
+    yield client
     _cleanup_patches(patches)

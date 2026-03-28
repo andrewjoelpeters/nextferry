@@ -53,7 +53,7 @@ uv run mypy backend/
 **Key patterns:**
 - Module-level singletons for `predictor` and `fill_predictor` with `.train()/.save()/.load()` lifecycle
 - Global `_sailings_cache` dict in `main.py` shared across requests, updated by background task
-- All datetimes use `zoneinfo.ZoneInfo("America/Los_Angeles")` — WSDOT API returns UTC
+- All datetimes use `zoneinfo.ZoneInfo("America/Los_Angeles")` — WSDOT API returns UTC. Use `replay.current_time()` instead of `datetime.now()` so replay mode works.
 - SQLite with WAL mode; `data/` directory is gitignored (Railway uses persistent volume)
 
 ## Workflow

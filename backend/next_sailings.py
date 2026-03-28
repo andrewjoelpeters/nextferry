@@ -13,7 +13,7 @@ from .serializers import (
     RouteSchedule,
     Vessel,
 )
-from .utils import datetime_to_minutes
+from .utils import datetime_to_minutes, minutes_since, minutes_until
 from .wsdot_client import get_schedule_today, get_vessel_positions
 
 try:
@@ -80,6 +80,11 @@ def _record_prediction(
     _last_predictions[vessel_id]["sailings"].append(entry)
 
 
+# ---------------------------------------------------------------------------
+# Delay caching
+# ---------------------------------------------------------------------------
+
+
 def update_cached_delay(vessel: Vessel, delay: timedelta):
     for route in vessel.route_name:
         if route not in CACHED_DELAYS:
@@ -117,6 +122,24 @@ def get_vessels_with_delays():
     return vessel_positions
 
 
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+
+def _route_abbrev_for_terminal(terminal_id: int) -> str | None:
+    """Look up route abbreviation by departing terminal ID."""
+    for route in ROUTES:
+        if terminal_id in route["terminals"]:
+            return route["route_name"]
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Schedule grouping
+# ---------------------------------------------------------------------------
+
+
 def get_route_vessels(vessel_positions: list[Vessel], route_config):
     return [v for v in vessel_positions if route_config["route_name"] in v.route_name]
 
@@ -144,6 +167,95 @@ def get_route_schedule_by_boat(
     return schedule_by_boat
 
 
+# ---------------------------------------------------------------------------
+# Feature construction for ML models
+# ---------------------------------------------------------------------------
+
+
+def _build_en_route_features(
+    sailing: DirectionalSailing,
+    vessel_id: int | None,
+    vessel_speed: float | None,
+    delay_minutes: int,
+) -> dict | None:
+    """Build ML input features for en-route delay prediction.
+
+    Returns None if the sailing's terminal doesn't match a known route.
+    """
+    route_abbrev = _route_abbrev_for_terminal(sailing.departing_terminal_id)
+    if not route_abbrev:
+        return None
+
+    sched_iso = sailing.scheduled_departure.isoformat()
+    prev_fullness = get_previous_sailing_fullness(
+        sailing.departing_terminal_id, sched_iso
+    )
+    turnaround = (
+        get_turnaround_minutes(vessel_id, sched_iso) if vessel_id is not None else None
+    )
+
+    return {
+        "route_abbrev": route_abbrev,
+        "departing_terminal_id": sailing.departing_terminal_id,
+        "vessel_id": vessel_id or 0,
+        "day_of_week": sailing.scheduled_departure.weekday(),
+        "hour_of_day": sailing.scheduled_departure.hour,
+        "minutes_until_scheduled_departure": round(
+            minutes_until(sailing.scheduled_departure), 1
+        ),
+        "current_vessel_delay_minutes": delay_minutes,
+        "vessel_speed": vessel_speed,
+        "previous_sailing_fullness": prev_fullness,
+        "turnaround_minutes": turnaround,
+    }
+
+
+def _build_dock_features(
+    sailing: DirectionalSailing,
+    vessel: Vessel,
+    route_abbrev: str,
+    mins_at_dock: float,
+    delay_minutes: int,
+) -> dict:
+    """Build ML input features for at-dock delay prediction."""
+    incoming_fullness = _get_incoming_fullness(sailing)
+    return {
+        "route_abbrev": route_abbrev,
+        "departing_terminal_id": sailing.departing_terminal_id,
+        "vessel_id": vessel.vessel_id,
+        "day_of_week": sailing.scheduled_departure.weekday(),
+        "hour_of_day": sailing.scheduled_departure.hour,
+        "minutes_until_scheduled_departure": round(
+            minutes_until(sailing.scheduled_departure), 1
+        ),
+        "minutes_at_dock": round(mins_at_dock, 1),
+        "incoming_vehicle_fullness": (
+            round(incoming_fullness, 2) if incoming_fullness is not None else None
+        ),
+        "current_vessel_delay_minutes": delay_minutes,
+    }
+
+
+def _get_incoming_fullness(sailing: DirectionalSailing) -> float | None:
+    """Get fullness of the most recent inbound sailing to this terminal.
+
+    For a vessel at dock at terminal X about to depart to terminal Y,
+    the inbound trip arrived FROM Y TO X. get_previous_sailing_fullness
+    looks up the most recent sailing arriving at departing_terminal_id,
+    which is exactly the inbound trip's load.
+    """
+    try:
+        sched_iso = sailing.scheduled_departure.isoformat()
+        return get_previous_sailing_fullness(sailing.departing_terminal_id, sched_iso)
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Delay prediction
+# ---------------------------------------------------------------------------
+
+
 def propigate_delays(
     delay: timedelta | None,
     sailings: list[DirectionalSailing],
@@ -156,57 +268,25 @@ def propigate_delays(
         return sailings
 
     delay_minutes = datetime_to_minutes(delay) if delay else 0
-    now = datetime.now(tz=ZoneInfo("America/Los_Angeles"))
 
     for sailing in sailings:
         if ml_predictor and ml_predictor.is_trained and sailing.scheduled_departure:
-            # Compute minutes until departure
-            time_diff = sailing.scheduled_departure - now
-            minutes_until = max(0, time_diff.total_seconds() / 60)
-
-            route_abbrev = None
-            # Get route from config by terminal IDs
-            for route in ROUTES:
-                if sailing.departing_terminal_id in route["terminals"]:
-                    route_abbrev = route["route_name"]
-                    break
-
-            if route_abbrev:
-                sched_iso = sailing.scheduled_departure.isoformat()
-
-                # Look up docking features for this sailing
-                prev_fullness = get_previous_sailing_fullness(
-                    sailing.departing_terminal_id, sched_iso
-                )
-                turnaround = None
-                if vessel_id is not None:
-                    turnaround = get_turnaround_minutes(vessel_id, sched_iso)
-
-                inputs = {
-                    "route_abbrev": route_abbrev,
-                    "departing_terminal_id": sailing.departing_terminal_id,
-                    "vessel_id": vessel_id or 0,
-                    "day_of_week": sailing.scheduled_departure.weekday(),
-                    "hour_of_day": sailing.scheduled_departure.hour,
-                    "minutes_until_scheduled_departure": round(minutes_until, 1),
-                    "current_vessel_delay_minutes": delay_minutes,
-                    "vessel_speed": vessel_speed,
-                    "previous_sailing_fullness": prev_fullness,
-                    "turnaround_minutes": turnaround,
-                }
-
+            inputs = _build_en_route_features(
+                sailing, vessel_id, vessel_speed, delay_minutes
+            )
+            if inputs:
                 prediction = ml_predictor.predict(**inputs)
                 if prediction:
                     sailing.delay_in_minutes = round(prediction["predicted_delay"])
                     sailing.delay_lower_bound = round(prediction["lower_bound"])
                     sailing.delay_upper_bound = round(prediction["upper_bound"])
                     _record_prediction(
-                        vessel_id=vessel_id,
-                        vessel_name=vessel_name,
-                        sailing=sailing,
-                        source="en_route_model",
-                        inputs=inputs,
-                        prediction=prediction,
+                        vessel_id,
+                        vessel_name,
+                        sailing,
+                        "en_route_model",
+                        inputs,
+                        prediction,
                     )
                     continue
 
@@ -214,12 +294,12 @@ def propigate_delays(
         if delay:
             sailing.delay_in_minutes = delay_minutes
             _record_prediction(
-                vessel_id=vessel_id,
-                vessel_name=vessel_name,
-                sailing=sailing,
-                source="fallback_flat",
-                inputs={"current_vessel_delay_minutes": delay_minutes},
-                prediction=None,
+                vessel_id,
+                vessel_name,
+                sailing,
+                "fallback_flat",
+                {"current_vessel_delay_minutes": delay_minutes},
+                None,
             )
 
     return sailings
@@ -238,69 +318,31 @@ def _apply_dock_prediction(sailing: DirectionalSailing, vessel: Vessel) -> None:
     Falls back to flat delay propagation (vessel's cached delay) if the dock
     model isn't available.
     """
-    now = datetime.now(tz=ZoneInfo("America/Los_Angeles"))
-
     # Compute minutes_at_dock from vessel.eta (arrival/dock time)
-    minutes_at_dock = 0.0
-    if vessel.eta:
-        eta = vessel.eta
-        if eta.tzinfo is None:
-            eta = eta.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
-        minutes_at_dock = max(0, (now - eta).total_seconds() / 60)
-
-    time_diff = sailing.scheduled_departure - now
-    minutes_until = max(0, time_diff.total_seconds() / 60)
+    eta = vessel.eta
+    if eta and eta.tzinfo is None:
+        eta = eta.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
+    mins_at_dock = minutes_since(eta) if eta else 0.0
 
     delay_minutes = datetime_to_minutes(vessel.delay) if vessel.delay else 0
-
-    route_abbrev = None
-    for route in ROUTES:
-        if sailing.departing_terminal_id in route["terminals"]:
-            route_abbrev = route["route_name"]
-            break
+    route_abbrev = _route_abbrev_for_terminal(sailing.departing_terminal_id)
 
     if dock_predictor and dock_predictor.is_trained and route_abbrev:
-        # Look up inbound fullness: how full was the boat arriving at this
-        # terminal? A fuller inbound load means longer unloading time.
-        incoming_fullness = _get_incoming_fullness(sailing)
-
-        prediction = dock_predictor.predict(
-            route_abbrev=route_abbrev,
-            departing_terminal_id=sailing.departing_terminal_id,
-            vessel_id=vessel.vessel_id,
-            day_of_week=sailing.scheduled_departure.weekday(),
-            hour_of_day=sailing.scheduled_departure.hour,
-            minutes_until_scheduled_departure=minutes_until,
-            minutes_at_dock=minutes_at_dock,
-            incoming_vehicle_fullness=incoming_fullness,
-            current_vessel_delay_minutes=delay_minutes,
+        inputs = _build_dock_features(
+            sailing, vessel, route_abbrev, mins_at_dock, delay_minutes
         )
+        prediction = dock_predictor.predict(**inputs)
         if prediction:
             sailing.delay_in_minutes = round(prediction["predicted_delay"])
             sailing.delay_lower_bound = round(prediction["lower_bound"])
             sailing.delay_upper_bound = round(prediction["upper_bound"])
-            inputs = {
-                "route_abbrev": route_abbrev,
-                "departing_terminal_id": sailing.departing_terminal_id,
-                "vessel_id": vessel.vessel_id,
-                "day_of_week": sailing.scheduled_departure.weekday(),
-                "hour_of_day": sailing.scheduled_departure.hour,
-                "minutes_until_scheduled_departure": round(minutes_until, 1),
-                "minutes_at_dock": round(minutes_at_dock, 1),
-                "incoming_vehicle_fullness": (
-                    round(incoming_fullness, 2)
-                    if incoming_fullness is not None
-                    else None
-                ),
-                "current_vessel_delay_minutes": delay_minutes,
-            }
             _record_prediction(
-                vessel_id=vessel.vessel_id,
-                vessel_name=vessel.vessel_name,
-                sailing=sailing,
-                source="dock_model",
-                inputs=inputs,
-                prediction=prediction,
+                vessel.vessel_id,
+                vessel.vessel_name,
+                sailing,
+                "dock_model",
+                inputs,
+                prediction,
             )
             return
 
@@ -328,109 +370,118 @@ def _apply_dock_prediction(sailing: DirectionalSailing, vessel: Vessel) -> None:
         sailing.delay_upper_bound = None
 
 
-def _get_incoming_fullness(sailing: DirectionalSailing) -> float | None:
-    """Get fullness of the most recent inbound sailing to this terminal.
+# ---------------------------------------------------------------------------
+# Sailing selection & vessel state annotation
+# ---------------------------------------------------------------------------
 
-    For a vessel at dock at terminal X about to depart to terminal Y,
-    the inbound trip arrived FROM Y TO X. get_previous_sailing_fullness
-    looks up the most recent sailing arriving at departing_terminal_id,
-    which is exactly the inbound trip's load.
+
+def _filter_next_sailings(
+    sailings: list[DirectionalSailing],
+    vessel: Vessel | None,
+) -> list[DirectionalSailing]:
+    """Select upcoming sailings based on vessel state.
+
+    - No vessel data or no scheduled departure: all future sailings.
+    - At dock: current sailing (by scheduled departure) and later.
+    - En route: just-departed sailing (if within 30 min) plus future sailings.
     """
-    try:
-        sched_iso = sailing.scheduled_departure.isoformat()
-        return get_previous_sailing_fullness(sailing.departing_terminal_id, sched_iso)
-    except Exception:
-        return None
+    now = datetime.now(tz=ZoneInfo("America/Los_Angeles"))
+
+    if not vessel or not vessel.scheduled_departure:
+        return [s for s in sailings if s.scheduled_departure > now]
+
+    if vessel.at_dock:
+        return [
+            s for s in sailings if s.scheduled_departure >= vessel.scheduled_departure
+        ]
+
+    # En route: include the just-departed sailing so users can see it's in transit
+    future = [s for s in sailings if s.scheduled_departure > vessel.scheduled_departure]
+    for s in sailings:
+        if s.scheduled_departure == vessel.scheduled_departure:
+            if minutes_since(s.scheduled_departure) <= 30:
+                departed = s.model_copy()
+                departed.departed = True
+                future.insert(0, departed)
+            break
+
+    return future
+
+
+def _annotate_with_vessel_state(
+    sailing: DirectionalSailing,
+    vessel: Vessel,
+) -> None:
+    """Attach live vessel state to the first sailing.
+
+    Only annotates if the vessel's direction matches this sailing's direction.
+    At-dock vessels always match; en-route vessels must be heading toward this
+    sailing's departing terminal (guards against the WSDOT null-field edge case
+    where a vessel reports no direction data).
+    """
+    direction_matches = (
+        vessel.at_dock or sailing.departing_terminal_id == vessel.departing_terminal_id
+    )
+    if not direction_matches:
+        return
+
+    sailing.vessel_at_dock = vessel.at_dock
+    sailing.vessel_left_dock = vessel.left_dock
+    sailing.vessel_eta = vessel.eta
+    if vessel.delay:
+        sailing.vessel_delay_minutes = datetime_to_minutes(vessel.delay)
+
+
+# ---------------------------------------------------------------------------
+# Core orchestration
+# ---------------------------------------------------------------------------
 
 
 def get_next_sailings_by_boat(
     schedule_by_boat: dict[int, list[DirectionalSailing]], route_vessels: list[Vessel]
 ) -> dict[int, list[DirectionalSailing]]:
-    route_vessels_by_position = {
-        vessel.vessel_position_num: vessel for vessel in route_vessels
-    }
-    next_sailings_by_boat = {}
-    for vessel_position_num, sailings in schedule_by_boat.items():
-        # if this vessel_position_num isn't in route_vessels:
-        # next sailings are all sailings with this vessel position num and a scheduled
-        # departure greater than right now
-        current_vessel = route_vessels_by_position.get(vessel_position_num)
-        if not current_vessel or not current_vessel.scheduled_departure:
-            next_sailings = [
-                sailing
-                for sailing in sailings
-                if sailing.scheduled_departure
-                > datetime.now(tz=ZoneInfo("America/Los_Angeles"))
-            ]
-        elif current_vessel.at_dock:
-            next_sailings = [
-                sailing
-                for sailing in sailings
-                if sailing.scheduled_departure >= current_vessel.scheduled_departure
-            ]
-        elif not current_vessel.at_dock:
-            # Include the just-departed sailing so users can see it's en route
-            departed_sailing = None
-            for sailing in sailings:
-                if sailing.scheduled_departure == current_vessel.scheduled_departure:
-                    now = datetime.now(tz=ZoneInfo("America/Los_Angeles"))
-                    minutes_since = (
-                        now - sailing.scheduled_departure
-                    ).total_seconds() / 60
-                    # Show departed sailing for up to 30 minutes after departure
-                    if minutes_since <= 30:
-                        departed_sailing = sailing.model_copy()
-                        departed_sailing.departed = True
-                    break
+    vessels_by_position = {v.vessel_position_num: v for v in route_vessels}
+    result = {}
 
-            next_sailings = [
-                sailing
-                for sailing in sailings
-                if sailing.scheduled_departure > current_vessel.scheduled_departure
-            ]
+    for position_num, sailings in schedule_by_boat.items():
+        vessel = vessels_by_position.get(position_num)
+        next_sailings = _filter_next_sailings(sailings, vessel)
 
-            if departed_sailing:
-                next_sailings.insert(0, departed_sailing)
+        # When the vessel is at dock, hold back the first sailing from the
+        # en-route model — it will be handled by the dock predictor below.
+        first_held_back = None
+        if (
+            vessel
+            and vessel.at_dock
+            and next_sailings
+            and next_sailings[0].scheduled_departure
+        ):
+            first_held_back = next_sailings[0]
+            remaining = next_sailings[1:]
+        else:
+            remaining = next_sailings
 
-        v_id = current_vessel.vessel_id if current_vessel else None
-        v_speed = current_vessel.speed if current_vessel else None
-        v_name = current_vessel.vessel_name if current_vessel else None
-        next_sailings = propigate_delays(
-            current_vessel.delay,
-            next_sailings,
-            vessel_id=v_id,
-            vessel_speed=v_speed,
-            vessel_name=v_name,
+        remaining = propigate_delays(
+            vessel.delay if vessel else None,
+            remaining,
+            vessel_id=vessel.vessel_id if vessel else None,
+            vessel_speed=vessel.speed if vessel else None,
+            vessel_name=vessel.vessel_name if vessel else None,
         )
 
-        # Annotate the first sailing with live vessel state.
-        # When the vessel is en route, verify the first sailing's direction matches
-        # the vessel's current direction. E.g. if the vessel departed Seattle heading
-        # to Bainbridge, only annotate a Seattle→Bainbridge sailing, not a future
-        # sailing departing from a different terminal.
-        if next_sailings and current_vessel:
-            first = next_sailings[0]
-            direction_matches = (
-                current_vessel.at_dock
-                or first.departing_terminal_id == current_vessel.departing_terminal_id
-            )
-            if direction_matches:
-                first.vessel_at_dock = current_vessel.at_dock
-                first.vessel_left_dock = current_vessel.left_dock
-                first.vessel_eta = current_vessel.eta
-                if current_vessel.delay:
-                    first.vessel_delay_minutes = datetime_to_minutes(
-                        current_vessel.delay
-                    )
+        next_sailings = (
+            [first_held_back] + remaining if first_held_back is not None else remaining
+        )
 
-                # For at-dock vessels, use the dock predictor instead of
-                # the en-route ML model for the current sailing.
-                if current_vessel.at_dock and first.scheduled_departure:
-                    _apply_dock_prediction(first, current_vessel)
+        # Annotate first sailing with live vessel state + dock prediction
+        if next_sailings and vessel:
+            _annotate_with_vessel_state(next_sailings[0], vessel)
+            if vessel.at_dock and next_sailings[0].scheduled_departure:
+                _apply_dock_prediction(next_sailings[0], vessel)
 
-        next_sailings_by_boat[vessel_position_num] = next_sailings
+        result[position_num] = next_sailings
 
-    return next_sailings_by_boat
+    return result
 
 
 def get_directional_schedules(
@@ -441,7 +492,6 @@ def get_directional_schedules(
     # Flatten all sailings from all vessels and group by direction
     for vessel_sailings in next_sailings_by_boat.values():
         for sailing in vessel_sailings:
-            # direction_key = (sailing.departing_terminal_id, sailing.arriving_terminal_id)
             direction_meta = (
                 sailing.departing_terminal_id,
                 sailing.departing_terminal_name,

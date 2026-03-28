@@ -82,6 +82,18 @@ def format_confidence_text(lower_bound: int | None, upper_bound: int | None) -> 
     return f"({fmt(lower_bound)} to {fmt(upper_bound)}m)"
 
 
+def minutes_until(dt: datetime) -> float:
+    """Minutes from now until dt. Returns 0 if dt is in the past."""
+    now = datetime.now(ZoneInfo("America/Los_Angeles"))
+    return max(0, (dt - now).total_seconds() / 60)
+
+
+def minutes_since(dt: datetime) -> float:
+    """Minutes elapsed since dt. Returns 0 if dt is in the future."""
+    now = datetime.now(ZoneInfo("America/Los_Angeles"))
+    return max(0, (now - dt).total_seconds() / 60)
+
+
 def is_peak_hour(hour: int) -> bool:
     """Return True if the hour falls in commuter peak windows."""
     return (6 <= hour <= 9) or (15 <= hour <= 19)

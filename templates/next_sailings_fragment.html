@@ -72,7 +72,11 @@
                                 {% endif %}
                             {% endif %}
                             {% if sailing.inbound_info %}
+                                {% if sailing.inbound_info.at_dock %}
+                                <span class="detail-item">{{ sailing.inbound_info.vessel_name }} docked in {{ sailing.inbound_info.from_terminal }}{% if sailing.inbound_info.scheduled_departure %}, departs {{ sailing.inbound_info.scheduled_departure }}{% endif %}</span>
+                                {% else %}
                                 <span class="detail-item">{{ sailing.inbound_info.vessel_name }} left {{ sailing.inbound_info.from_terminal }}{% if sailing.inbound_info.left_dock %} at {{ sailing.inbound_info.left_dock }}{% endif %}{% if sailing.inbound_info.eta %}, arrives ~{{ sailing.inbound_info.eta }}{% endif %}</span>
+                                {% endif %}
                             {% endif %}
                             {% if sailing.capacity %}
                                 {% if sailing.departed %}

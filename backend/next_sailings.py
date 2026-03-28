@@ -395,13 +395,33 @@ def get_next_sailings_by_boat(
         v_id = current_vessel.vessel_id if current_vessel else None
         v_speed = current_vessel.speed if current_vessel else None
         v_name = current_vessel.vessel_name if current_vessel else None
-        next_sailings = propigate_delays(
+
+        # When the vessel is at dock, handle the first sailing separately
+        # with the dock predictor — don't run it through the en-route model.
+        first_sailing_held_back = None
+        if (
+            current_vessel
+            and current_vessel.at_dock
+            and next_sailings
+            and next_sailings[0].scheduled_departure
+        ):
+            first_sailing_held_back = next_sailings[0]
+            remaining = next_sailings[1:]
+        else:
+            remaining = next_sailings
+
+        remaining = propigate_delays(
             current_vessel.delay,
-            next_sailings,
+            remaining,
             vessel_id=v_id,
             vessel_speed=v_speed,
             vessel_name=v_name,
         )
+
+        if first_sailing_held_back is not None:
+            next_sailings = [first_sailing_held_back] + remaining
+        else:
+            next_sailings = remaining
 
         # Annotate the first sailing with live vessel state.
         # When the vessel is en route, verify the first sailing's direction matches

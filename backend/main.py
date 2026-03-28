@@ -15,9 +15,13 @@ from fastapi.templating import Jinja2Templates
 
 from .data_collector import collect_data
 from .database import (
-    get_dashboard_data,
+    get_available_routes,
+    get_busyness_heatmap,
+    get_data_date_range,
+    get_history_data,
     get_sailing_event_count,
     get_snapshot_count,
+    get_time_travel_data,
     init_db,
 )
 from .display_processing import process_routes_for_display
@@ -290,20 +294,28 @@ async def get_sailings_tab(request: Request):
     )
 
 
-@app.get("/predictions-tab", response_class=HTMLResponse)
-async def get_predictions_tab(request: Request):
-    """Return the predictions dashboard tab content."""
+@app.get("/history-tab", response_class=HTMLResponse)
+async def get_history_tab(request: Request):
+    """Return the historical data dashboard tab content."""
+    routes = get_available_routes()
+    date_range = get_data_date_range()
     return templates.TemplateResponse(
-        "predictions_tab_fragment.html", {"request": request}
+        "history_tab_fragment.html",
+        {"request": request, "routes": routes, "date_range": date_range},
     )
 
 
-@app.get("/predictions-data")
-async def get_predictions_data():
-    """Return dashboard data as JSON for chart rendering."""
-    dashboard = get_dashboard_data()
+@app.get("/history-data")
+async def get_history_data_endpoint(
+    route: str | None = None,
+    season: str | None = None,
+    day_type: str | None = None,
+):
+    """Return filtered historical data as JSON for chart rendering."""
+    history = get_history_data(route=route, season=season, day_type=day_type)
+    heatmap = get_busyness_heatmap(route=route, season=season)
 
-    # Transform evaluation metrics into the format the frontend expects
+    # Model performance section (kept for ML engineer error analysis)
     evaluation = None
     raw_eval = ml_predictor.last_evaluation
     if raw_eval:
@@ -312,12 +324,10 @@ async def get_predictions_data():
             "overall_mean_error": raw_eval.get("overall_bias"),
             "improvement_pct": raw_eval.get("overall_improvement_pct"),
         }
-        # Convert by_horizon dict into error_by_horizon array
         by_horizon = raw_eval.get("by_horizon", {})
         if by_horizon:
             error_by_horizon = []
             for label, metrics in by_horizon.items():
-                # Parse midpoint from label like "2–4m" → 3
                 parts = label.rstrip("m").split("–")
                 lo, hi = float(parts[0]), float(parts[1])
                 error_by_horizon.append(
@@ -345,7 +355,141 @@ async def get_predictions_data():
         "evaluation": evaluation,
     }
 
-    return {**dashboard, "model": model_info}
+    return {**history, "heatmap": heatmap, "model": model_info}
+
+
+@app.get("/time-travel-data")
+async def get_time_travel_endpoint(timestamp: str):
+    """Return historical vessel state and prediction replay for a given moment.
+
+    The timestamp should be ISO 8601 format, e.g. "2024-11-07T20:00:00".
+    Returns vessel positions, actual sailing outcomes, capacity data,
+    and what the current ML model would have predicted at that moment.
+    """
+    raw = get_time_travel_data(timestamp)
+
+    # Re-run predictions for each vessel that had an upcoming sailing
+    predictions = {}
+    if ml_predictor.is_trained:
+        for v in raw["vessels"]:
+            sched = v.get("scheduled_departure")
+            if not sched:
+                continue
+
+            try:
+                sched_dt = datetime.fromisoformat(sched).replace(tzinfo=None)
+                ts_dt = datetime.fromisoformat(timestamp).replace(tzinfo=None)
+                mins_until = (sched_dt - ts_dt).total_seconds() / 60
+            except (ValueError, TypeError):
+                continue
+
+            if mins_until < 0 or mins_until > 120:
+                continue
+
+            vid = v["vessel_id"]
+            prev_delay = raw["vessel_delays"].get(vid, 0.0)
+            turnaround = raw["vessel_turnarounds"].get(vid)
+
+            pred = ml_predictor.predict(
+                route_abbrev=v.get("route_abbrev", ""),
+                departing_terminal_id=v.get("departing_terminal_id", 0),
+                vessel_id=vid,
+                day_of_week=sched_dt.weekday(),
+                hour_of_day=sched_dt.hour,
+                minutes_until_scheduled_departure=mins_until,
+                current_vessel_delay_minutes=prev_delay,
+                vessel_speed=v.get("speed"),
+                turnaround_minutes=turnaround,
+            )
+            if pred:
+                predictions[vid] = pred
+
+    # Build sailing lookup by (vessel_id, scheduled_departure) for actual outcomes
+    sailing_lookup = {}
+    for s in raw["sailings"]:
+        key = (s["vessel_id"], s["scheduled_departure"])
+        sailing_lookup[key] = s
+
+    # Build capacity lookup by (departing_terminal_id, departure_time)
+    capacity_lookup = {}
+    for c in raw["capacity"]:
+        key = (c["departing_terminal_id"], c["departure_time"])
+        capacity_lookup[key] = c
+
+    # Assemble vessel cards
+    vessel_cards = []
+    for v in raw["vessels"]:
+        vid = v["vessel_id"]
+        sched = v.get("scheduled_departure")
+
+        # Find actual outcome for this sailing
+        actual = None
+        if sched:
+            actual = sailing_lookup.get((vid, sched))
+
+        # Find capacity for this sailing
+        cap = None
+        if sched and v.get("departing_terminal_id"):
+            cap = capacity_lookup.get((v["departing_terminal_id"], sched))
+
+        card = {
+            "vessel_id": vid,
+            "vessel_name": v["vessel_name"],
+            "route_abbrev": v.get("route_abbrev"),
+            "departing_terminal_name": v.get("departing_terminal_name"),
+            "arriving_terminal_name": v.get("arriving_terminal_name"),
+            "latitude": v.get("latitude"),
+            "longitude": v.get("longitude"),
+            "speed": v.get("speed"),
+            "heading": v.get("heading"),
+            "at_dock": bool(v.get("at_dock")),
+            "scheduled_departure": sched,
+            "left_dock": v.get("left_dock"),
+            "eta": v.get("eta"),
+            "snapshot_time": v.get("collected_at"),
+        }
+
+        if actual:
+            card["actual_delay_minutes"] = actual["delay_minutes"]
+            card["actual_departure"] = actual["actual_departure"]
+
+        pred = predictions.get(vid)
+        if pred:
+            card["predicted_delay"] = pred["predicted_delay"]
+            card["predicted_lower"] = pred["lower_bound"]
+            card["predicted_upper"] = pred["upper_bound"]
+
+        if cap and cap["max_space_count"] > 0:
+            fill_pct = round(
+                (1 - cap["drive_up_space_count"] / cap["max_space_count"]) * 100, 1
+            )
+            card["capacity"] = {
+                "drive_up_spaces": cap["drive_up_space_count"],
+                "max_spaces": cap["max_space_count"],
+                "fill_pct": fill_pct,
+            }
+
+        # Compute prediction error if we have both prediction and actual
+        if "predicted_delay" in card and "actual_delay_minutes" in card:
+            card["prediction_error"] = round(
+                card["predicted_delay"] - card["actual_delay_minutes"], 2
+            )
+            card["within_bounds"] = (
+                card["predicted_lower"] <= card["actual_delay_minutes"]
+                <= card["predicted_upper"]
+            )
+
+        vessel_cards.append(card)
+
+    date_range = get_data_date_range()
+
+    return {
+        "timestamp": timestamp,
+        "vessels": vessel_cards,
+        "all_sailings": raw["sailings"],
+        "date_range": date_range,
+        "model_trained": ml_predictor.is_trained,
+    }
 
 
 @app.get("/debug/cache-status")

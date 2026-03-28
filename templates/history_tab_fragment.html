@@ -1,0 +1,754 @@
+<!-- Historical Data Dashboard Tab -->
+<div class="dashboard-container">
+    <!-- Filter Controls -->
+    <div class="history-filters">
+        <div class="filter-group">
+            <label for="filter-route">Route</label>
+            <select id="filter-route">
+                <option value="">All Routes</option>
+                {% for r in routes %}
+                <option value="{{ r.route_abbrev }}">{{ r.route_abbrev }} ({{ r.count }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="filter-season">Season</label>
+            <select id="filter-season">
+                <option value="">All Seasons</option>
+                <option value="winter">Winter (Dec–Feb)</option>
+                <option value="spring">Spring (Mar–May)</option>
+                <option value="summer">Summer (Jun–Aug)</option>
+                <option value="fall">Fall (Sep–Nov)</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="filter-day">Day</label>
+            <select id="filter-day">
+                <option value="">All Days</option>
+                <option value="weekdays">Weekdays</option>
+                <option value="weekends">Weekends</option>
+                <option value="0">Sunday</option>
+                <option value="1">Monday</option>
+                <option value="2">Tuesday</option>
+                <option value="3">Wednesday</option>
+                <option value="4">Thursday</option>
+                <option value="5">Friday</option>
+                <option value="6">Saturday</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="history-summary" class="history-summary"></div>
+
+    <div id="dashboard-content" class="dashboard-grid">
+        <div class="loading-state">
+            <div>Loading historical data...</div>
+        </div>
+    </div>
+
+    <!-- Collapsible Model Performance section -->
+    <details class="model-details" id="model-section">
+        <summary class="model-summary">Model Performance</summary>
+        <div id="model-content" class="dashboard-grid" style="margin-top: var(--md)">
+        </div>
+    </details>
+
+    <!-- Time Travel: Historical Replay & Error Analysis -->
+    <details class="model-details" id="time-travel-section" style="margin-top: var(--lg)">
+        <summary class="model-summary">Time Travel — Historical Replay &amp; Error Analysis</summary>
+        <div id="time-travel-content" style="margin-top: var(--md)">
+            <div class="tt-controls">
+                <div class="tt-picker-row">
+                    <div class="filter-group">
+                        <label for="tt-date">Date</label>
+                        <input type="date" id="tt-date"
+                            {% if date_range.min_date %}min="{{ date_range.min_date }}"{% endif %}
+                            {% if date_range.max_date %}max="{{ date_range.max_date }}"{% endif %}
+                            {% if date_range.max_date %}value="{{ date_range.max_date }}"{% endif %}
+                        >
+                    </div>
+                    <div class="filter-group">
+                        <label for="tt-time">Time</label>
+                        <input type="time" id="tt-time" value="17:00" step="900">
+                    </div>
+                    <div class="filter-group" style="justify-content: flex-end">
+                        <label>&nbsp;</label>
+                        <button id="tt-go" class="tt-button" onclick="loadTimeTravel()">Go</button>
+                    </div>
+                </div>
+                {% if date_range.days_with_data %}
+                <div class="stat-meta">{{ date_range.days_with_data }} days of data available
+                    {% if date_range.min_date %}({{ date_range.min_date }} to {{ date_range.max_date }}){% endif %}
+                </div>
+                {% else %}
+                <div class="stat-meta">No vessel snapshot data available yet.</div>
+                {% endif %}
+            </div>
+            <div id="tt-results"></div>
+        </div>
+    </details>
+</div>
+
+<script>
+(function() {
+    const ROUTE_LABELS = { 'sea-bi': 'Seattle–Bainbridge', 'ed-king': 'Kingston–Edmonds' };
+    const DOW_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const OCEAN_DEEP = '#1e3a8a';
+    const OCEAN_SURFACE = '#3b82f6';
+    const SUCCESS_GREEN = '#10b981';
+    const DANGER_RED = '#ef4444';
+    const DECK_GRAY = '#64748b';
+
+    const chartDefaults = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                backgroundColor: 'rgba(10, 22, 40, 0.9)',
+                titleFont: { size: 13 },
+                bodyFont: { size: 12 },
+                cornerRadius: 8,
+                padding: 10,
+            },
+        },
+        scales: {
+            x: {
+                grid: { display: false },
+                ticks: { color: DECK_GRAY, font: { size: 11 } },
+            },
+            y: {
+                grid: { color: 'rgba(0,0,0,0.05)' },
+                ticks: { color: DECK_GRAY, font: { size: 11 } },
+            },
+        },
+    };
+
+    function mergeOpts(overrides) {
+        return JSON.parse(JSON.stringify({...chartDefaults, ...overrides}));
+    }
+
+    // Track active Chart.js instances so we can destroy them on re-render
+    let activeCharts = [];
+    function destroyCharts() {
+        activeCharts.forEach(c => c.destroy());
+        activeCharts = [];
+    }
+    function track(chart) { activeCharts.push(chart); return chart; }
+
+    function buildUrl() {
+        const params = new URLSearchParams();
+        const route = document.getElementById('filter-route').value;
+        const season = document.getElementById('filter-season').value;
+        const day = document.getElementById('filter-day').value;
+        if (route) params.set('route', route);
+        if (season) params.set('season', season);
+        if (day) params.set('day_type', day);
+        return '/history-data' + (params.toString() ? '?' + params.toString() : '');
+    }
+
+    function loadData() {
+        const container = document.getElementById('dashboard-content');
+        container.innerHTML = '<div class="loading-state"><div>Loading...</div></div>';
+
+        fetch(buildUrl())
+            .then(r => r.json())
+            .then(data => {
+                destroyCharts();
+                renderSummary(data);
+                renderCharts(data);
+                renderModel(data);
+            })
+            .catch(() => {
+                container.innerHTML = '<div class="loading-state"><div>Unable to load data.</div></div>';
+            });
+    }
+
+    // Bind filter changes
+    document.getElementById('filter-route').addEventListener('change', loadData);
+    document.getElementById('filter-season').addEventListener('change', loadData);
+    document.getElementById('filter-day').addEventListener('change', loadData);
+
+    // Initial load
+    loadData();
+
+    function renderSummary(data) {
+        const el = document.getElementById('history-summary');
+        const count = data.event_count;
+        if (!count) {
+            el.innerHTML = '<div class="stat-meta">No sailings match these filters.</div>';
+            return;
+        }
+        // Compute overall stats from delays_by_route
+        let totalSailings = 0, weightedDelay = 0, weightedOnTime = 0;
+        for (const r of (data.delays_by_route || [])) {
+            totalSailings += r.count;
+            weightedDelay += r.avg_delay * r.count;
+            weightedOnTime += r.on_time_pct * r.count;
+        }
+        const avgDelay = totalSailings ? (weightedDelay / totalSailings).toFixed(1) : '–';
+        const onTimePct = totalSailings ? (weightedOnTime / totalSailings).toFixed(0) : '–';
+
+        el.innerHTML = `
+            <div class="summary-stats">
+                <div class="summary-stat">
+                    <div class="summary-stat-value">${count.toLocaleString()}</div>
+                    <div class="summary-stat-label">Sailings</div>
+                </div>
+                <div class="summary-stat">
+                    <div class="summary-stat-value">${avgDelay} min</div>
+                    <div class="summary-stat-label">Avg Delay</div>
+                </div>
+                <div class="summary-stat">
+                    <div class="summary-stat-value">${onTimePct}%</div>
+                    <div class="summary-stat-label">On Time</div>
+                </div>
+            </div>`;
+    }
+
+    function renderCharts(data) {
+        const container = document.getElementById('dashboard-content');
+        let html = '';
+
+        // Busyness heatmap
+        html += `
+        <div class="dash-card dash-card-wide">
+            <div class="dash-card-header">Typical Busyness by Day &amp; Hour</div>
+            <div class="dash-card-body">
+                <div id="heatmap-container" class="heatmap-container"></div>
+                <div class="heatmap-legend">
+                    <span class="heatmap-legend-label">Empty</span>
+                    <div class="heatmap-legend-bar"></div>
+                    <span class="heatmap-legend-label">Full</span>
+                </div>
+            </div>
+        </div>`;
+
+        // Delay by hour
+        html += `
+        <div class="dash-card">
+            <div class="dash-card-header">Average Delay by Hour</div>
+            <div class="dash-card-body"><div class="chart-wrap"><canvas id="chart-hour"></canvas></div></div>
+        </div>`;
+
+        // Delay by day of week
+        html += `
+        <div class="dash-card">
+            <div class="dash-card-header">Average Delay by Day of Week</div>
+            <div class="dash-card-body"><div class="chart-wrap"><canvas id="chart-dow"></canvas></div></div>
+        </div>`;
+
+        // Delay distribution
+        html += `
+        <div class="dash-card">
+            <div class="dash-card-header">Delay Distribution</div>
+            <div class="dash-card-body"><div class="chart-wrap"><canvas id="chart-distribution"></canvas></div></div>
+        </div>`;
+
+        // Delays by route (only when showing all routes)
+        if (!document.getElementById('filter-route').value && data.delays_by_route.length > 1) {
+            html += `
+            <div class="dash-card">
+                <div class="dash-card-header">Average Delay by Route</div>
+                <div class="dash-card-body"><div class="chart-wrap"><canvas id="chart-route"></canvas></div></div>
+            </div>`;
+        }
+
+        // On-time trend
+        if (data.daily_trend.length > 1) {
+            html += `
+            <div class="dash-card dash-card-wide">
+                <div class="dash-card-header">On-Time Performance Trend</div>
+                <div class="dash-card-body"><div class="chart-wrap"><canvas id="chart-trend"></canvas></div></div>
+            </div>`;
+        }
+
+        container.innerHTML = html;
+
+        // --- Render heatmap ---
+        renderHeatmap(data.heatmap || []);
+
+        // --- Render charts ---
+
+        // Delay by hour
+        if (data.delays_by_hour.length > 0) {
+            track(new Chart(document.getElementById('chart-hour'), {
+                type: 'bar',
+                data: {
+                    labels: data.delays_by_hour.map(d => d.hour_of_day + ':00'),
+                    datasets: [{
+                        data: data.delays_by_hour.map(d => d.avg_delay),
+                        backgroundColor: data.delays_by_hour.map(d =>
+                            ((d.hour_of_day >= 6 && d.hour_of_day <= 9) || (d.hour_of_day >= 15 && d.hour_of_day <= 19))
+                                ? OCEAN_DEEP : OCEAN_SURFACE
+                        ),
+                        borderRadius: 4,
+                    }],
+                },
+                options: {
+                    ...mergeOpts({}),
+                    scales: {
+                        ...chartDefaults.scales,
+                        y: { ...chartDefaults.scales.y, title: { display: true, text: 'Avg Delay (min)', color: DECK_GRAY } },
+                    },
+                },
+            }));
+        }
+
+        // Delay by day of week
+        if (data.delays_by_dow.length > 0) {
+            track(new Chart(document.getElementById('chart-dow'), {
+                type: 'bar',
+                data: {
+                    labels: data.delays_by_dow.map(d => DOW_LABELS[d.day_of_week]),
+                    datasets: [{
+                        data: data.delays_by_dow.map(d => d.avg_delay),
+                        backgroundColor: OCEAN_SURFACE,
+                        borderRadius: 6,
+                    }],
+                },
+                options: {
+                    ...mergeOpts({}),
+                    scales: {
+                        ...chartDefaults.scales,
+                        y: { ...chartDefaults.scales.y, title: { display: true, text: 'Avg Delay (min)', color: DECK_GRAY } },
+                    },
+                },
+            }));
+        }
+
+        // Delay distribution
+        if (data.delay_distribution.length > 0) {
+            track(new Chart(document.getElementById('chart-distribution'), {
+                type: 'bar',
+                data: {
+                    labels: data.delay_distribution.map(d => d.delay_bin),
+                    datasets: [{
+                        data: data.delay_distribution.map(d => d.count),
+                        backgroundColor: data.delay_distribution.map(d =>
+                            d.delay_bin <= 0 ? SUCCESS_GREEN : (d.delay_bin >= 5 ? DANGER_RED : OCEAN_SURFACE)
+                        ),
+                        borderRadius: 3,
+                    }],
+                },
+                options: {
+                    ...mergeOpts({}),
+                    scales: {
+                        ...chartDefaults.scales,
+                        y: { ...chartDefaults.scales.y, title: { display: true, text: 'Sailings', color: DECK_GRAY } },
+                        x: { ...chartDefaults.scales.x, title: { display: true, text: 'Delay (minutes)', color: DECK_GRAY } },
+                    },
+                },
+            }));
+        }
+
+        // By route
+        const chartRouteEl = document.getElementById('chart-route');
+        if (chartRouteEl && data.delays_by_route.length > 0) {
+            const routeColors = [OCEAN_DEEP, OCEAN_SURFACE, SUCCESS_GREEN, '#8b5cf6'];
+            track(new Chart(chartRouteEl, {
+                type: 'bar',
+                data: {
+                    labels: data.delays_by_route.map(d => ROUTE_LABELS[d.route_abbrev] || d.route_abbrev),
+                    datasets: [{
+                        data: data.delays_by_route.map(d => d.avg_delay),
+                        backgroundColor: data.delays_by_route.map((_, i) => routeColors[i % routeColors.length]),
+                        borderRadius: 6,
+                    }],
+                },
+                options: {
+                    ...mergeOpts({}),
+                    indexAxis: 'y',
+                    scales: {
+                        x: { ...chartDefaults.scales.x, title: { display: true, text: 'Avg Delay (min)', color: DECK_GRAY } },
+                        y: { ...chartDefaults.scales.y, grid: { display: false } },
+                    },
+                },
+            }));
+        }
+
+        // On-time trend
+        if (data.daily_trend.length > 1 && document.getElementById('chart-trend')) {
+            const trend = data.daily_trend.slice(-60);
+            track(new Chart(document.getElementById('chart-trend'), {
+                type: 'line',
+                data: {
+                    labels: trend.map(d => {
+                        const dt = new Date(d.date + 'T00:00:00');
+                        return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    }),
+                    datasets: [{
+                        label: 'On-Time %',
+                        data: trend.map(d => d.on_time_pct),
+                        borderColor: SUCCESS_GREEN,
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: trend.length > 30 ? 0 : 2,
+                        pointHoverRadius: 5,
+                    }],
+                },
+                options: {
+                    ...mergeOpts({}),
+                    scales: {
+                        ...chartDefaults.scales,
+                        y: {
+                            ...chartDefaults.scales.y,
+                            title: { display: true, text: 'On-Time %', color: DECK_GRAY },
+                            min: 0, max: 100,
+                        },
+                    },
+                },
+            }));
+        }
+    }
+
+    function renderHeatmap(heatmapData) {
+        const container = document.getElementById('heatmap-container');
+        if (!container) return;
+        if (!heatmapData.length) {
+            container.innerHTML = '<div class="stat-meta">No capacity data available for these filters.</div>';
+            return;
+        }
+
+        // Build lookup: key = "dow-hour"
+        const lookup = {};
+        let maxFill = 0;
+        for (const d of heatmapData) {
+            lookup[d.day_of_week + '-' + d.hour_of_day] = d;
+            if (d.avg_fill_pct > maxFill) maxFill = d.avg_fill_pct;
+        }
+
+        // Find the range of hours with data
+        const hours = [...new Set(heatmapData.map(d => d.hour_of_day))].sort((a,b) => a-b);
+        const minHour = Math.max(0, hours[0] - 1);
+        const maxHour = Math.min(23, hours[hours.length - 1] + 1);
+        const displayHours = [];
+        for (let h = minHour; h <= maxHour; h++) displayHours.push(h);
+
+        let html = '<table class="heatmap-table"><thead><tr><th></th>';
+        for (const h of displayHours) {
+            html += `<th>${h}</th>`;
+        }
+        html += '</tr></thead><tbody>';
+
+        for (let dow = 0; dow <= 6; dow++) {
+            html += `<tr><td class="heatmap-row-label">${DOW_LABELS[dow]}</td>`;
+            for (const h of displayHours) {
+                const d = lookup[dow + '-' + h];
+                if (d && d.avg_fill_pct !== null) {
+                    const pct = d.avg_fill_pct;
+                    const color = heatmapColor(pct);
+                    const textColor = pct > 60 ? '#fff' : '#1e293b';
+                    html += `<td class="heatmap-cell" style="background:${color};color:${textColor}" title="${DOW_LABELS[dow]} ${h}:00 – ${pct}% full (${d.sailing_count} sailings)">${Math.round(pct)}</td>`;
+                } else {
+                    html += '<td class="heatmap-cell heatmap-empty" title="No data">–</td>';
+                }
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    function heatmapColor(pct) {
+        // Green (empty) → Yellow (moderate) → Red (full)
+        if (pct <= 30) {
+            const t = pct / 30;
+            return interpolate([16, 185, 129], [234, 179, 8], t);
+        } else if (pct <= 65) {
+            const t = (pct - 30) / 35;
+            return interpolate([234, 179, 8], [239, 68, 68], t);
+        } else {
+            const t = Math.min(1, (pct - 65) / 35);
+            return interpolate([239, 68, 68], [153, 27, 27], t);
+        }
+    }
+
+    function interpolate(c1, c2, t) {
+        const r = Math.round(c1[0] + (c2[0] - c1[0]) * t);
+        const g = Math.round(c1[1] + (c2[1] - c1[1]) * t);
+        const b = Math.round(c1[2] + (c2[2] - c1[2]) * t);
+        return `rgb(${r},${g},${b})`;
+    }
+
+    function renderModel(data) {
+        const container = document.getElementById('model-content');
+        if (!container) return;
+
+        const model = data.model;
+        let html = '';
+
+        if (model.is_trained && model.evaluation && model.evaluation.error_by_horizon) {
+            const ev = model.evaluation;
+            html += `
+            <div class="dash-card dash-card-wide">
+                <div class="dash-card-header">Prediction Error by Time to Departure</div>
+                <div class="dash-card-body">
+                    <div class="chart-wrap chart-wrap-tall"><canvas id="chart-horizon"></canvas></div>
+                    <div class="stat-meta" style="margin-top: var(--sm)">
+                        Overall: ${ev.overall_mae} min MAE, ${ev.overall_mean_error > 0 ? '+' : ''}${ev.overall_mean_error} min bias
+                        ${ev.improvement_pct !== undefined ? ` &middot; ${ev.improvement_pct}% better than flat propagation` : ''}
+                        &middot; ${data.event_count.toLocaleString()} sailings
+                    </div>
+                </div>
+            </div>`;
+        } else {
+            html += `
+            <div class="dash-card dash-card-wide">
+                <div class="dash-card-header">Model Status</div>
+                <div class="dash-card-body">
+                    <div class="stat-meta">
+                        ${model.is_trained ? 'Model trained' : 'Model not yet trained'}
+                        ${model.last_trained ? ' · Last trained: ' + new Date(model.last_trained).toLocaleDateString() : ''}
+                        ${model.training_data_size ? ' · ' + model.training_data_size.toLocaleString() + ' training samples' : ''}
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        container.innerHTML = html;
+
+        // Render error-by-horizon chart
+        if (model.is_trained && model.evaluation && model.evaluation.error_by_horizon) {
+            const horizon = model.evaluation.error_by_horizon;
+            const labels = horizon.map(d => d.minutes_out + 'm');
+            const maeValues = horizon.map(d => d.mae);
+            const biasValues = horizon.map(d => d.mean_error);
+            const errUpper = horizon.map(d => d.error_p88 || 0);
+            const errLower = horizon.map(d => d.error_p12 || 0);
+
+            track(new Chart(document.getElementById('chart-horizon'), {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '75% of errors',
+                            data: errUpper,
+                            borderColor: 'transparent',
+                            pointRadius: 0, pointHitRadius: 0,
+                            tension: 0.3,
+                            fill: { target: 1, above: 'rgba(30, 58, 138, 0.10)', below: 'rgba(30, 58, 138, 0.10)' },
+                        },
+                        {
+                            label: '75% error lower',
+                            data: errLower,
+                            borderColor: 'transparent',
+                            pointRadius: 0, pointHitRadius: 0,
+                            tension: 0.3, fill: false,
+                        },
+                        {
+                            label: 'Avg Error (MAE)',
+                            data: maeValues,
+                            borderColor: OCEAN_DEEP, backgroundColor: OCEAN_DEEP,
+                            fill: false, tension: 0.3,
+                            pointRadius: 2, pointHoverRadius: 5, borderWidth: 2,
+                        },
+                        {
+                            label: 'Bias',
+                            data: biasValues,
+                            borderColor: DANGER_RED, backgroundColor: DANGER_RED,
+                            borderDash: [4, 3], tension: 0.3,
+                            pointRadius: 2, pointHoverRadius: 5, borderWidth: 1.5, fill: false,
+                        },
+                    ],
+                },
+                options: {
+                    ...mergeOpts({}),
+                    plugins: {
+                        ...chartDefaults.plugins,
+                        legend: {
+                            display: true, position: 'top',
+                            labels: {
+                                usePointStyle: true, pointStyle: 'circle',
+                                boxWidth: 6, boxHeight: 6, font: { size: 11 },
+                                filter: item => item.text !== '75% error lower',
+                            },
+                        },
+                        tooltip: {
+                            ...chartDefaults.plugins.tooltip,
+                            filter: item => item.dataset.label !== '75% error lower',
+                            callbacks: {
+                                label: ctx => {
+                                    const val = ctx.parsed.y;
+                                    return `${ctx.dataset.label}: ${val >= 0 ? '+' : ''}${val.toFixed(1)} min`;
+                                },
+                            },
+                        },
+                    },
+                    scales: {
+                        ...chartDefaults.scales,
+                        y: { ...chartDefaults.scales.y, title: { display: true, text: 'Error (minutes)', color: DECK_GRAY } },
+                        x: {
+                            ...chartDefaults.scales.x,
+                            title: { display: true, text: 'Time to Departure', color: DECK_GRAY },
+                            ticks: { ...chartDefaults.scales.x.ticks, maxTicksLimit: 10, autoSkip: true },
+                        },
+                    },
+                },
+            }));
+        }
+    }
+})();
+
+// --- Time Travel ---
+function loadTimeTravel() {
+    const dateEl = document.getElementById('tt-date');
+    const timeEl = document.getElementById('tt-time');
+    const results = document.getElementById('tt-results');
+    if (!dateEl.value || !timeEl.value) {
+        results.innerHTML = '<div class="stat-meta">Please select a date and time.</div>';
+        return;
+    }
+    const timestamp = dateEl.value + 'T' + timeEl.value + ':00';
+    results.innerHTML = '<div class="loading-state"><div>Loading snapshot...</div></div>';
+
+    fetch('/time-travel-data?timestamp=' + encodeURIComponent(timestamp))
+        .then(r => r.json())
+        .then(data => renderTimeTravel(data, results))
+        .catch(() => {
+            results.innerHTML = '<div class="stat-meta">Failed to load time travel data.</div>';
+        });
+}
+
+function renderTimeTravel(data, container) {
+    if (!data.vessels || data.vessels.length === 0) {
+        container.innerHTML = '<div class="stat-meta">No vessel data found at this time.</div>';
+        return;
+    }
+
+    const ROUTE_LABELS = { 'sea-bi': 'Seattle \u2013 Bainbridge', 'ed-king': 'Kingston \u2013 Edmonds' };
+    const fmtTime = (iso) => {
+        if (!iso) return '\u2013';
+        try {
+            const d = new Date(iso);
+            return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        } catch { return iso; }
+    };
+    const fmtDelay = (min) => {
+        if (min === null || min === undefined) return '\u2013';
+        const sign = min >= 0 ? '+' : '';
+        return sign + min.toFixed(1) + ' min';
+    };
+
+    // Summary: how many predictions, how many within bounds
+    const withPred = data.vessels.filter(v => v.predicted_delay !== undefined && v.actual_delay_minutes !== undefined);
+    let summaryHtml = '';
+    if (withPred.length > 0) {
+        const withinBounds = withPred.filter(v => v.within_bounds).length;
+        const avgError = (withPred.reduce((s, v) => s + Math.abs(v.prediction_error), 0) / withPred.length).toFixed(1);
+        summaryHtml = `
+            <div class="summary-stats" style="margin-bottom: var(--md)">
+                <div class="summary-stat">
+                    <div class="summary-stat-value">${withPred.length}</div>
+                    <div class="summary-stat-label">Predictions</div>
+                </div>
+                <div class="summary-stat">
+                    <div class="summary-stat-value">${avgError} min</div>
+                    <div class="summary-stat-label">Avg |Error|</div>
+                </div>
+                <div class="summary-stat">
+                    <div class="summary-stat-value">${Math.round(withinBounds / withPred.length * 100)}%</div>
+                    <div class="summary-stat-label">Within CI</div>
+                </div>
+            </div>`;
+    }
+
+    if (!data.model_trained) {
+        summaryHtml += '<div class="stat-meta" style="margin-bottom: var(--md)">Model not trained — predictions unavailable. Only actual outcomes shown.</div>';
+    }
+
+    // Vessel cards
+    let cardsHtml = '<div class="tt-cards">';
+    for (const v of data.vessels) {
+        const routeLabel = ROUTE_LABELS[v.route_abbrev] || v.route_abbrev || 'Unknown route';
+        const status = v.at_dock ? 'At Dock' : (v.speed > 0 ? `Underway ${v.speed.toFixed(1)} kn` : 'In Transit');
+        const direction = [v.departing_terminal_name, v.arriving_terminal_name].filter(Boolean).join(' \u2192 ') || '';
+
+        // Prediction vs actual comparison
+        let predActualHtml = '';
+        if (v.predicted_delay !== undefined || v.actual_delay_minutes !== undefined) {
+            predActualHtml = '<div class="tt-comparison">';
+
+            if (v.actual_delay_minutes !== undefined) {
+                const delayClass = v.actual_delay_minutes <= 0 ? 'tt-on-time' : (v.actual_delay_minutes >= 5 ? 'tt-late' : 'tt-minor');
+                predActualHtml += `
+                    <div class="tt-metric">
+                        <div class="tt-metric-label">Actual</div>
+                        <div class="tt-metric-value ${delayClass}">${fmtDelay(v.actual_delay_minutes)}</div>
+                    </div>`;
+            }
+
+            if (v.predicted_delay !== undefined) {
+                predActualHtml += `
+                    <div class="tt-metric">
+                        <div class="tt-metric-label">Predicted</div>
+                        <div class="tt-metric-value">${fmtDelay(v.predicted_delay)}</div>
+                        <div class="tt-metric-sub">[${fmtDelay(v.predicted_lower)} to ${fmtDelay(v.predicted_upper)}]</div>
+                    </div>`;
+            }
+
+            if (v.prediction_error !== undefined) {
+                const errClass = Math.abs(v.prediction_error) <= 2 ? 'tt-on-time' : (Math.abs(v.prediction_error) >= 5 ? 'tt-late' : 'tt-minor');
+                const boundsIcon = v.within_bounds ? '\u2705' : '\u274C';
+                predActualHtml += `
+                    <div class="tt-metric">
+                        <div class="tt-metric-label">Error ${boundsIcon}</div>
+                        <div class="tt-metric-value ${errClass}">${fmtDelay(v.prediction_error)}</div>
+                    </div>`;
+            }
+
+            predActualHtml += '</div>';
+        }
+
+        // Capacity
+        let capHtml = '';
+        if (v.capacity) {
+            const fillClass = v.capacity.fill_pct >= 80 ? 'tt-late' : (v.capacity.fill_pct >= 50 ? 'tt-minor' : 'tt-on-time');
+            capHtml = `
+                <div class="tt-capacity">
+                    <div class="tt-cap-bar-bg">
+                        <div class="tt-cap-bar-fill ${fillClass}" style="width:${Math.min(100, v.capacity.fill_pct)}%"></div>
+                    </div>
+                    <span class="tt-cap-text">${v.capacity.fill_pct}% full (${v.capacity.max_spaces - v.capacity.drive_up_spaces}/${v.capacity.max_spaces} spaces)</span>
+                </div>`;
+        }
+
+        cardsHtml += `
+        <div class="tt-card">
+            <div class="tt-card-header">
+                <div class="tt-vessel-name">${v.vessel_name}</div>
+                <div class="tt-vessel-status">${status}</div>
+            </div>
+            <div class="tt-card-body">
+                <div class="tt-route">${routeLabel}</div>
+                ${direction ? '<div class="tt-direction">' + direction + '</div>' : ''}
+                ${v.scheduled_departure ? '<div class="tt-sched">Scheduled: ' + fmtTime(v.scheduled_departure) + (v.left_dock ? ' \u2022 Departed: ' + fmtTime(v.left_dock) : '') + '</div>' : '<div class="tt-sched">No upcoming sailing</div>'}
+                ${predActualHtml}
+                ${capHtml}
+            </div>
+        </div>`;
+    }
+    cardsHtml += '</div>';
+
+    // Sailings timeline (all sailings in the window)
+    let timelineHtml = '';
+    if (data.all_sailings && data.all_sailings.length > 0) {
+        timelineHtml = '<div class="tt-timeline"><div class="tt-timeline-title">All Sailings in Window</div><table class="tt-timeline-table"><thead><tr><th>Vessel</th><th>Route</th><th>Sched</th><th>Actual</th><th>Delay</th></tr></thead><tbody>';
+        for (const s of data.all_sailings) {
+            const delayClass = s.delay_minutes <= 0 ? 'tt-on-time' : (s.delay_minutes >= 5 ? 'tt-late' : 'tt-minor');
+            timelineHtml += `<tr>
+                <td>${s.vessel_name}</td>
+                <td>${ROUTE_LABELS[s.route_abbrev] || s.route_abbrev || ''}</td>
+                <td>${fmtTime(s.scheduled_departure)}</td>
+                <td>${fmtTime(s.actual_departure)}</td>
+                <td class="${delayClass}">${fmtDelay(s.delay_minutes)}</td>
+            </tr>`;
+        }
+        timelineHtml += '</tbody></table></div>';
+    }
+
+    container.innerHTML = summaryHtml + cardsHtml + timelineHtml;
+}
+</script>

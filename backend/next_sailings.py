@@ -191,9 +191,7 @@ def _build_en_route_features(
         sailing.departing_terminal_id, sched_iso
     )
     turnaround = (
-        get_turnaround_minutes(vessel_id, sched_iso)
-        if vessel_id is not None
-        else None
+        get_turnaround_minutes(vessel_id, sched_iso) if vessel_id is not None else None
     )
 
     return {
@@ -232,9 +230,7 @@ def _build_dock_features(
         ),
         "minutes_at_dock": round(mins_at_dock, 1),
         "incoming_vehicle_fullness": (
-            round(incoming_fullness, 2)
-            if incoming_fullness is not None
-            else None
+            round(incoming_fullness, 2) if incoming_fullness is not None else None
         ),
         "current_vessel_delay_minutes": delay_minutes,
     }
@@ -285,8 +281,12 @@ def propigate_delays(
                     sailing.delay_lower_bound = round(prediction["lower_bound"])
                     sailing.delay_upper_bound = round(prediction["upper_bound"])
                     _record_prediction(
-                        vessel_id, vessel_name, sailing,
-                        "en_route_model", inputs, prediction,
+                        vessel_id,
+                        vessel_name,
+                        sailing,
+                        "en_route_model",
+                        inputs,
+                        prediction,
                     )
                     continue
 
@@ -294,7 +294,9 @@ def propigate_delays(
         if delay:
             sailing.delay_in_minutes = delay_minutes
             _record_prediction(
-                vessel_id, vessel_name, sailing,
+                vessel_id,
+                vessel_name,
+                sailing,
                 "fallback_flat",
                 {"current_vessel_delay_minutes": delay_minutes},
                 None,
@@ -335,8 +337,12 @@ def _apply_dock_prediction(sailing: DirectionalSailing, vessel: Vessel) -> None:
             sailing.delay_lower_bound = round(prediction["lower_bound"])
             sailing.delay_upper_bound = round(prediction["upper_bound"])
             _record_prediction(
-                vessel.vessel_id, vessel.vessel_name, sailing,
-                "dock_model", inputs, prediction,
+                vessel.vessel_id,
+                vessel.vessel_name,
+                sailing,
+                "dock_model",
+                inputs,
+                prediction,
             )
             return
 
@@ -386,15 +392,11 @@ def _filter_next_sailings(
 
     if vessel.at_dock:
         return [
-            s for s in sailings
-            if s.scheduled_departure >= vessel.scheduled_departure
+            s for s in sailings if s.scheduled_departure >= vessel.scheduled_departure
         ]
 
     # En route: include the just-departed sailing so users can see it's in transit
-    future = [
-        s for s in sailings
-        if s.scheduled_departure > vessel.scheduled_departure
-    ]
+    future = [s for s in sailings if s.scheduled_departure > vessel.scheduled_departure]
     for s in sailings:
         if s.scheduled_departure == vessel.scheduled_departure:
             if minutes_since(s.scheduled_departure) <= 30:
@@ -418,8 +420,7 @@ def _annotate_with_vessel_state(
     where a vessel reports no direction data).
     """
     direction_matches = (
-        vessel.at_dock
-        or sailing.departing_terminal_id == vessel.departing_terminal_id
+        vessel.at_dock or sailing.departing_terminal_id == vessel.departing_terminal_id
     )
     if not direction_matches:
         return
@@ -469,9 +470,7 @@ def get_next_sailings_by_boat(
         )
 
         next_sailings = (
-            [first_held_back] + remaining
-            if first_held_back is not None
-            else remaining
+            [first_held_back] + remaining if first_held_back is not None else remaining
         )
 
         # Annotate first sailing with live vessel state + dock prediction

@@ -2,6 +2,7 @@
 *.ipynb
 .mypy_cache
 /*.egg-info
+__pycache__/
 */__pycache__/*
 .DS_Store
 data/

@@ -343,12 +343,6 @@ async def get_predictions_data():
     return {**dashboard, "model": model_info}
 
 
-@app.get("/metrics-tab", response_class=HTMLResponse)
-async def get_metrics_tab(request: Request):
-    """Return the user metrics dashboard tab content."""
-    return templates.TemplateResponse("metrics_tab_fragment.html", {"request": request})
-
-
 @app.get("/metrics-data")
 async def get_metrics_data_endpoint(days: int = 30):
     """Return user metrics as JSON."""

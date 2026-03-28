@@ -58,9 +58,20 @@
             <div>Loading...</div>
         </div>
     </div>
+    {% if is_replay %}
+    <!-- Replay control bar -->
+    <div id="replay-bar">
+        <span id="replay-label">REPLAY</span>
+        <button id="replay-back" onclick="replayStep('back')">&larr;</button>
+        <span id="replay-position">{{ replay_info.index + 1 }} / {{ replay_info.total }}</span>
+        <button id="replay-forward" onclick="replayStep('advance')">&rarr;</button>
+        <span id="replay-time">{{ replay_info.captured_at }}</span>
+    </div>
+    {% endif %}
+
     <!-- Leaflet JavaScript for mapping -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    
+
     <script>
         // Register service worker for PWA installability
         if ('serviceWorker' in navigator) {
@@ -76,6 +87,33 @@
             // Add active class to clicked button
             clickedButton.classList.add('active');
         }
+
+        {% if is_replay %}
+        // Replay mode: step through snapshots with arrow keys or buttons
+        async function replayStep(direction) {
+            const url = '/replay/' + direction;
+            try {
+                const resp = await fetch(url, { method: 'POST' });
+                const data = await resp.json();
+                if (data.error && !data.index && data.index !== 0) return;
+
+                document.getElementById('replay-position').textContent =
+                    (data.index + 1) + ' / ' + data.total;
+                document.getElementById('replay-time').textContent = data.captured_at;
+
+                // Refresh the sailings view
+                const target = document.getElementById('sailings-content');
+                if (target) htmx.trigger(target, 'load');
+            } catch (e) {
+                console.error('Replay step failed:', e);
+            }
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowRight') { e.preventDefault(); replayStep('advance'); }
+            if (e.key === 'ArrowLeft')  { e.preventDefault(); replayStep('back'); }
+        });
+        {% endif %}
     </script>
 </body>
 </html>

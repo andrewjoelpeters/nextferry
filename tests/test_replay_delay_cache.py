@@ -1,9 +1,19 @@
-"""Tests for replay vessel history and delay cache warming."""
+"""Tests for replay vessel history, delay cache warming, and snapshot stepping."""
 
+import json
+import tempfile
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import backend.replay as replay_module
 from backend.next_sailings import CACHED_DELAYS, warm_delay_cache
+from backend.replay import (
+    activate_replay,
+    advance_snapshot,
+    get_replay_time,
+    get_snapshot_info,
+    retreat_snapshot,
+)
 
 PT = ZoneInfo("America/Los_Angeles")
 
@@ -51,6 +61,25 @@ def _make_raw_vessel(
         "OpRouteAbbrev": [route],
         "VesselPositionNum": position_num,
     }
+
+
+def _make_scenario_file(vessel_history=None):
+    """Write a scenario JSON to a temp file and return the path."""
+    now = _now()
+    vessel = _make_raw_vessel(at_dock=True)
+
+    scenario = {
+        "captured_at": now.isoformat(),
+        "vessels": [vessel],
+        "schedules": {},
+        "sailing_space": [],
+    }
+    if vessel_history is not None:
+        scenario["vessel_history"] = vessel_history
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(scenario, f)
+    return f.name
 
 
 class TestWarmDelayCache:
@@ -164,3 +193,118 @@ class TestWarmDelayCache:
         assert "ed-king" in CACHED_DELAYS
         assert abs(CACHED_DELAYS["sea-bi"][1].total_seconds() - 180) < 2
         assert abs(CACHED_DELAYS["ed-king"][1].total_seconds() - 600) < 2
+
+
+class TestSnapshotStepping:
+    def test_activate_builds_snapshot_list(self):
+        """History snapshots + final snapshot should be in order."""
+        t1 = (_now() - timedelta(minutes=2)).isoformat()
+        t2 = (_now() - timedelta(minutes=1)).isoformat()
+        vessel = _make_raw_vessel(at_dock=True)
+
+        history = [
+            {"captured_at": t1, "vessels": [vessel]},
+            {"captured_at": t2, "vessels": [vessel]},
+        ]
+        path = _make_scenario_file(vessel_history=history)
+        activate_replay(path)
+
+        # 2 history + 1 final = 3 snapshots
+        assert len(replay_module._snapshots) == 3
+        info = get_snapshot_info()
+        assert info["index"] == 0
+        assert info["total"] == 3
+        assert info["at_start"] is True
+        assert info["at_end"] is False
+
+    def test_activate_legacy_scenario(self):
+        """A scenario without vessel_history should have exactly 1 snapshot."""
+        path = _make_scenario_file(vessel_history=None)
+        activate_replay(path)
+
+        assert len(replay_module._snapshots) == 1
+        info = get_snapshot_info()
+        assert info["total"] == 1
+        assert info["at_start"] is True
+        assert info["at_end"] is True
+
+    def test_advance_and_retreat(self):
+        t1 = (_now() - timedelta(minutes=1)).isoformat()
+        vessel = _make_raw_vessel(at_dock=True)
+        history = [{"captured_at": t1, "vessels": [vessel]}]
+        path = _make_scenario_file(vessel_history=history)
+        activate_replay(path)
+
+        # Start at 0, advance to 1
+        result = advance_snapshot()
+        assert result is not None
+        assert result["index"] == 1
+        assert result["at_end"] is True
+
+        # Can't advance past end
+        assert advance_snapshot() is None
+
+        # Retreat back to 0
+        result = retreat_snapshot()
+        assert result is not None
+        assert result["index"] == 0
+        assert result["at_start"] is True
+
+        # Can't retreat past start
+        assert retreat_snapshot() is None
+
+    def test_advance_updates_replay_time(self):
+        """Each step should update the replay time to match the snapshot."""
+        t1 = (_now() - timedelta(minutes=5)).isoformat()
+        t2 = (_now() - timedelta(minutes=3)).isoformat()
+        vessel = _make_raw_vessel(at_dock=True)
+
+        history = [
+            {"captured_at": t1, "vessels": [vessel]},
+            {"captured_at": t2, "vessels": [vessel]},
+        ]
+        path = _make_scenario_file(vessel_history=history)
+        activate_replay(path)
+
+        # At snapshot 0 (t1)
+        time_at_0 = get_replay_time()
+        assert time_at_0 == datetime.fromisoformat(t1)
+
+        # Advance to snapshot 1 (t2)
+        advance_snapshot()
+        time_at_1 = get_replay_time()
+        assert time_at_1 == datetime.fromisoformat(t2)
+        assert time_at_1 > time_at_0
+
+    def test_advance_swaps_vessel_data(self):
+        """Advancing should change which vessel data is served."""
+        vessel_a = _make_raw_vessel(name="Walla Walla", at_dock=True)
+        vessel_b = _make_raw_vessel(name="Spokane", at_dock=False)
+
+        t1 = (_now() - timedelta(minutes=1)).isoformat()
+        history = [{"captured_at": t1, "vessels": [vessel_a]}]
+
+        # Final snapshot has vessel_b
+        now = _now()
+        scenario = {
+            "captured_at": now.isoformat(),
+            "vessels": [vessel_b],
+            "schedules": {},
+            "sailing_space": [],
+            "vessel_history": history,
+        }
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as f:
+            json.dump(scenario, f)
+
+        activate_replay(f.name)
+
+        # At snapshot 0: should see vessel_a
+        from backend.replay import get_scenario_data
+
+        assert get_scenario_data()["vessels"][0]["VesselName"] == "Walla Walla"
+
+        # Advance to final: should see vessel_b
+        advance_snapshot()
+        assert get_scenario_data()["vessels"][0]["VesselName"] == "Spokane"

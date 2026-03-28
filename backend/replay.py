@@ -7,9 +7,9 @@ live API, and datetime.now() is overridden to the capture time.
 
 Scenarios may also contain a ``vessel_history`` array — a series of vessel
 position snapshots captured over a time window before the final snapshot.
-At replay startup the app fast-forwards through this history to pre-warm
-the delay cache, matching production behavior where delays are observed
-across many polling cycles.
+At replay startup the user can step through snapshots with keyboard controls
+(arrow keys), watching the delay cache accumulate naturally — matching
+production behavior where delays are observed across many polling cycles.
 
 Usage:
     # Capture a scenario from the live API right now
@@ -32,11 +32,13 @@ PT = ZoneInfo("America/Los_Angeles")
 # Global replay state
 _replay_time: datetime | None = None
 _scenario_data: dict | None = None
+_snapshots: list[dict] = []  # [{captured_at, vessels}, ...]
+_snapshot_index: int = 0
 
 
 def activate_replay(scenario_path: str) -> datetime:
     """Load a captured scenario and set replay time to its capture timestamp."""
-    global _replay_time, _scenario_data
+    global _replay_time, _scenario_data, _snapshots, _snapshot_index
 
     path = Path(scenario_path)
     if not path.is_absolute():
@@ -46,16 +48,65 @@ def activate_replay(scenario_path: str) -> datetime:
     with open(path) as f:
         _scenario_data = json.load(f)
 
-    _replay_time = datetime.fromisoformat(_scenario_data["captured_at"])
+    # Build ordered snapshot list: history first, then the final capture
+    history = _scenario_data.get("vessel_history", [])
+    final = {
+        "captured_at": _scenario_data["captured_at"],
+        "vessels": _scenario_data["vessels"],
+    }
+    _snapshots = history + [final]
+    _snapshot_index = 0
+
+    # Start at first snapshot
+    _apply_snapshot(0)
+
+    logger.info(
+        f"Replay mode: {path.name} ({len(_snapshots)} snapshots, "
+        f"starting at {_replay_time.isoformat()})"
+    )
+    return _replay_time
+
+
+def _apply_snapshot(index: int) -> None:
+    """Set replay time and vessel data from the snapshot at the given index."""
+    global _replay_time, _snapshot_index
+
+    _snapshot_index = index
+    snap = _snapshots[index]
+
+    _replay_time = datetime.fromisoformat(snap["captured_at"])
     if _replay_time.tzinfo is None:
         _replay_time = _replay_time.replace(tzinfo=PT)
 
-    history = _scenario_data.get("vessel_history", [])
-    logger.info(
-        f"Replay mode: {path.name} (captured {_replay_time.isoformat()}, "
-        f"{len(history)} history snapshots)"
-    )
-    return _replay_time
+    # Swap the vessel data that wsdot_client reads
+    _scenario_data["vessels"] = snap["vessels"]
+
+
+def advance_snapshot() -> dict | None:
+    """Move to the next snapshot. Returns snapshot info, or None if at end."""
+    if _snapshot_index >= len(_snapshots) - 1:
+        return None
+    _apply_snapshot(_snapshot_index + 1)
+    return get_snapshot_info()
+
+
+def retreat_snapshot() -> dict | None:
+    """Move to the previous snapshot. Returns snapshot info, or None if at start."""
+    if _snapshot_index <= 0:
+        return None
+    _apply_snapshot(_snapshot_index - 1)
+    return get_snapshot_info()
+
+
+def get_snapshot_info() -> dict:
+    """Return current snapshot position and metadata."""
+    return {
+        "index": _snapshot_index,
+        "total": len(_snapshots),
+        "captured_at": _replay_time.isoformat() if _replay_time else None,
+        "at_start": _snapshot_index == 0,
+        "at_end": _snapshot_index >= len(_snapshots) - 1,
+    }
 
 
 def get_replay_time() -> datetime | None:

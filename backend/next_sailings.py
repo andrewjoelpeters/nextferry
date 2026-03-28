@@ -1,11 +1,12 @@
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from backend.config import ROUTES
 
 from .database import get_previous_sailing_fullness, get_turnaround_minutes
+from .replay import now as _now
 from .serializers import (
     DirectionalSailing,
     DirectionalSchedule,
@@ -156,7 +157,7 @@ def propigate_delays(
         return sailings
 
     delay_minutes = datetime_to_minutes(delay) if delay else 0
-    now = datetime.now(tz=ZoneInfo("America/Los_Angeles"))
+    now = _now()
 
     for sailing in sailings:
         if ml_predictor and ml_predictor.is_trained and sailing.scheduled_departure:
@@ -238,7 +239,7 @@ def _apply_dock_prediction(sailing: DirectionalSailing, vessel: Vessel) -> None:
     Falls back to flat delay propagation (vessel's cached delay) if the dock
     model isn't available.
     """
-    now = datetime.now(tz=ZoneInfo("America/Los_Angeles"))
+    now = _now()
 
     # Compute minutes_at_dock from vessel.eta (arrival/dock time)
     minutes_at_dock = 0.0
@@ -357,10 +358,7 @@ def get_next_sailings_by_boat(
         current_vessel = route_vessels_by_position.get(vessel_position_num)
         if not current_vessel or not current_vessel.scheduled_departure:
             next_sailings = [
-                sailing
-                for sailing in sailings
-                if sailing.scheduled_departure
-                > datetime.now(tz=ZoneInfo("America/Los_Angeles"))
+                sailing for sailing in sailings if sailing.scheduled_departure > _now()
             ]
         elif current_vessel.at_dock:
             next_sailings = [
@@ -373,7 +371,7 @@ def get_next_sailings_by_boat(
             departed_sailing = None
             for sailing in sailings:
                 if sailing.scheduled_departure == current_vessel.scheduled_departure:
-                    now = datetime.now(tz=ZoneInfo("America/Los_Angeles"))
+                    now = _now()
                     minutes_since = (
                         now - sailing.scheduled_departure
                     ).total_seconds() / 60

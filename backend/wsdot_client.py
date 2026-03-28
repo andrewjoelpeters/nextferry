@@ -4,6 +4,7 @@ import os
 import requests
 from dotenv import load_dotenv
 
+from .replay import get_replay_time, get_scenario_data
 from .serializers import RawDirectionalSchedule, RawRouteSchedule, TerminalSpace, Vessel
 
 logger = logging.getLogger(__name__)
@@ -13,6 +14,10 @@ APIAccessCode = os.getenv("WSDOT_API_KEY")
 
 
 def get_vessel_positions() -> list[Vessel]:
+    if get_replay_time():
+        data = get_scenario_data()["vessels"]
+        return [Vessel(**ferry) for ferry in data if ferry.get("InService")]
+
     if not APIAccessCode:
         raise Exception("WSDOT_API_KEY environment variable is not set")
 
@@ -36,6 +41,13 @@ def get_vessel_positions() -> list[Vessel]:
 
 
 def get_schedule_today(route_id) -> list[RawDirectionalSchedule]:
+    if get_replay_time():
+        data = get_scenario_data()["schedules"].get(str(route_id))
+        if not data:
+            return []
+        schedule = RawRouteSchedule(**data)
+        return schedule.terminal_combos
+
     url = f"https://www.wsdot.wa.gov/ferries/api/schedule/rest/scheduletoday/{route_id}/false?apiaccesscode={APIAccessCode}"
     response = requests.get(url)
 
@@ -49,6 +61,10 @@ def get_schedule_today(route_id) -> list[RawDirectionalSchedule]:
 
 
 def get_sailing_space():
+    if get_replay_time():
+        data = get_scenario_data().get("sailing_space", [])
+        return [TerminalSpace(**terminal) for terminal in data]
+
     url = f"https://www.wsdot.wa.gov/ferries/api/terminals/rest/terminalsailingspace?apiaccesscode={APIAccessCode}"
     response = requests.get(url)
 

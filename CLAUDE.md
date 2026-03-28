@@ -62,6 +62,21 @@ uv run mypy backend/
 - CI runs `uv run pytest tests/ -v` on Python 3.13 via GitHub Actions
 - Requires a `WSDOT_API_KEY` env var (from `.env` locally, Railway secret in prod)
 
+## Replay Mode
+
+The app can replay captured WSDOT API snapshots, serving the app exactly as it would have appeared at the capture time. Useful for verifying changes against real data without hitting the live API.
+
+```bash
+# Capture a snapshot from the live API
+uv run python -m scripts.capture_scenario
+uv run python -m scripts.capture_scenario --name rush-hour
+
+# Start the app with a captured scenario
+NEXTFERRY_SCENARIO=scenarios/rush-hour.json uvicorn backend.main:app --reload
+```
+
+Scenarios are JSON files in `scenarios/` containing raw WSDOT API responses + a timestamp. In replay mode, the data collector and ML retrainer are disabled.
+
 ## Gotchas
 
 - **WSDOT vessel data can have null fields even when the vessel is moving.** A vessel may report `AtDock: false` with non-zero speed but have `ScheduledDeparture`, `LeftDock`, and `Eta` all null. When matching vessel state to schedule sailings, always verify the direction (departing/arriving terminal) matches before annotating — don't assume the first future sailing corresponds to the vessel's current trip.

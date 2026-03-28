@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import hashlib
 import logging
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -32,6 +33,8 @@ from .next_sailings import (
     get_next_sailings,
     get_vessels_with_delays,
 )
+from .replay import activate_replay, get_replay_time
+from .replay import now as _now
 from .sailing_space import get_sailing_space_lookup
 from .utils import datetime_to_minutes
 
@@ -54,10 +57,8 @@ async def update_sailings_cache():
 
             _sailings_cache = {
                 "routes": processed_routes,
-                "last_updated": datetime.now(tz=ZoneInfo("America/Los_Angeles"))
-                .strftime("%I:%M:%S %p")
-                .lstrip("0"),
-                "cached_at": datetime.now(tz=ZoneInfo("America/Los_Angeles")),
+                "last_updated": _now().strftime("%I:%M:%S %p").lstrip("0"),
+                "cached_at": _now(),
             }
             logger.info(f"Cache updated with {len(processed_routes)} routes")
 
@@ -161,21 +162,33 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing database")
     init_db()
 
+    # Check for replay mode (serve captured WSDOT data instead of live API)
+    scenario_path = os.getenv("NEXTFERRY_SCENARIO")
+    is_replay = bool(scenario_path or get_replay_time())
+    if scenario_path and not get_replay_time():
+        activate_replay(scenario_path)
+
+    tasks = []
+
     # Start background task on startup
     logger.info("Starting sailings cache background task")
-    sailings_cache_task = asyncio.create_task(update_sailings_cache())
+    tasks.append(asyncio.create_task(update_sailings_cache()))
 
-    logger.info("Starting data collector backround tasks")
-    collector_task = asyncio.create_task(collect_data())
+    if not is_replay:
+        # In replay mode, skip data collection and model retraining
+        logger.info("Starting data collector backround tasks")
+        tasks.append(asyncio.create_task(collect_data()))
 
-    logger.info("Starting ML model retraining task")
-    retrain_task = asyncio.create_task(retrain_model_daily())
+        logger.info("Starting ML model retraining task")
+        tasks.append(asyncio.create_task(retrain_model_daily()))
+    else:
+        logger.info("Replay mode: skipping data collector and model retraining")
 
     yield
 
     # Clean shutdown
     logger.info("Shutting down background tasks")
-    for task in [sailings_cache_task, collector_task, retrain_task]:
+    for task in tasks:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
@@ -248,7 +261,7 @@ async def get_next_sailings_html(request: Request):
                 {
                     "request": request,
                     "routes": processed_routes,
-                    "last_updated": datetime.now().strftime("%I:%M:%S %p").lstrip("0"),
+                    "last_updated": _now().strftime("%I:%M:%S %p").lstrip("0"),
                 },
             )
         except Exception as e:
@@ -377,7 +390,7 @@ async def debug_cache_status():
     if _sailings_cache is None:
         return {"status": "Cache not initialized"}
 
-    cache_age_seconds = (datetime.now() - _sailings_cache["cached_at"]).total_seconds()
+    cache_age_seconds = (_now() - _sailings_cache["cached_at"]).total_seconds()
     return {
         "status": "Cache active",
         "last_updated": _sailings_cache["last_updated"],

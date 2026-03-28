@@ -53,12 +53,11 @@ async def update_sailings_cache():
             routes_data = get_next_sailings()
             space_lookup = get_sailing_space_lookup()
             processed_routes = process_routes_for_display(routes_data, space_lookup)
-            t = current_time()
 
             _sailings_cache = {
                 "routes": processed_routes,
-                "last_updated": t.strftime("%I:%M:%S %p").lstrip("0"),
-                "cached_at": t,
+                "last_updated": current_time().strftime("%I:%M:%S %p").lstrip("0"),
+                "cached_at": current_time(),
             }
             logger.info(f"Cache updated with {len(processed_routes)} routes")
 

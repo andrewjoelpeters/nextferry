@@ -18,14 +18,17 @@ from zoneinfo import ZoneInfo
 import requests
 from dotenv import load_dotenv
 
+from backend.config import ROUTES
+
 load_dotenv()
 
 PT = ZoneInfo("America/Los_Angeles")
 API_KEY = os.getenv("WSDOT_API_KEY")
 BASE = "https://www.wsdot.wa.gov/ferries/api"
 
-# Route IDs to capture schedules for (from backend/config.py)
-ROUTE_IDS = [5, 6]  # sea-bi, ed-king
+ROUTE_IDS = [r["route_id"] for r in ROUTES]
+
+TIMEOUT = 30
 
 
 def capture():
@@ -36,7 +39,9 @@ def capture():
     print(f"Capturing WSDOT data at {now.isoformat()}")
 
     # Vessels
-    resp = requests.get(f"{BASE}/vessels/rest/vessellocations?apiaccesscode={API_KEY}")
+    resp = requests.get(
+        f"{BASE}/vessels/rest/vessellocations?apiaccesscode={API_KEY}", timeout=TIMEOUT
+    )
     resp.raise_for_status()
     vessels = resp.json()
     print(f"  Vessels: {len(vessels)}")
@@ -45,7 +50,8 @@ def capture():
     schedules = {}
     for route_id in ROUTE_IDS:
         resp = requests.get(
-            f"{BASE}/schedule/rest/scheduletoday/{route_id}/false?apiaccesscode={API_KEY}"
+            f"{BASE}/schedule/rest/scheduletoday/{route_id}/false?apiaccesscode={API_KEY}",
+            timeout=TIMEOUT,
         )
         resp.raise_for_status()
         schedules[str(route_id)] = resp.json()
@@ -55,7 +61,8 @@ def capture():
 
     # Sailing space
     resp = requests.get(
-        f"{BASE}/terminals/rest/terminalsailingspace?apiaccesscode={API_KEY}"
+        f"{BASE}/terminals/rest/terminalsailingspace?apiaccesscode={API_KEY}",
+        timeout=TIMEOUT,
     )
     resp.raise_for_status()
     sailing_space = resp.json()

@@ -2,7 +2,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from .replay import now as _now
+from .replay import current_time
 
 
 def parse_ms_date(value: str | None) -> datetime | None:
@@ -28,7 +28,7 @@ def format_time_until(
     if not scheduled_time:
         return "N/A", "status-unknown"
 
-    now = _now()
+    now = current_time()
 
     # Make sure scheduled_time is timezone-aware
     if scheduled_time.tzinfo is None:

@@ -56,7 +56,7 @@ def get_scenario_data() -> dict | None:
     return _scenario_data
 
 
-def now() -> datetime:
+def current_time() -> datetime:
     """Drop-in replacement for datetime.now() that respects replay mode."""
     if _replay_time:
         return _replay_time

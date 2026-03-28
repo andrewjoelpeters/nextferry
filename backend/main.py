@@ -33,8 +33,7 @@ from .next_sailings import (
     get_next_sailings,
     get_vessels_with_delays,
 )
-from .replay import activate_replay, get_replay_time
-from .replay import now as _now
+from .replay import activate_replay, current_time, get_replay_time
 from .sailing_space import get_sailing_space_lookup
 from .utils import datetime_to_minutes
 
@@ -54,11 +53,12 @@ async def update_sailings_cache():
             routes_data = get_next_sailings()
             space_lookup = get_sailing_space_lookup()
             processed_routes = process_routes_for_display(routes_data, space_lookup)
+            t = current_time()
 
             _sailings_cache = {
                 "routes": processed_routes,
-                "last_updated": _now().strftime("%I:%M:%S %p").lstrip("0"),
-                "cached_at": _now(),
+                "last_updated": t.strftime("%I:%M:%S %p").lstrip("0"),
+                "cached_at": t,
             }
             logger.info(f"Cache updated with {len(processed_routes)} routes")
 
@@ -176,7 +176,7 @@ async def lifespan(app: FastAPI):
 
     if not is_replay:
         # In replay mode, skip data collection and model retraining
-        logger.info("Starting data collector backround tasks")
+        logger.info("Starting data collector background tasks")
         tasks.append(asyncio.create_task(collect_data()))
 
         logger.info("Starting ML model retraining task")
@@ -261,7 +261,7 @@ async def get_next_sailings_html(request: Request):
                 {
                     "request": request,
                     "routes": processed_routes,
-                    "last_updated": _now().strftime("%I:%M:%S %p").lstrip("0"),
+                    "last_updated": current_time().strftime("%I:%M:%S %p").lstrip("0"),
                 },
             )
         except Exception as e:
@@ -390,7 +390,7 @@ async def debug_cache_status():
     if _sailings_cache is None:
         return {"status": "Cache not initialized"}
 
-    cache_age_seconds = (_now() - _sailings_cache["cached_at"]).total_seconds()
+    cache_age_seconds = (current_time() - _sailings_cache["cached_at"]).total_seconds()
     return {
         "status": "Cache active",
         "last_updated": _sailings_cache["last_updated"],

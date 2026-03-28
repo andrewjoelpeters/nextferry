@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from .config import ROUTES
 from .database import get_departed_sailing_space
 from .fill_predictor import fill_predictor
-from .replay import now as _now
+from .replay import current_time
 from .serializers import RouteSchedule
 from .utils import format_confidence_text, format_delay_text, format_time_until
 
@@ -33,7 +33,7 @@ def _format_vessel_status(sailing) -> dict:
         result = {"vessel_status": "At Dock", "vessel_status_key": "at_dock"}
         if sailing.vessel_eta:
             result["docked_at"] = fmt_time(sailing.vessel_eta)
-            now = _now()
+            now = current_time()
             eta = sailing.vessel_eta
             if eta.tzinfo is None:
                 eta = eta.replace(tzinfo=ZoneInfo("America/Los_Angeles"))

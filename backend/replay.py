@@ -5,6 +5,12 @@ endpoints (vessels, schedules, sailing space) plus the timestamp they were
 collected at. In replay mode, the app serves this data instead of hitting the
 live API, and datetime.now() is overridden to the capture time.
 
+Scenarios may also contain a ``vessel_history`` array — a series of vessel
+position snapshots captured over a time window before the final snapshot.
+At replay startup the app fast-forwards through this history to pre-warm
+the delay cache, matching production behavior where delays are observed
+across many polling cycles.
+
 Usage:
     # Capture a scenario from the live API right now
     uv run python -m scripts.capture_scenario
@@ -44,7 +50,11 @@ def activate_replay(scenario_path: str) -> datetime:
     if _replay_time.tzinfo is None:
         _replay_time = _replay_time.replace(tzinfo=PT)
 
-    logger.info(f"Replay mode: {path.name} (captured {_replay_time.isoformat()})")
+    history = _scenario_data.get("vessel_history", [])
+    logger.info(
+        f"Replay mode: {path.name} (captured {_replay_time.isoformat()}, "
+        f"{len(history)} history snapshots)"
+    )
     return _replay_time
 
 
@@ -54,6 +64,13 @@ def get_replay_time() -> datetime | None:
 
 def get_scenario_data() -> dict | None:
     return _scenario_data
+
+
+def get_vessel_history() -> list[dict]:
+    """Return the vessel history snapshots, or empty list for legacy scenarios."""
+    if _scenario_data is None:
+        return []
+    return _scenario_data.get("vessel_history", [])
 
 
 def current_time() -> datetime:

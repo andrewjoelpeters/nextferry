@@ -103,8 +103,8 @@ def get_cached_delay(vessel: Vessel) -> timedelta | None:
         return CACHED_DELAYS[route].get(vessel.vessel_position_num, None)
 
 
-def get_vessels_with_delays():
-    vessel_positions = get_vessel_positions()
+def _process_vessel_delays(vessel_positions: list[Vessel]) -> list[Vessel]:
+    """Compute delays for a list of vessels, updating the cache as we go."""
     for v in vessel_positions:
         vessel_delay = (
             v.left_dock - v.scheduled_departure
@@ -121,6 +121,32 @@ def get_vessels_with_delays():
             logging.debug(f"Got cached delay of {vessel_delay} for {v.vessel_name}")
         v.delay = vessel_delay
     return vessel_positions
+
+
+def get_vessels_with_delays():
+    vessel_positions = get_vessel_positions()
+    return _process_vessel_delays(vessel_positions)
+
+
+def warm_delay_cache(vessel_history: list[dict]) -> int:
+    """Fast-forward through historical vessel snapshots to pre-warm CACHED_DELAYS.
+
+    Each entry in vessel_history is {"captured_at": ..., "vessels": [...]}.
+    Returns the number of history snapshots processed.
+    """
+    from .serializers import Vessel
+
+    for snapshot in vessel_history:
+        vessels = [
+            Vessel(**v) for v in snapshot["vessels"] if v.get("InService")
+        ]
+        _process_vessel_delays(vessels)
+
+    logger.info(
+        f"Warmed delay cache from {len(vessel_history)} history snapshots: "
+        f"{dict(CACHED_DELAYS)}"
+    )
+    return len(vessel_history)
 
 
 # ---------------------------------------------------------------------------

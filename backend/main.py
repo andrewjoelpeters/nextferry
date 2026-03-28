@@ -32,8 +32,9 @@ from .next_sailings import (
     get_last_predictions,
     get_next_sailings,
     get_vessels_with_delays,
+    warm_delay_cache,
 )
-from .replay import activate_replay, current_time, get_replay_time
+from .replay import activate_replay, current_time, get_replay_time, get_vessel_history
 from .sailing_space import get_sailing_space_lookup
 from .utils import datetime_to_minutes
 
@@ -182,6 +183,10 @@ async def lifespan(app: FastAPI):
         tasks.append(asyncio.create_task(retrain_model_daily()))
     else:
         logger.info("Replay mode: skipping data collector and model retraining")
+        # Fast-forward through vessel history to pre-warm the delay cache
+        vessel_history = get_vessel_history()
+        if vessel_history:
+            warm_delay_cache(vessel_history)
 
     yield
 

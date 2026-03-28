@@ -23,11 +23,6 @@ dependencies = [
     "mypy>=1.14",
 ]
 
-[tool.pytest.ini_options]
-markers = [
-    "e2e: end-to-end browser tests (require playwright and chromium)",
-]
-
 [tool.ruff]
 target-version = "py313"
 line-length = 88
@@ -76,8 +71,3 @@ ignore_errors = true
 
 [tool.setuptools.packages.find]
 where = ["."]
-
-[dependency-groups]
-dev = [
-    "pytest-playwright>=0.7.2",
-]

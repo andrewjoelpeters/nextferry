@@ -69,11 +69,8 @@ Before merging any change to main, an AI agent should independently verify the c
 ### 1. Run the automated test suite
 
 ```bash
-# Unit + integration tests (no browser needed)
-uv run pytest tests/ -v --tb=short -m "not e2e"
-
-# E2e browser tests (requires playwright install chromium)
-uv run pytest tests/e2e/ -v -m e2e
+# Unit + integration tests
+uv run pytest tests/ -v --tb=short
 
 # Lint and type check
 uv run ruff check . && uv run ruff format --check .
@@ -130,14 +127,25 @@ NEXTFERRY_TEST_MODE=two_boats_at_dock uvicorn backend.main:app --reload
 
 This starts the app with fixture data instead of live WSDOT API calls. Open `http://localhost:8000` and visually check the map, sailings list, and predictions tab.
 
-### 5. If you changed templates or JS
+### 5. If you changed templates or JS — visually verify with Playwright MCP
 
-Run the Playwright e2e tests (or manually verify with `NEXTFERRY_TEST_MODE`):
-- Map markers render at correct positions and clicking opens info panel
-- Direction toggle buttons switch the visible terminal
-- Sailing details expand/collapse
-- Tab switching (Sailings → Map → Predictions) loads content via HTMX
-- Vessel name and status in map info panel match the sailings list
+Start the server with a test scenario and use the Playwright MCP to open it in a browser and visually verify. Don't write scripted e2e tests — just look at it.
+
+```bash
+NEXTFERRY_TEST_MODE=two_boats_at_dock uvicorn backend.main:app --port 8000
+```
+
+Then use Playwright MCP to:
+1. **Open `http://localhost:8000`** — the sailings tab should load with vessel data
+2. **Check the sailings list** — vessel names, departure times, delay text, and "At Dock"/"En route" status should all render correctly
+3. **Click direction toggle buttons** — clicking "From Seattle" should hide the Bainbridge departures and vice versa
+4. **Click a sailing item** — details should expand showing vessel name and status
+5. **Switch to the Map tab** — Leaflet map should load with ferry markers at Puget Sound positions
+6. **Click a map marker** — info panel should open showing the vessel's name, route, terminals, and status matching what the sailings tab shows
+7. **Switch to the Predictions tab** — should load without errors
+8. **Try different scenarios** — restart with `NEXTFERRY_TEST_MODE=severe_delay` or `both_en_route` and repeat
+
+This catches rendering bugs, JS errors, and visual regressions that API tests can't.
 
 ### 6. Adding new scenarios
 

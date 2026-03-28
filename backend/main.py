@@ -33,7 +33,14 @@ from .next_sailings import (
     get_next_sailings,
     get_vessels_with_delays,
 )
-from .replay import activate_replay, current_time, get_replay_time
+from .replay import (
+    activate_replay,
+    advance_snapshot,
+    current_time,
+    get_replay_time,
+    get_snapshot_info,
+    retreat_snapshot,
+)
 from .sailing_space import get_sailing_space_lookup
 from .utils import datetime_to_minutes
 
@@ -43,24 +50,28 @@ logger = logging.getLogger(__name__)
 _sailings_cache: dict[str, Any] | None = None
 
 
-async def update_sailings_cache():
-    """Background task to update sailings cache every 30 seconds"""
+def refresh_sailings_cache():
+    """Recompute the sailings cache from current data (replay or live)."""
     global _sailings_cache
 
+    routes_data = get_next_sailings()
+    space_lookup = get_sailing_space_lookup()
+    processed_routes = process_routes_for_display(routes_data, space_lookup)
+
+    _sailings_cache = {
+        "routes": processed_routes,
+        "last_updated": current_time().strftime("%I:%M:%S %p").lstrip("0"),
+        "cached_at": current_time(),
+    }
+    logger.info(f"Cache updated with {len(processed_routes)} routes")
+
+
+async def update_sailings_cache():
+    """Background task to update sailings cache every 30 seconds"""
     while True:
         try:
             logger.info("Updating shared sailings cache")
-            routes_data = get_next_sailings()
-            space_lookup = get_sailing_space_lookup()
-            processed_routes = process_routes_for_display(routes_data, space_lookup)
-
-            _sailings_cache = {
-                "routes": processed_routes,
-                "last_updated": current_time().strftime("%I:%M:%S %p").lstrip("0"),
-                "cached_at": current_time(),
-            }
-            logger.info(f"Cache updated with {len(processed_routes)} routes")
-
+            refresh_sailings_cache()
         except Exception as e:
             logger.error(f"Error updating sailings cache: {e}")
 
@@ -241,7 +252,10 @@ async def service_worker():
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     """Serve the main page"""
-    return templates.TemplateResponse("index.html", {"request": request})
+    ctx = {"request": request, "is_replay": bool(get_replay_time())}
+    if get_replay_time():
+        ctx["replay_info"] = get_snapshot_info()
+    return templates.TemplateResponse("index.html", ctx)
 
 
 @app.get("/next-sailings", response_class=HTMLResponse)
@@ -452,3 +466,40 @@ async def debug_predictions():
     - prediction: the model output (delay, lower_bound, upper_bound)
     """
     return get_last_predictions()
+
+
+# ---------------------------------------------------------------------------
+# Replay controls (only active in replay mode)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/replay/advance")
+async def replay_advance():
+    """Advance to the next vessel snapshot and refresh the cache."""
+    if not get_replay_time():
+        return {"error": "Not in replay mode"}
+    result = advance_snapshot()
+    if result is None:
+        return {"error": "Already at last snapshot", **get_snapshot_info()}
+    refresh_sailings_cache()
+    return result
+
+
+@app.post("/replay/back")
+async def replay_back():
+    """Go back to the previous vessel snapshot and refresh the cache."""
+    if not get_replay_time():
+        return {"error": "Not in replay mode"}
+    result = retreat_snapshot()
+    if result is None:
+        return {"error": "Already at first snapshot", **get_snapshot_info()}
+    refresh_sailings_cache()
+    return result
+
+
+@app.get("/replay/status")
+async def replay_status():
+    """Return current replay snapshot position."""
+    if not get_replay_time():
+        return {"error": "Not in replay mode"}
+    return get_snapshot_info()

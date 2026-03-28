@@ -3,14 +3,23 @@
 Saves the raw JSON from all three WSDOT endpoints (vessels, schedules,
 sailing space) plus a timestamp into a single file under scenarios/.
 
+By default, captures vessel positions every 30 seconds for 10 minutes
+before taking the final snapshot.  This builds a ``vessel_history`` array
+that replay mode fast-forwards through at startup to pre-warm the delay
+cache — matching production behavior where delays are observed across
+many polling cycles.
+
 Usage:
     uv run python -m scripts.capture_scenario
     uv run python -m scripts.capture_scenario --name rush-hour
+    uv run python -m scripts.capture_scenario --duration 300 --interval 15
+    uv run python -m scripts.capture_scenario --no-history   # single snapshot (legacy)
 """
 
 import argparse
 import json
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -31,19 +40,52 @@ ROUTE_IDS = [r["route_id"] for r in ROUTES]
 TIMEOUT = 30
 
 
-def capture():
-    if not API_KEY:
-        raise SystemExit("WSDOT_API_KEY not set — add it to .env")
-
-    now = datetime.now(tz=PT)
-    print(f"Capturing WSDOT data at {now.isoformat()}")
-
-    # Vessels
+def _fetch_vessels() -> list[dict]:
     resp = requests.get(
         f"{BASE}/vessels/rest/vessellocations?apiaccesscode={API_KEY}", timeout=TIMEOUT
     )
     resp.raise_for_status()
-    vessels = resp.json()
+    return resp.json()
+
+
+def _capture_vessel_history(duration: int, interval: int) -> list[dict]:
+    """Poll vessel positions repeatedly to build a history for delay cache warming."""
+    history: list[dict] = []
+    end_time = time.monotonic() + duration
+    remaining = duration
+
+    print(f"  Capturing vessel history ({duration}s, every {interval}s)...")
+    while time.monotonic() < end_time:
+        ts = datetime.now(tz=PT)
+        vessels = _fetch_vessels()
+        history.append({"captured_at": ts.isoformat(), "vessels": vessels})
+        remaining = end_time - time.monotonic()
+        print(
+            f"    Snapshot {len(history)}: {len(vessels)} vessels "
+            f"({max(0, int(remaining))}s remaining)"
+        )
+        if remaining <= 0:
+            break
+        time.sleep(min(interval, remaining))
+
+    print(f"  Captured {len(history)} vessel snapshots")
+    return history
+
+
+def capture(duration: int = 600, interval: int = 30, history: bool = True):
+    if not API_KEY:
+        raise SystemExit("WSDOT_API_KEY not set — add it to .env")
+
+    # Collect vessel history first (while waiting, delays may appear/disappear)
+    vessel_history: list[dict] = []
+    if history and duration > 0:
+        vessel_history = _capture_vessel_history(duration, interval)
+
+    now = datetime.now(tz=PT)
+    print(f"Capturing final WSDOT snapshot at {now.isoformat()}")
+
+    # Final vessel snapshot (the "live" state for the replay session)
+    vessels = _fetch_vessels()
     print(f"  Vessels: {len(vessels)}")
 
     # Schedules (one per route)
@@ -75,15 +117,39 @@ def capture():
         "sailing_space": sailing_space,
     }
 
+    if vessel_history:
+        scenario["vessel_history"] = vessel_history
+
     return scenario, now
 
 
 def main():
     parser = argparse.ArgumentParser(description="Capture WSDOT API snapshot")
     parser.add_argument("--name", help="Scenario name (default: timestamp)")
+    parser.add_argument(
+        "--duration",
+        type=int,
+        default=600,
+        help="Seconds to poll vessel history before final snapshot (default: 600)",
+    )
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=30,
+        help="Seconds between vessel history polls (default: 30)",
+    )
+    parser.add_argument(
+        "--no-history",
+        action="store_true",
+        help="Skip vessel history capture (legacy single-snapshot mode)",
+    )
     args = parser.parse_args()
 
-    scenario, now = capture()
+    scenario, now = capture(
+        duration=args.duration,
+        interval=args.interval,
+        history=not args.no_history,
+    )
 
     filename = f"{args.name}.json" if args.name else now.strftime("%Y-%m-%dT%H_%M.json")
 
@@ -94,7 +160,8 @@ def main():
     with open(out_path, "w") as f:
         json.dump(scenario, f, indent=2)
 
-    print(f"\nSaved: {out_path}")
+    snapshots = len(scenario.get("vessel_history", []))
+    print(f"\nSaved: {out_path} ({snapshots} history snapshots)")
     print(f"Replay: NEXTFERRY_SCENARIO={out_path} uvicorn backend.main:app --reload")
 
 

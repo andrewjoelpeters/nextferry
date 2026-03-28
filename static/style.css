@@ -823,3 +823,51 @@ header h1 {
     color: var(--deck-gray);
     margin-top: var(--sm);
 }
+
+/* Replay control bar */
+#replay-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: var(--sm);
+    padding: var(--sm) var(--lg);
+    background: var(--ocean-midnight);
+    color: var(--hull-white);
+    font-family: monospace;
+    font-size: var(--text-sm);
+}
+
+#replay-label {
+    background: var(--danger-red);
+    color: white;
+    padding: 2px var(--sm);
+    border-radius: 3px;
+    font-weight: 700;
+    font-size: var(--text-xs);
+    letter-spacing: 0.05em;
+}
+
+#replay-bar button {
+    background: var(--ocean-deep);
+    color: white;
+    border: 1px solid var(--ocean-surface);
+    border-radius: 4px;
+    padding: 2px var(--md);
+    cursor: pointer;
+    font-size: var(--text-sm);
+    font-family: monospace;
+    line-height: 1.4;
+}
+
+#replay-bar button:hover {
+    background: var(--ocean-surface);
+}
+
+#replay-time {
+    margin-left: auto;
+    color: var(--deck-gray);
+}

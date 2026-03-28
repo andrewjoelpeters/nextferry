@@ -62,6 +62,109 @@ uv run mypy backend/
 - CI runs `uv run pytest tests/ -v` on Python 3.13 via GitHub Actions
 - Requires a `WSDOT_API_KEY` env var (from `.env` locally, Railway secret in prod)
 
+## Pre-Merge Testing (AI Agent Checklist)
+
+Before merging any change to main, an AI agent should independently verify the change by following this process. The goal is to catch regressions across the full data pipeline — not just the code you touched.
+
+### 1. Run the automated test suite
+
+```bash
+# Unit + integration tests
+uv run pytest tests/ -v --tb=short
+
+# Lint and type check
+uv run ruff check . && uv run ruff format --check .
+uv run mypy backend/
+```
+
+All tests must pass. If any fail, fix the root cause — do not skip or weaken assertions.
+
+### 2. Verify cross-endpoint consistency
+
+The app serves the same vessel data through two endpoints: `/ferry-data` (JSON for map) and `/next-sailings` (HTML for sailing list). After any change to `next_sailings.py`, `display_processing.py`, `main.py`, or `serializers.py`, verify:
+
+- **Every vessel on the map appears in the sailings list** (and vice versa)
+- **Delay values match**: if `/ferry-data` shows `DelayMinutes: 5` for a vessel, the sailings list should show that vessel as delayed
+- **Vessel state is consistent**: an at-dock vessel on the map should show "At Dock" status in sailings, not "En route"
+
+The `TestCrossEndpointConsistency` tests in `test_integration.py` cover this automatically. If you're adding a new data field, add a cross-endpoint test for it.
+
+### 3. Verify correct model selection
+
+The app uses two ML models with different features:
+- **Dock model** (`dock_predictor`): for the FIRST sailing of at-dock vessels only — uses `minutes_at_dock`, `incoming_vehicle_fullness`
+- **En-route model** (`ml_predictor`): for all other future sailings — uses `vessel_speed`, `minutes_until_scheduled_departure`
+
+After changes to `next_sailings.py` or either predictor, verify:
+- Dock model fires for at-dock vessels' current sailing
+- Dock model does NOT fire when no vessels are at dock (use `scenario_both_en_route`)
+- En-route model handles remaining future sailings
+- Check `/debug/predictions` to see which model was used and what inputs it received
+
+The `TestModelSelection` and `TestBothEnRoute` test classes cover this.
+
+### 4. Test with bundled scenarios
+
+The test fixtures (`tests/fixtures/scenarios.py`) provide WSDOT-format data for specific situations the app must handle. After any pipeline change, these should all work:
+
+| Scenario | What it tests |
+|---|---|
+| `scenario_two_boats_at_dock` | Normal operations, both vessels docked |
+| `scenario_one_en_route_one_docked` | Departed sailing shown, delay propagation |
+| `scenario_both_en_route` | No dock model, direction matching critical |
+| `scenario_severe_delay` | 25-min delay, severe delay styling |
+| `scenario_null_fields` | Vessel with null ScheduledDeparture/LeftDock/Eta (the WSDOT gotcha) |
+| `scenario_just_departed` | "Just left" display, 0-delay computation |
+| `scenario_arriving` | Near-terminal ETA display |
+| `scenario_late_night` | No future sailings, graceful empty state |
+| `scenario_multi_route` | Two routes don't cross-contaminate |
+
+To manually test a specific scenario with the real server:
+
+```bash
+NEXTFERRY_TEST_MODE=two_boats_at_dock uvicorn backend.main:app --reload
+```
+
+This starts the app with fixture data instead of live WSDOT API calls. Open `http://localhost:8000` and visually check the map, sailings list, and predictions tab.
+
+### 5. If you changed templates or JS — visually verify with Playwright MCP
+
+Start the server with a test scenario and use the Playwright MCP to open it in a browser and visually verify. Don't write scripted e2e tests — just look at it.
+
+```bash
+NEXTFERRY_TEST_MODE=two_boats_at_dock uvicorn backend.main:app --port 8000
+```
+
+Then use Playwright MCP to:
+1. **Open `http://localhost:8000`** — the sailings tab should load with vessel data
+2. **Check the sailings list** — vessel names, departure times, delay text, and "At Dock"/"En route" status should all render correctly
+3. **Click direction toggle buttons** — clicking "From Seattle" should hide the Bainbridge departures and vice versa
+4. **Click a sailing item** — details should expand showing vessel name and status
+5. **Switch to the Map tab** — Leaflet map should load with ferry markers at Puget Sound positions
+6. **Click a map marker** — info panel should open showing the vessel's name, route, terminals, and status matching what the sailings tab shows
+7. **Switch to the Predictions tab** — should load without errors
+8. **Try different scenarios** — restart with `NEXTFERRY_TEST_MODE=severe_delay` or `both_en_route` and repeat
+
+This catches rendering bugs, JS errors, and visual regressions that API tests can't.
+
+### 6. Adding new scenarios
+
+When you encounter a new edge case or bug, add a scenario for it:
+
+1. Add a vessel function to `tests/fixtures/scenarios.py` (follow existing patterns)
+2. Add a `scenario_*()` bundle that composes vessels + schedules
+3. Add a fixture in `tests/conftest.py`
+4. Add integration tests that verify the expected behavior
+5. The scenario name is automatically available for `NEXTFERRY_TEST_MODE`
+
+### 7. Fix, don't suppress
+
+If a test fails after your change:
+- Read the assertion and understand what contract it's checking
+- Fix your code to satisfy the contract, OR
+- If the contract itself is wrong (the test is outdated), update the test AND explain why in the commit message
+- Never delete a failing test without understanding why it existed
+
 ## Gotchas
 
 - **WSDOT vessel data can have null fields even when the vessel is moving.** A vessel may report `AtDock: false` with non-zero speed but have `ScheduledDeparture`, `LeftDock`, and `Eta` all null. When matching vessel state to schedule sailings, always verify the direction (departing/arriving terminal) matches before annotating — don't assume the first future sailing corresponds to the vessel's current trip.

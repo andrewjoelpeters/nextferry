@@ -53,7 +53,7 @@ uv run mypy backend/
 **Key patterns:**
 - Module-level singletons for `predictor` and `fill_predictor` with `.train()/.save()/.load()` lifecycle
 - Global `_sailings_cache` dict in `main.py` shared across requests, updated by background task
-- All datetimes use `zoneinfo.ZoneInfo("America/Los_Angeles")` — WSDOT API returns UTC
+- All datetimes use `zoneinfo.ZoneInfo("America/Los_Angeles")` — WSDOT API returns UTC. Use `replay.current_time()` instead of `datetime.now()` so replay mode works.
 - SQLite with WAL mode; `data/` directory is gitignored (Railway uses persistent volume)
 
 ## Workflow
@@ -61,6 +61,21 @@ uv run mypy backend/
 - Main branch is protected — all changes go through PRs
 - CI runs `uv run pytest tests/ -v` on Python 3.13 via GitHub Actions
 - Requires a `WSDOT_API_KEY` env var (from `.env` locally, Railway secret in prod)
+
+## Replay Mode
+
+The app can replay captured WSDOT API snapshots, serving the app exactly as it would have appeared at the capture time. Useful for verifying changes against real data without hitting the live API.
+
+```bash
+# Capture a snapshot from the live API
+uv run python -m scripts.capture_scenario
+uv run python -m scripts.capture_scenario --name rush-hour
+
+# Start the app with a captured scenario
+NEXTFERRY_SCENARIO=scenarios/rush-hour.json uvicorn backend.main:app --reload
+```
+
+Scenarios are JSON files in `scenarios/` containing raw WSDOT API responses + a timestamp. In replay mode, the data collector and ML retrainer are disabled.
 
 ## Gotchas
 

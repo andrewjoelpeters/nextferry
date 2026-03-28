@@ -1,11 +1,12 @@
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from backend.config import ROUTES
 
 from .database import get_previous_sailing_fullness, get_turnaround_minutes
+from .replay import current_time
 from .serializers import (
     DirectionalSailing,
     DirectionalSchedule,
@@ -385,7 +386,7 @@ def _filter_next_sailings(
     - At dock: current sailing (by scheduled departure) and later.
     - En route: just-departed sailing (if within 30 min) plus future sailings.
     """
-    now = datetime.now(tz=ZoneInfo("America/Los_Angeles"))
+    now = current_time()
 
     if not vessel or not vessel.scheduled_departure:
         return [s for s in sailings if s.scheduled_departure > now]

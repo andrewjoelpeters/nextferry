@@ -216,6 +216,24 @@ def process_routes_for_display(
                     display_time = scheduled_time_str
                     display_time_html = scheduled_time_str
 
+                # Inbound vessel info (preceding sailing heading toward this terminal)
+                inbound_info = None
+                if sailing.inbound_vessel_name:
+
+                    def _fmt_time(dt):
+                        return dt.strftime("%I:%M %p").lstrip("0") if dt else None
+
+                    inbound_info = {
+                        "vessel_name": sailing.inbound_vessel_name,
+                        "from_terminal": sailing.inbound_vessel_from_terminal,
+                        "at_dock": sailing.inbound_vessel_at_dock,
+                        "left_dock": _fmt_time(sailing.inbound_vessel_left_dock),
+                        "eta": _fmt_time(sailing.inbound_vessel_eta),
+                        "scheduled_departure": _fmt_time(
+                            sailing.inbound_vessel_scheduled_departure
+                        ),
+                    }
+
                 sailing_data = {
                     "time_until": time_until,
                     "scheduled_time": scheduled_time_str,
@@ -230,6 +248,7 @@ def process_routes_for_display(
                     "departed": sailing.departed,
                     "has_delay": has_delay,
                     "vessel_info": _format_vessel_status(sailing),
+                    "inbound_info": inbound_info,
                     "capacity": capacity,
                     "departing_terminal_name": schedule.departing_terminal_name,
                     "scheduled_departure_iso": (

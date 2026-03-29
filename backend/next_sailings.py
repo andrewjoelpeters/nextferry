@@ -480,6 +480,27 @@ def get_next_sailings_by_boat(
             if vessel.at_dock and next_sailings[0].scheduled_departure:
                 _apply_dock_prediction(next_sailings[0], vessel)
 
+        # Annotate the first opposite-direction sailing with info about the
+        # immediately preceding sailing (the vessel heading toward that terminal).
+        # Works for both at-dock (waiting to depart) and en-route (crossing).
+        if vessel:
+            for s in next_sailings:
+                if (
+                    not s.departed
+                    and s.departing_terminal_id != vessel.departing_terminal_id
+                ):
+                    s.inbound_vessel_name = vessel.vessel_name
+                    s.inbound_vessel_at_dock = vessel.at_dock
+                    s.inbound_vessel_from_terminal = vessel.departing_terminal_name
+                    if vessel.at_dock:
+                        s.inbound_vessel_scheduled_departure = (
+                            vessel.scheduled_departure
+                        )
+                    else:
+                        s.inbound_vessel_left_dock = vessel.left_dock
+                        s.inbound_vessel_eta = vessel.eta
+                    break
+
         result[position_num] = next_sailings
 
     return result

@@ -40,8 +40,9 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 32 | [+ consecutive_late_sailings](#32-add-consecutive_late_sailings) | 2.48 | 1.97 | 70.0% | 43.5% | No gain — redundant with current_delay |
 | 33 | [NGBoost (Normal)](#33-ngboost-normal-distribution) | 2.76 | 2.05 | 81.0% | 37.1% | Distributional model, worse PL |
 | 34 | [q30 quantile](#34-q30-quantile) | **2.45** | 1.99 | 70.0% | 44.2% | Slight improvement over q33 |
+| 35 | [q28 quantile](#35-q28-quantile) | **2.43** | 2.00 | 70.0% | 44.6% | Better still — new best |
 
-**Best configuration: Experiment 34 (q30)** — PL=2.45, 44.2% improvement, 70% coverage.
+**Best configuration: Experiment 35 (q28)** — PL=2.43, 44.6% improvement, 70% coverage.
 
 ## Experiment Log
 
@@ -493,6 +494,19 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | **2.45** | 1.99 | -1.06 | 44.2% | 70.0% |
 
 **Takeaway:** Small but real improvement: PL 2.48→2.45. The theoretical optimum of q33 (1/(1+α)) assumes perfect calibration; with real-world model errors, slightly more conservative (q30) helps because the penalty for overprediction (α=2) means it's better to err further on the safe side. Bias increases to -1.06 (1 min conservative), still perfectly acceptable for ferry riders. **New best.**
+
+---
+
+### 35. q28 quantile
+
+**Report:** [exp35-q28.md](exp35-q28.md)
+**Change:** Changed point estimate quantile from q30 to q28 (0.28).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| **2.43** | 2.00 | -1.14 | 44.6% | 70.0% |
+
+**Takeaway:** Continues the trend — q28 beats q30 (2.43 vs 2.45). Bias is -1.14 min, still fine for ferry riders. The model benefits from predicting more conservatively than the theoretical optimum. **New best.**
 
 ---
 

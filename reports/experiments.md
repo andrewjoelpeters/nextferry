@@ -38,6 +38,7 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 30 | [Drop previous_sailing_fullness](#30-drop-previous_sailing_fullness) | 2.49 | 1.97 | 70.0% | 43.3% | Negligible impact |
 | 31 | [Deeper trees (depth=10)](#31-deeper-trees-depth10) | 2.48 | 1.97 | 69.8% | 43.5% | No gain from deeper trees |
 | 32 | [+ consecutive_late_sailings](#32-add-consecutive_late_sailings) | 2.48 | 1.97 | 70.0% | 43.5% | No gain — redundant with current_delay |
+| 33 | [NGBoost (Normal)](#33-ngboost-normal-distribution) | 2.76 | 2.05 | 81.0% | 37.1% | Distributional model, worse PL |
 
 **Best configuration: Experiment 27 (rebaseline of 24)** — PL=2.48, 43.5% improvement, 70% coverage.
 
@@ -465,6 +466,19 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 2.48 | 1.97 | -0.93 | 43.5% | 70.0% |
 
 **Takeaway:** No improvement. The cascading delay signal is already captured by `current_vessel_delay_minutes` — if the vessel is currently late, previous sailings were already late. The feature is redundant with existing real-time delay information.
+
+---
+
+### 33. NGBoost (Normal distribution)
+
+**Report:** [exp33-ngboost.md](exp33-ngboost.md)
+**Change:** New model: NGBRegressor with Normal distribution, DecisionTree base learner (depth=4), 200 estimators, lr=0.05. Uses q33 percentile for point estimate.
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.76 | 2.05 | -0.65 | 37.1% | 81.0% |
+
+**Takeaway:** NGBoost is worse than quantile GBT (2.76 vs 2.48). Two issues: (1) Normal distribution is symmetric but ferry delays are right-skewed, making intervals too wide (81% coverage vs 70% target). (2) NGBoost base learner is limited to shallow trees (depth=4) without HistGBT's native categorical handling. The quantile GBT approach better fits this problem. ~10× slower training time.
 
 ---
 

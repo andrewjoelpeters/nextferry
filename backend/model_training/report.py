@@ -22,14 +22,28 @@ def _natural_sort_key(key: str):
 
 def _metric_table(data: dict, key_label: str) -> list:
     """Render a dict of {label: metrics} as a markdown table."""
+    has_width = any("mean_interval_width" in m for m in data.values())
     lines = []
-    lines.append(f"| {key_label} | Pinball Loss | Bias | p90 | N |")
-    lines.append("|---|---|---|---|---|")
-    for label, m in sorted(data.items(), key=lambda x: _natural_sort_key(x[0])):
+    if has_width:
         lines.append(
-            f"| {label} | {m['pinball_loss']} | {m['bias']:+.2f} | "
-            f"{m['error_p90']:+.2f} | {m['n']} |"
+            f"| {key_label} | Pinball Loss | Bias | p90 | Interval Width | N |"
         )
+        lines.append("|---|---|---|---|---|---|")
+    else:
+        lines.append(f"| {key_label} | Pinball Loss | Bias | p90 | N |")
+        lines.append("|---|---|---|---|---|")
+    for label, m in sorted(data.items(), key=lambda x: _natural_sort_key(x[0])):
+        if has_width:
+            width = m.get("mean_interval_width", "—")
+            lines.append(
+                f"| {label} | {m['pinball_loss']} | {m['bias']:+.2f} | "
+                f"{m['error_p90']:+.2f} | {width} | {m['n']} |"
+            )
+        else:
+            lines.append(
+                f"| {label} | {m['pinball_loss']} | {m['bias']:+.2f} | "
+                f"{m['error_p90']:+.2f} | {m['n']} |"
+            )
     return lines
 
 
@@ -98,6 +112,13 @@ def generate_markdown_report(
     lines.append(
         f"| 70% Interval Coverage | {agg['overall_coverage_70pct']}% (target: 70%) |"
     )
+    if "overall_mean_interval_width" in agg:
+        lines.append(
+            f"| Interval Width (mean) | {agg['overall_mean_interval_width']} min |"
+        )
+        lines.append(
+            f"| Interval Width (median) | {agg['overall_median_interval_width']} min |"
+        )
     if "overall_baseline_pinball_loss" in agg:
         lines.append(
             f"| Baseline Pinball Loss | {agg['overall_baseline_pinball_loss']} min |"
@@ -189,6 +210,7 @@ def _comparison_section(agg: dict, prev: dict) -> list:
         ("MAE", "overall_mae", " min", True),
         ("p90", "overall_error_p90", " min", True),
         ("Coverage", "overall_coverage_70pct", "%", False),
+        ("Interval Width", "overall_mean_interval_width", " min", True),
         ("Improvement %", "overall_improvement_pct", "%", False),
     ]:
         p, c = prev.get(key), agg.get(key)

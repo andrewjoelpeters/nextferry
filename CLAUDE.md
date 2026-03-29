@@ -59,7 +59,8 @@ uv run mypy backend/
 ## Workflow
 
 - Main branch is protected — all changes go through PRs
-- CI runs `uv run pytest tests/ -v` on Python 3.13 via GitHub Actions
+- CI runs three jobs: `lint` (ruff format + ruff check), `typecheck` (mypy), and `test` (pytest) — see `.github/workflows/test.yml`
+- **Before committing, always run:** `uv run ruff format . && uv run ruff check . && uv run pytest tests/ -v`
 - Requires a `WSDOT_API_KEY` env var (from `.env` locally, Railway secret in prod)
 
 ## Replay Mode

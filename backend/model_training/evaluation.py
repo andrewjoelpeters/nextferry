@@ -18,6 +18,8 @@ Core metrics per slice:
 Top-level only:
 - "mae": standard MAE (reference, universally understood)
 - "coverage_70pct": prediction interval calibration check
+- "mean_interval_width": average prediction interval width (upper - lower)
+- "median_interval_width": median prediction interval width
 - "improvement_pct": vs naive "current delay = future delay" baseline
 
 Usage:
@@ -107,10 +109,15 @@ def compute_metrics(
     # MAE — included for reference / universally understood
     metrics["mae"] = round(float(np.abs(err_arr).mean()), 2)
 
-    # Coverage — only meaningful when interval bounds are provided
+    # Coverage + interval width — only meaningful when interval bounds are provided
     if actuals is not None and lower is not None and upper is not None:
         within_bounds = (actuals >= lower) & (actuals <= upper)
         metrics["coverage_70pct"] = round(float(within_bounds.mean() * 100), 1)
+
+    if lower is not None and upper is not None:
+        widths = upper - lower
+        metrics["mean_interval_width"] = round(float(widths.mean()), 2)
+        metrics["median_interval_width"] = round(float(widths.median()), 2)
 
     if baseline_errors is not None and len(baseline_errors) > 0:
         baseline_pl = pinball_loss(baseline_errors.values)
@@ -123,12 +130,17 @@ def compute_metrics(
 
 def _slice_metrics(test_df, errors, baseline_errors, groupby_col):
     """Compute core metrics for each value of groupby_col."""
+    has_bounds = "lower_bound" in test_df.columns and "upper_bound" in test_df.columns
     result = {}
     for val, group in test_df.groupby(groupby_col):
         idx = group.index
         g_errors = errors.loc[idx]
         g_baseline = baseline_errors.loc[idx] if baseline_errors is not None else None
-        m = compute_metrics(g_errors, baseline_errors=g_baseline)
+        g_lower = test_df.loc[idx, "lower_bound"] if has_bounds else None
+        g_upper = test_df.loc[idx, "upper_bound"] if has_bounds else None
+        m = compute_metrics(
+            g_errors, lower=g_lower, upper=g_upper, baseline_errors=g_baseline
+        )
         if m:
             result[val] = m
     return result
@@ -277,6 +289,11 @@ def print_evaluation(results: dict):
     print(f"  Bias:         {results['overall_bias']:+.2f} min (positive = risky)")
     print(f"  p90:          {results['overall_error_p90']:+.2f} min")
     print(f"  70% Coverage: {results['overall_coverage_70pct']}%")
+    if "overall_mean_interval_width" in results:
+        print(
+            f"  Interval Width: {results['overall_mean_interval_width']} min (mean), "
+            f"{results['overall_median_interval_width']} min (median)"
+        )
 
     if "overall_baseline_pinball_loss" in results:
         print(f"\n  Baseline PL:   {results['overall_baseline_pinball_loss']} min")

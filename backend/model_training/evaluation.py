@@ -138,7 +138,9 @@ def _slice_metrics(test_df, errors, baseline_errors, groupby_col):
         g_baseline = baseline_errors.loc[idx] if baseline_errors is not None else None
         g_lower = test_df.loc[idx, "lower_bound"] if has_bounds else None
         g_upper = test_df.loc[idx, "upper_bound"] if has_bounds else None
-        m = compute_metrics(g_errors, lower=g_lower, upper=g_upper, baseline_errors=g_baseline)
+        m = compute_metrics(
+            g_errors, lower=g_lower, upper=g_upper, baseline_errors=g_baseline
+        )
         if m:
             result[val] = m
     return result

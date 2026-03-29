@@ -25,7 +25,9 @@ def _metric_table(data: dict, key_label: str) -> list:
     has_width = any("mean_interval_width" in m for m in data.values())
     lines = []
     if has_width:
-        lines.append(f"| {key_label} | Pinball Loss | Bias | p90 | Interval Width | N |")
+        lines.append(
+            f"| {key_label} | Pinball Loss | Bias | p90 | Interval Width | N |"
+        )
         lines.append("|---|---|---|---|---|---|")
     else:
         lines.append(f"| {key_label} | Pinball Loss | Bias | p90 | N |")

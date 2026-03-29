@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import hashlib
 import logging
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -16,18 +17,23 @@ from fastapi.templating import Jinja2Templates
 from .data_collector import collect_data
 from .database import (
     get_dashboard_data,
+    get_metrics_data,
     get_sailing_event_count,
     get_snapshot_count,
     init_db,
 )
 from .display_processing import process_routes_for_display
+from .dock_predictor import dock_predictor
 from .fill_predictor import fill_predictor
+from .metrics import track_request
 from .ml_predictor import predictor as ml_predictor
 from .next_sailings import (
     CACHED_DELAYS,
+    get_last_predictions,
     get_next_sailings,
     get_vessels_with_delays,
 )
+from .replay import activate_replay, current_time, get_replay_time
 from .sailing_space import get_sailing_space_lookup
 from .utils import datetime_to_minutes
 
@@ -50,10 +56,8 @@ async def update_sailings_cache():
 
             _sailings_cache = {
                 "routes": processed_routes,
-                "last_updated": datetime.now(tz=ZoneInfo("America/Los_Angeles"))
-                .strftime("%I:%M:%S %p")
-                .lstrip("0"),
-                "cached_at": datetime.now(tz=ZoneInfo("America/Los_Angeles")),
+                "last_updated": current_time().strftime("%I:%M:%S %p").lstrip("0"),
+                "cached_at": current_time(),
             }
             logger.info(f"Cache updated with {len(processed_routes)} routes")
 
@@ -69,6 +73,7 @@ async def retrain_model_daily():
     logger.info("Attempting to load saved ML models...")
     ml_predictor.load()
     fill_predictor.load()
+    dock_predictor.load()
 
     # If no models found, try an immediate background train
     if not ml_predictor.is_trained:
@@ -83,6 +88,19 @@ async def retrain_model_daily():
                 logger.info("Delay model training skipped (insufficient data)")
         except Exception as e:
             logger.error(f"Initial delay model training failed: {e}")
+
+    if not dock_predictor.is_trained:
+        logger.info("No at-dock model found, attempting background train...")
+        try:
+            if dock_predictor.train():
+                dock_predictor.save()
+                logger.info(
+                    f"Initial at-dock model trained on {dock_predictor.training_data_size} rows"
+                )
+            else:
+                logger.info("At-dock model training skipped (insufficient data)")
+        except Exception as e:
+            logger.error(f"Initial at-dock model training failed: {e}")
 
     if not fill_predictor.is_trained:
         logger.info("No fill risk model found, attempting background train...")
@@ -124,6 +142,12 @@ async def retrain_model_daily():
                     f"Fill risk model retrained on {fill_predictor.training_data_size} sailings"
                 )
 
+            if dock_predictor.train():
+                dock_predictor.save()
+                logger.info(
+                    f"At-dock model retrained on {dock_predictor.training_data_size} rows"
+                )
+
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -137,27 +161,54 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing database")
     init_db()
 
+    # Check for replay mode (serve captured WSDOT data instead of live API)
+    scenario_path = os.getenv("NEXTFERRY_SCENARIO")
+    is_replay = bool(scenario_path or get_replay_time())
+    if scenario_path and not get_replay_time():
+        activate_replay(scenario_path)
+
+    tasks = []
+
     # Start background task on startup
     logger.info("Starting sailings cache background task")
-    sailings_cache_task = asyncio.create_task(update_sailings_cache())
+    tasks.append(asyncio.create_task(update_sailings_cache()))
 
-    logger.info("Starting data collector backround tasks")
-    collector_task = asyncio.create_task(collect_data())
+    if not is_replay:
+        # In replay mode, skip data collection and model retraining
+        logger.info("Starting data collector background tasks")
+        tasks.append(asyncio.create_task(collect_data()))
 
-    logger.info("Starting ML model retraining task")
-    retrain_task = asyncio.create_task(retrain_model_daily())
+        logger.info("Starting ML model retraining task")
+        tasks.append(asyncio.create_task(retrain_model_daily()))
+    else:
+        logger.info("Replay mode: skipping data collector and model retraining")
 
     yield
 
     # Clean shutdown
     logger.info("Shutting down background tasks")
-    for task in [sailings_cache_task, collector_task, retrain_task]:
+    for task in tasks:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    """Track page views for user metrics."""
+    response = await call_next(request)
+    if response.status_code == 200:
+        track_request(
+            path=request.url.path,
+            client_ip=request.client.host if request.client else "unknown",
+            user_agent_str=request.headers.get("user-agent", ""),
+            referrer=request.headers.get("referer"),
+        )
+    return response
+
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
@@ -209,7 +260,7 @@ async def get_next_sailings_html(request: Request):
                 {
                     "request": request,
                     "routes": processed_routes,
-                    "last_updated": datetime.now().strftime("%I:%M:%S %p").lstrip("0"),
+                    "last_updated": current_time().strftime("%I:%M:%S %p").lstrip("0"),
                 },
             )
         except Exception as e:
@@ -326,13 +377,19 @@ async def get_predictions_data():
     return {**dashboard, "model": model_info}
 
 
+@app.get("/metrics-data")
+async def get_metrics_data_endpoint(days: int = 30):
+    """Return user metrics as JSON."""
+    return get_metrics_data(days=days)
+
+
 @app.get("/debug/cache-status")
 async def debug_cache_status():
     """Debug endpoint to check cache status"""
     if _sailings_cache is None:
         return {"status": "Cache not initialized"}
 
-    cache_age_seconds = (datetime.now() - _sailings_cache["cached_at"]).total_seconds()
+    cache_age_seconds = (current_time() - _sailings_cache["cached_at"]).total_seconds()
     return {
         "status": "Cache active",
         "last_updated": _sailings_cache["last_updated"],
@@ -356,6 +413,16 @@ async def debug_model_status():
             "training_data_size": ml_predictor.training_data_size,
             "evaluation_metrics": ml_predictor.last_evaluation,
         },
+        "dock_model": {
+            "is_trained": dock_predictor.is_trained,
+            "last_trained": (
+                dock_predictor.last_trained.isoformat()
+                if dock_predictor.last_trained
+                else None
+            ),
+            "training_data_size": dock_predictor.training_data_size,
+            "evaluation_metrics": dock_predictor.last_evaluation,
+        },
         "fill_risk_model": {
             "is_trained": fill_predictor.is_trained,
             "last_trained": (
@@ -371,3 +438,17 @@ async def debug_model_status():
             "sailing_event_count": get_sailing_event_count(),
         },
     }
+
+
+@app.get("/debug/predictions")
+async def debug_predictions():
+    """Show the most recent predictions for all vessels on active routes.
+
+    Each vessel entry contains every sailing prediction from the last cache
+    cycle (~30s), including:
+    - source: which model made the prediction (dock_model, en_route_model,
+      fallback_flat)
+    - inputs: the full feature dict passed to the model
+    - prediction: the model output (delay, lower_bound, upper_bound)
+    """
+    return get_last_predictions()

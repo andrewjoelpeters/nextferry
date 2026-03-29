@@ -1,10 +1,11 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from .config import ROUTES
 from .database import get_departed_sailing_space
 from .fill_predictor import fill_predictor
+from .replay import current_time
 from .serializers import RouteSchedule
 from .utils import format_confidence_text, format_delay_text, format_time_until
 
@@ -32,7 +33,7 @@ def _format_vessel_status(sailing) -> dict:
         result = {"vessel_status": "At Dock", "vessel_status_key": "at_dock"}
         if sailing.vessel_eta:
             result["docked_at"] = fmt_time(sailing.vessel_eta)
-            now = datetime.now(ZoneInfo("America/Los_Angeles"))
+            now = current_time()
             eta = sailing.vessel_eta
             if eta.tzinfo is None:
                 eta = eta.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
@@ -44,10 +45,13 @@ def _format_vessel_status(sailing) -> dict:
                     hours = minutes_docked // 60
                     mins = minutes_docked % 60
                     result["docked_duration"] = f"{hours}h {mins}m"
-        if sailing.scheduled_departure and sailing.vessel_delay_minutes:
-            predicted = sailing.scheduled_departure + timedelta(
-                minutes=sailing.vessel_delay_minutes
-            )
+        delay = (
+            sailing.delay_in_minutes
+            if sailing.delay_in_minutes
+            else sailing.vessel_delay_minutes
+        )
+        if sailing.scheduled_departure and delay:
+            predicted = sailing.scheduled_departure + timedelta(minutes=delay)
             result["predicted_departure"] = fmt_time(predicted)
         return result
     else:

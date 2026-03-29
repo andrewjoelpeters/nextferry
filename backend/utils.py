@@ -2,6 +2,8 @@ import re
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from .replay import current_time
+
 
 def parse_ms_date(value: str | None) -> datetime | None:
     if value is None:
@@ -26,7 +28,7 @@ def format_time_until(
     if not scheduled_time:
         return "N/A", "status-unknown"
 
-    now = datetime.now(ZoneInfo("America/Los_Angeles"))
+    now = current_time()
 
     # Make sure scheduled_time is timezone-aware
     if scheduled_time.tzinfo is None:
@@ -80,6 +82,18 @@ def format_confidence_text(lower_bound: int | None, upper_bound: int | None) -> 
         return f"+{val}" if val >= 0 else str(val)
 
     return f"({fmt(lower_bound)} to {fmt(upper_bound)}m)"
+
+
+def minutes_until(dt: datetime) -> float:
+    """Minutes from now until dt. Returns 0 if dt is in the past."""
+    now = current_time()
+    return max(0, (dt - now).total_seconds() / 60)
+
+
+def minutes_since(dt: datetime) -> float:
+    """Minutes elapsed since dt. Returns 0 if dt is in the future."""
+    now = current_time()
+    return max(0, (now - dt).total_seconds() / 60)
 
 
 def is_peak_hour(hour: int) -> bool:

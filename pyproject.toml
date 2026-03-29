@@ -21,6 +21,7 @@ dependencies = [
     "pytest>=8.0",
     "ruff>=0.9",
     "mypy>=1.14",
+    "user-agents>=2.2.0",
 ]
 
 [tool.ruff]

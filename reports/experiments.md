@@ -33,6 +33,7 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 25 | [q33 + more iters](#25-q33--more-iterations) | 2.77 | 2.22 | 68.8% | 61.0% | 800 iters (no gain, 2× slower) |
 | 26 | [+ L2 regularization](#26-l2-regularization) | 2.79 | 2.24 | 70.0% | 60.8% | l2_regularization=0.1 |
 | 27 | [Rebaseline](#27-rebaseline) | **2.48** | 1.97 | 70.0% | 43.5% | More data (19K events) |
+| 28 | [Tighter bounds (q25/q75)](#28-tighter-bounds-q25q75) | 2.48 | 1.97 | 42.5% | 43.5% | Narrower intervals, same PL |
 
 **Best configuration: Experiment 27 (rebaseline of 24)** — PL=2.48, 43.5% improvement, 70% coverage.
 
@@ -395,6 +396,19 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | **2.48** | 1.97 | -0.93 | 43.5% | 70.0% |
 
 **Takeaway:** Absolute PL improved from 2.76→2.48 with more training data. Improvement % dropped to 43.5% because the naive baseline also improved. Fold stability excellent (std=0.32). This is the new starting point for all further experiments.
+
+---
+
+### 28. Tighter bounds (q25/q75)
+
+**Report:** [exp28-tighter-bounds.md](exp28-tighter-bounds.md)
+**Change:** Changed interval bounds from q10/q90 to q25/q75 for narrower prediction intervals.
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.48 | 1.97 | -0.93 | 43.5% | 42.5% |
+
+**Takeaway:** PL and MAE identical — bounds don't affect the point estimate. But coverage dropped from 70%→42.5%, far below the 70% target. Tighter bounds answer the question from the proposal: the problem isn't just wide bounds, we need a different approach to confidence. Keep q10/q90.
 
 ---
 

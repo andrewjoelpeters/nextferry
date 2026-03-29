@@ -396,6 +396,37 @@ def get_turnaround_minutes(vessel_id: int, scheduled_departure: str) -> float | 
         conn.close()
 
 
+def get_docked_since(vessel_id: int, scheduled_departure: str) -> datetime | None:
+    """Get when the vessel first appeared at dock for this sailing.
+
+    Returns the earliest collected_at timestamp where at_dock=1 for this
+    vessel and scheduled_departure, or None if no snapshots exist or DB
+    is unavailable.
+    """
+    try:
+        conn = get_connection()
+    except Exception:
+        return None
+    try:
+        row = conn.execute(
+            """
+            SELECT MIN(collected_at) as docked_at
+            FROM vessel_snapshots
+            WHERE vessel_id = ?
+              AND at_dock = 1
+              AND scheduled_departure = ?
+            """,
+            (vessel_id, scheduled_departure),
+        ).fetchone()
+        if row and row["docked_at"]:
+            return datetime.fromisoformat(row["docked_at"])
+        return None
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        conn.close()
+
+
 def get_departed_sailing_space(
     departing_terminal_id: int, departure_time: str
 ) -> dict | None:

@@ -5,7 +5,11 @@ from zoneinfo import ZoneInfo
 
 from backend.config import ROUTES
 
-from .database import get_previous_sailing_fullness, get_turnaround_minutes
+from .database import (
+    get_docked_since,
+    get_previous_sailing_fullness,
+    get_turnaround_minutes,
+)
 from .replay import current_time
 from .serializers import (
     DirectionalSailing,
@@ -319,11 +323,14 @@ def _apply_dock_prediction(sailing: DirectionalSailing, vessel: Vessel) -> None:
     Falls back to flat delay propagation (vessel's cached delay) if the dock
     model isn't available.
     """
-    # Compute minutes_at_dock from vessel.eta (arrival/dock time)
-    eta = vessel.eta
-    if eta and eta.tzinfo is None:
-        eta = eta.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
-    mins_at_dock = minutes_since(eta) if eta else 0.0
+    # Compute minutes_at_dock from vessel.eta (arrival/dock time),
+    # falling back to DB snapshot docked_since when eta is null
+    dock_time = vessel.eta
+    if dock_time is None and sailing.vessel_docked_since:
+        dock_time = sailing.vessel_docked_since
+    if dock_time and dock_time.tzinfo is None:
+        dock_time = dock_time.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
+    mins_at_dock = minutes_since(dock_time) if dock_time else 0.0
 
     delay_minutes = datetime_to_minutes(vessel.delay) if vessel.delay else 0
     route_abbrev = _route_abbrev_for_terminal(sailing.departing_terminal_id)
@@ -429,6 +436,12 @@ def _annotate_with_vessel_state(
     sailing.vessel_at_dock = vessel.at_dock
     sailing.vessel_left_dock = vessel.left_dock
     sailing.vessel_eta = vessel.eta
+    if vessel.at_dock and vessel.eta is None and vessel.scheduled_departure:
+        docked_since = get_docked_since(
+            vessel.vessel_id, vessel.scheduled_departure.isoformat()
+        )
+        if docked_since:
+            sailing.vessel_docked_since = docked_since
     if vessel.delay:
         sailing.vessel_delay_minutes = datetime_to_minutes(vessel.delay)
 

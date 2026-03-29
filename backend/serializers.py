@@ -161,6 +161,9 @@ class RouteSailing(BaseModel):
     vessel_left_dock: datetime | None = None
     vessel_eta: datetime | None = None
     vessel_delay_minutes: int | None = None
+    vessel_docked_since: datetime | None = (
+        None  # from DB snapshots, fallback when eta is null
+    )
     # Inbound vessel info (preceding sailing heading toward this departure terminal)
     inbound_vessel_name: str | None = None
     inbound_vessel_at_dock: bool | None = None
@@ -192,6 +195,7 @@ class DirectionalSailing(RouteSailing):
                     "vessel_left_dock",
                     "vessel_eta",
                     "vessel_delay_minutes",
+                    "vessel_docked_since",
                     "inbound_vessel_name",
                     "inbound_vessel_at_dock",
                     "inbound_vessel_left_dock",

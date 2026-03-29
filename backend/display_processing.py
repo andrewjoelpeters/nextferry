@@ -31,13 +31,15 @@ def _format_vessel_status(sailing) -> dict:
     if sailing.vessel_at_dock:
         # Vessel is at dock — boarding/unloading
         result = {"vessel_status": "At Dock", "vessel_status_key": "at_dock"}
-        if sailing.vessel_eta:
-            result["docked_at"] = fmt_time(sailing.vessel_eta)
+        # Use WSDOT eta (precise arrival time) if available,
+        # fall back to DB snapshot docked_since (within 30s accuracy)
+        dock_time = sailing.vessel_eta or sailing.vessel_docked_since
+        if dock_time:
+            result["docked_at"] = fmt_time(dock_time)
             now = current_time()
-            eta = sailing.vessel_eta
-            if eta.tzinfo is None:
-                eta = eta.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
-            minutes_docked = int((now - eta).total_seconds() / 60)
+            if dock_time.tzinfo is None:
+                dock_time = dock_time.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
+            minutes_docked = int((now - dock_time).total_seconds() / 60)
             if minutes_docked >= 0:
                 if minutes_docked < 60:
                     result["docked_duration"] = f"{minutes_docked}m"

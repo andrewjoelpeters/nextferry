@@ -234,16 +234,22 @@ function showFerryDetails(ferry) {
 
     if (ferry.InService && ferry.AtDock) {
         // At dock: show docked time, scheduled departure, predicted departure
-        detailsHtml += `
-            <div class="detail-row">
-                <span class="detail-label">Docked at:</span>
-                <span>${formatTime(ferry.Eta)}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Scheduled Departure:</span>
-                <span>${formatTime(ferry.ScheduledDeparture)}</span>
-            </div>
-        `;
+        if (ferry.Eta) {
+            detailsHtml += `
+                <div class="detail-row">
+                    <span class="detail-label">Docked at:</span>
+                    <span>${formatTime(ferry.Eta)}</span>
+                </div>
+            `;
+        }
+        if (ferry.ScheduledDeparture) {
+            detailsHtml += `
+                <div class="detail-row">
+                    <span class="detail-label">Scheduled Departure:</span>
+                    <span>${formatTime(ferry.ScheduledDeparture)}</span>
+                </div>
+            `;
+        }
         if (ferry.PredictedDeparture && ferry.DelayMinutes) {
             detailsHtml += `
                 <div class="detail-row">
@@ -254,24 +260,36 @@ function showFerryDetails(ferry) {
         }
     } else if (ferry.InService && !ferry.AtDock) {
         // In transit: show left dock time, scheduled departure, delay
+        if (ferry.ScheduledDeparture) {
+            detailsHtml += `
+                <div class="detail-row">
+                    <span class="detail-label">Scheduled Departure:</span>
+                    <span>${formatTime(ferry.ScheduledDeparture)}</span>
+                </div>
+            `;
+        }
+        if (ferry.LeftDock) {
+            detailsHtml += `
+                <div class="detail-row">
+                    <span class="detail-label">Left Dock:</span>
+                    <span>${formatTime(ferry.LeftDock)}${formatDelay(ferry.DelayMinutes)}</span>
+                </div>
+            `;
+        }
         detailsHtml += `
-            <div class="detail-row">
-                <span class="detail-label">Scheduled Departure:</span>
-                <span>${formatTime(ferry.ScheduledDeparture)}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Left Dock:</span>
-                <span>${formatTime(ferry.LeftDock)}${formatDelay(ferry.DelayMinutes)}</span>
-            </div>
             <div class="detail-row">
                 <span class="detail-label">Speed:</span>
                 <span>${ferry.Speed ? ferry.Speed.toFixed(1) : '0'} knots</span>
             </div>
-            <div class="detail-row">
-                <span class="detail-label">ETA:</span>
-                <span>${formatTime(ferry.Eta)}</span>
-            </div>
         `;
+        if (ferry.Eta) {
+            detailsHtml += `
+                <div class="detail-row">
+                    <span class="detail-label">ETA:</span>
+                    <span>${formatTime(ferry.Eta)}</span>
+                </div>
+            `;
+        }
     }
 
     // Update ferry details panel

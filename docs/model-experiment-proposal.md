@@ -14,7 +14,7 @@ The real-world problem has natural structure the current approach doesn't captur
 - `backtest_model.py:125` trains q50 (actually at quantile=0.333), q10, q90
 - `predict_single()` returns `{predicted_delay, lower_bound, upper_bound}`
 - `display_processing.py` computes `confidence_text` (e.g., "(+1 to +5m)") but **no template renders it**
-- `evaluation.py` tracks pinball loss, bias, p90, coverage — but not interval width
+- `evaluation.py` tracks pinball loss, bias, p90, coverage, and interval width
 
 ## Models to Test
 
@@ -45,10 +45,6 @@ Full survival analysis — models the hazard function directly. Most theoretical
 | `is_holiday` | Different traffic patterns | Static calendar |
 
 Test features independently from model changes — one variable at a time.
-
-## Prerequisite: Add Interval Width Metric
-
-Before running experiments, add `mean_interval_width` and `median_interval_width` to `evaluation.py`. This is the key metric for comparing models — same pinball loss with narrower intervals is strictly better. See `docs/plan-interval-width.md` for the implementation plan.
 
 ## How to Run Experiments
 

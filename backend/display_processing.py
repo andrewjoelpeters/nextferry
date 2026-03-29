@@ -245,7 +245,7 @@ def process_routes_for_display(
                     inbound_predicted_departure = None
                     if (
                         sailing.inbound_vessel_scheduled_departure
-                        and sailing.inbound_vessel_delay_minutes
+                        and sailing.inbound_vessel_delay_minutes is not None
                     ):
                         inbound_predicted_departure = (
                             sailing.inbound_vessel_scheduled_departure

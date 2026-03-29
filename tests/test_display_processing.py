@@ -68,6 +68,35 @@ class TestFormatVesselStatus:
         result = _format_vessel_status(sailing)
         assert "docked_duration" not in result
 
+    def test_at_dock_null_eta_shows_scheduled_departure(self):
+        """When at dock with null Eta and no delay, show scheduled departure."""
+        from backend.display_processing import _format_vessel_status
+
+        sailing = _make_sailing(30)
+        sailing.vessel_at_dock = True
+        sailing.vessel_eta = None
+
+        result = _format_vessel_status(sailing)
+        assert result["vessel_status_key"] == "at_dock"
+        assert "docked_at" not in result
+        # Should still show predicted_departure (falling back to scheduled time)
+        assert "predicted_departure" in result
+
+    def test_at_dock_null_eta_with_delay_shows_predicted_departure(self):
+        """When at dock with null Eta but known delay, show adjusted departure."""
+        from backend.display_processing import _format_vessel_status
+
+        sailing = _make_sailing(30, delay=10)
+        sailing.vessel_at_dock = True
+        sailing.vessel_eta = None
+
+        result = _format_vessel_status(sailing)
+        assert result["vessel_status_key"] == "at_dock"
+        assert "predicted_departure" in result
+        # predicted_departure should be scheduled_time + 10min, not scheduled_time
+        scheduled_str = sailing.scheduled_departure.strftime("%I:%M %p").lstrip("0")
+        assert result["predicted_departure"] != scheduled_str
+
 
 class TestProcessRoutesForDisplay:
     def test_basic_processing(self):

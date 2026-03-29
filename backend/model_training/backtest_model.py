@@ -122,7 +122,7 @@ class QuantileGBTModel:
         X_train = self._encode(train_df)
         y_train = train_df[TARGET_COL].values
 
-        for name, quantile in [("q50", 0.333), ("q10", 0.10), ("q90", 0.90)]:
+        for name, quantile in [("q50", 0.30), ("q10", 0.10), ("q90", 0.90)]:
             model = HistGradientBoostingRegressor(
                 loss="quantile",
                 quantile=quantile,

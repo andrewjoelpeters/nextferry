@@ -168,6 +168,7 @@ class RouteSailing(BaseModel):
     inbound_vessel_eta: datetime | None = None
     inbound_vessel_from_terminal: str | None = None
     inbound_vessel_scheduled_departure: datetime | None = None
+    inbound_vessel_delay_minutes: int | None = None
 
 
 class DirectionalSailing(RouteSailing):

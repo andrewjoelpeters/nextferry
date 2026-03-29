@@ -1,7 +1,6 @@
 """Tests for the evaluation module's interval width metrics."""
 
 import pandas as pd
-import pytest
 
 from backend.model_training.evaluation import compute_metrics, evaluate_predictions
 

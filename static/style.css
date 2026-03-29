@@ -285,6 +285,23 @@ header h1 {
     color: var(--ocean-surface);
 }
 
+.vessel-overdue {
+    color: var(--danger-red);
+    font-weight: 600;
+}
+
+.overdue-alert {
+    color: var(--danger-red);
+    font-weight: 500;
+    font-size: var(--text-xs);
+}
+
+.detail-overdue {
+    color: var(--danger-red);
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+
 /* Row 3: capacity */
 .sailing-row-capacity {
     display: flex;

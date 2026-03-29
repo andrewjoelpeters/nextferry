@@ -484,6 +484,13 @@ def get_next_sailings_by_boat(
         # immediately preceding sailing (the vessel heading toward that terminal).
         # Works for both at-dock (waiting to depart) and en-route (crossing).
         if vessel:
+            # Find the vessel's own first sailing to get its predicted delay
+            vessel_first_delay = None
+            if next_sailings and next_sailings[0].delay_in_minutes is not None:
+                first = next_sailings[0]
+                if first.departing_terminal_id == vessel.departing_terminal_id:
+                    vessel_first_delay = first.delay_in_minutes
+
             for s in next_sailings:
                 if (
                     not s.departed
@@ -496,6 +503,7 @@ def get_next_sailings_by_boat(
                         s.inbound_vessel_scheduled_departure = (
                             vessel.scheduled_departure
                         )
+                        s.inbound_vessel_delay_minutes = vessel_first_delay
                     else:
                         s.inbound_vessel_left_dock = vessel.left_dock
                         s.inbound_vessel_eta = vessel.eta

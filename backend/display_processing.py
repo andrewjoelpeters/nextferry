@@ -53,6 +53,14 @@ def _format_vessel_status(sailing) -> dict:
         if sailing.scheduled_departure and delay:
             predicted = sailing.scheduled_departure + timedelta(minutes=delay)
             result["predicted_departure"] = fmt_time(predicted)
+            # Check if vessel is overdue (10+ min past predicted departure)
+            now = current_time()
+            if predicted.tzinfo is None:
+                predicted = predicted.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
+            minutes_overdue = int((now - predicted).total_seconds() / 60)
+            if minutes_overdue >= 10:
+                result["overdue"] = True
+                result["minutes_overdue"] = minutes_overdue
         return result
     else:
         # Vessel is en route — crossing toward this terminal
@@ -108,6 +116,16 @@ def process_routes_for_display(
                 time_until, base_status = format_time_until(
                     estimated_departure, departed=sailing.departed
                 )
+
+                # When vessel is at dock but scheduled/estimated time has passed,
+                # don't show "Departed" — the vessel hasn't left yet
+                if (
+                    sailing.vessel_at_dock
+                    and not sailing.departed
+                    and base_status == "status-departed"
+                ):
+                    time_until = "Loading"
+                    base_status = "status-delayed"
 
                 # Delay info
                 delay_text, delay_status = format_delay_text(sailing.delay_in_minutes)
@@ -223,6 +241,17 @@ def process_routes_for_display(
                     def _fmt_time(dt):
                         return dt.strftime("%I:%M %p").lstrip("0") if dt else None
 
+                    # Compute predicted departure for inbound vessel
+                    inbound_predicted_departure = None
+                    if (
+                        sailing.inbound_vessel_scheduled_departure
+                        and sailing.inbound_vessel_delay_minutes is not None
+                    ):
+                        inbound_predicted_departure = (
+                            sailing.inbound_vessel_scheduled_departure
+                            + timedelta(minutes=sailing.inbound_vessel_delay_minutes)
+                        )
+
                     inbound_info = {
                         "vessel_name": sailing.inbound_vessel_name,
                         "from_terminal": sailing.inbound_vessel_from_terminal,
@@ -232,6 +261,7 @@ def process_routes_for_display(
                         "scheduled_departure": _fmt_time(
                             sailing.inbound_vessel_scheduled_departure
                         ),
+                        "predicted_departure": _fmt_time(inbound_predicted_departure),
                     }
 
                 sailing_data = {

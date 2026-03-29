@@ -35,6 +35,7 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 27 | [Rebaseline](#27-rebaseline) | **2.48** | 1.97 | 70.0% | 43.5% | More data (19K events) |
 | 28 | [Tighter bounds (q25/q75)](#28-tighter-bounds-q25q75) | 2.48 | 1.97 | 42.5% | 43.5% | Narrower intervals, same PL |
 | 29 | [Drop turnaround_minutes](#29-drop-turnaround_minutes) | 2.94 | 2.37 | 71.4% | 33.0% | Ablation: turnaround is critical |
+| 30 | [Drop previous_sailing_fullness](#30-drop-previous_sailing_fullness) | 2.49 | 1.97 | 70.0% | 43.3% | Negligible impact |
 
 **Best configuration: Experiment 27 (rebaseline of 24)** — PL=2.48, 43.5% improvement, 70% coverage.
 
@@ -423,6 +424,19 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 2.94 | 2.37 | -1.25 | 33.0% | 71.4% |
 
 **Takeaway:** Turnaround time is a critical feature. Removing it degrades PL from 2.48→2.94 (+18.5%). This makes sense: turnaround_minutes captures how long the vessel has been docked — a short turnaround means loading may not be complete, directly predicting departure delay.
+
+---
+
+### 30. Drop previous_sailing_fullness
+
+**Report:** [exp30-drop-fullness.md](exp30-drop-fullness.md)
+**Change:** Ablation — removed previous_sailing_fullness from features (11→10 features).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.49 | 1.97 | -0.93 | 43.3% | 70.0% |
+
+**Takeaway:** Negligible impact (2.48→2.49). Fullness of the previous sailing doesn't meaningfully predict delay for the current sailing. Could be dropped for simplicity, but keeping it costs nothing.
 
 ---
 

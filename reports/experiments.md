@@ -34,6 +34,7 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 26 | [+ L2 regularization](#26-l2-regularization) | 2.79 | 2.24 | 70.0% | 60.8% | l2_regularization=0.1 |
 | 27 | [Rebaseline](#27-rebaseline) | **2.48** | 1.97 | 70.0% | 43.5% | More data (19K events) |
 | 28 | [Tighter bounds (q25/q75)](#28-tighter-bounds-q25q75) | 2.48 | 1.97 | 42.5% | 43.5% | Narrower intervals, same PL |
+| 29 | [Drop turnaround_minutes](#29-drop-turnaround_minutes) | 2.94 | 2.37 | 71.4% | 33.0% | Ablation: turnaround is critical |
 
 **Best configuration: Experiment 27 (rebaseline of 24)** — PL=2.48, 43.5% improvement, 70% coverage.
 
@@ -409,6 +410,19 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 2.48 | 1.97 | -0.93 | 43.5% | 42.5% |
 
 **Takeaway:** PL and MAE identical — bounds don't affect the point estimate. But coverage dropped from 70%→42.5%, far below the 70% target. Tighter bounds answer the question from the proposal: the problem isn't just wide bounds, we need a different approach to confidence. Keep q10/q90.
+
+---
+
+### 29. Drop turnaround_minutes
+
+**Report:** [exp29-drop-turnaround.md](exp29-drop-turnaround.md)
+**Change:** Ablation — removed turnaround_minutes from features (10→9 features).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.94 | 2.37 | -1.25 | 33.0% | 71.4% |
+
+**Takeaway:** Turnaround time is a critical feature. Removing it degrades PL from 2.48→2.94 (+18.5%). This makes sense: turnaround_minutes captures how long the vessel has been docked — a short turnaround means loading may not be complete, directly predicting departure delay.
 
 ---
 

@@ -61,6 +61,8 @@
                                 {% if sailing.vessel_info.vessel_status_key == 'at_dock' %}
                                     {% if sailing.vessel_info.docked_at %}
                                     <span class="detail-item">Docked at {{ sailing.vessel_info.docked_at }}{% if sailing.vessel_info.docked_duration %} ({{ sailing.vessel_info.docked_duration }}){% endif %}</span>
+                                    {% else %}
+                                    <span class="detail-item">Docked</span>
                                     {% endif %}
                                     {% if sailing.vessel_info.predicted_departure %}
                                     <span class="detail-item{% if sailing.vessel_info.overdue %} detail-overdue{% endif %}">Predicted departure: {{ sailing.vessel_info.predicted_departure }}</span>

@@ -50,17 +50,23 @@ def _format_vessel_status(sailing) -> dict:
             if sailing.delay_in_minutes
             else sailing.vessel_delay_minutes
         )
-        if sailing.scheduled_departure and delay:
-            predicted = sailing.scheduled_departure + timedelta(minutes=delay)
-            result["predicted_departure"] = fmt_time(predicted)
-            # Check if vessel is overdue (10+ min past predicted departure)
-            now = current_time()
-            if predicted.tzinfo is None:
-                predicted = predicted.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
-            minutes_overdue = int((now - predicted).total_seconds() / 60)
-            if minutes_overdue >= 10:
-                result["overdue"] = True
-                result["minutes_overdue"] = minutes_overdue
+        if sailing.scheduled_departure:
+            if delay:
+                predicted = sailing.scheduled_departure + timedelta(minutes=delay)
+                result["predicted_departure"] = fmt_time(predicted)
+                # Check if vessel is overdue (10+ min past predicted departure)
+                now = current_time()
+                if predicted.tzinfo is None:
+                    predicted = predicted.replace(
+                        tzinfo=ZoneInfo("America/Los_Angeles")
+                    )
+                minutes_overdue = int((now - predicted).total_seconds() / 60)
+                if minutes_overdue >= 10:
+                    result["overdue"] = True
+                    result["minutes_overdue"] = minutes_overdue
+            else:
+                # No delay info — show scheduled departure as expected time
+                result["predicted_departure"] = fmt_time(sailing.scheduled_departure)
         return result
     else:
         # Vessel is en route — crossing toward this terminal

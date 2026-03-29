@@ -491,9 +491,7 @@ def get_next_sailings_by_boat(
                 ):
                     s.inbound_vessel_name = vessel.vessel_name
                     s.inbound_vessel_at_dock = vessel.at_dock
-                    s.inbound_vessel_from_terminal = (
-                        vessel.departing_terminal_name
-                    )
+                    s.inbound_vessel_from_terminal = vessel.departing_terminal_name
                     if vessel.at_dock:
                         s.inbound_vessel_scheduled_departure = (
                             vessel.scheduled_departure

@@ -48,9 +48,9 @@ def is_peak_hour(hour: int) -> bool:
 # ---------------------------------------------------------------------------
 
 DEFAULT_HYPERPARAMS = {
-    "max_iter": 200,
-    "max_depth": 6,
-    "learning_rate": 0.1,
+    "max_iter": 600,
+    "max_depth": 8,
+    "learning_rate": 0.05,
     "min_samples_leaf": 20,
     "random_state": 42,
 }

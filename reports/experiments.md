@@ -32,8 +32,9 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 24 | [q33 (optimal)](#24-q33-theoretically-optimal) | **2.76** | 2.22 | 70.0% | **61.2%** | 1/(1+α) = 1/3 ≈ 0.333 |
 | 25 | [q33 + more iters](#25-q33--more-iterations) | 2.77 | 2.22 | 68.8% | 61.0% | 800 iters (no gain, 2× slower) |
 | 26 | [+ L2 regularization](#26-l2-regularization) | 2.79 | 2.24 | 70.0% | 60.8% | l2_regularization=0.1 |
+| 27 | [Rebaseline](#27-rebaseline) | **2.48** | 1.97 | 70.0% | 43.5% | More data (19K events) |
 
-**Best configuration: Experiment 24** — PL=2.76, 61.2% improvement, 70% coverage.
+**Best configuration: Experiment 27 (rebaseline of 24)** — PL=2.48, 43.5% improvement, 70% coverage.
 
 ## Experiment Log
 
@@ -381,6 +382,19 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 2.79 | 2.24 | -1.14 | 60.8% | 70.0% |
 
 **Takeaway:** Slight degradation. The model is already well-regularized by depth + learning rate. Additional L2 penalty constrains useful splits.
+
+---
+
+### 27. Rebaseline
+
+**Report:** [exp27-rebaseline.md](exp27-rebaseline.md)
+**Change:** Re-run exp24 config on latest data (19,348 events, up from previous runs). Default hyperparams updated to exp24's best (iter=600, depth=8, lr=0.05).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| **2.48** | 1.97 | -0.93 | 43.5% | 70.0% |
+
+**Takeaway:** Absolute PL improved from 2.76→2.48 with more training data. Improvement % dropped to 43.5% because the naive baseline also improved. Fold stability excellent (std=0.32). This is the new starting point for all further experiments.
 
 ---
 

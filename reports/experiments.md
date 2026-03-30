@@ -47,6 +47,7 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 39 | [Higher lr (0.08, 800 iter)](#39-higher-learning-rate) | 2.42 | 2.02 | 66.8% | 44.9% | Slightly overfits, bad coverage |
 | 40 | [Interval regularization](#40-interval-model-regularization) | 2.40 | 2.03 | 69.6% | 45.3% | No gain — already well-regularized |
 | 41 | [+ delay_horizon_ratio](#41-delay-horizon-ratio) | 2.41 | 2.03 | 70.4% | 45.1% | GBT already learns this interaction |
+| 42 | [Drop vessel_speed](#42-drop-vessel_speed) | 2.44 | 2.04 | 70.2% | 44.4% | Ablation: speed still matters |
 
 **Best configuration: Experiment 36 (q25)** — PL=2.40, 45.3% improvement, 70% coverage.
 
@@ -591,6 +592,19 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 2.41 | 2.03 | -1.27 | 45.1% | 70.4% |
 
 **Takeaway:** No improvement (2.41 vs 2.40). GBT already learns the interaction between delay and horizon through tree splits — an explicit ratio feature adds nothing. Consistent with exp 5/13/14: engineered interactions don't help tree ensembles.
+
+---
+
+### 42. Drop vessel_speed
+
+**Report:** [exp42-drop-speed.md](exp42-drop-speed.md)
+**Change:** Ablation — removed vessel_speed from features (11→10 features).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.44 | 2.04 | -1.25 | 44.4% | 70.2% |
+
+**Takeaway:** vessel_speed still contributes meaningfully: PL degrades from 2.40→2.44 without it. A slow vessel en-route near departure time is a strong real-time delay signal that turnaround_minutes and current_delay alone can't capture. Second most impactful feature after turnaround_minutes.
 
 ---
 

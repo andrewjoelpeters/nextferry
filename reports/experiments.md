@@ -40,9 +40,10 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 32 | [+ consecutive_late_sailings](#32-add-consecutive_late_sailings) | 2.48 | 1.97 | 70.0% | 43.5% | No gain — redundant with current_delay |
 | 33 | [NGBoost (Normal)](#33-ngboost-normal-distribution) | 2.76 | 2.05 | 81.0% | 37.1% | Distributional model, worse PL |
 | 34 | [q30 quantile](#34-q30-quantile) | **2.45** | 1.99 | 70.0% | 44.2% | Slight improvement over q33 |
-| 35 | [q28 quantile](#35-q28-quantile) | **2.43** | 2.00 | 70.0% | 44.6% | Better still — new best |
+| 35 | [q28 quantile](#35-q28-quantile) | **2.43** | 2.00 | 70.0% | 44.6% | Better still |
+| 36 | [q25 quantile](#36-q25-quantile) | **2.40** | 2.03 | 70.0% | 45.3% | Trend continues — new best |
 
-**Best configuration: Experiment 35 (q28)** — PL=2.43, 44.6% improvement, 70% coverage.
+**Best configuration: Experiment 36 (q25)** — PL=2.40, 45.3% improvement, 70% coverage.
 
 ## Experiment Log
 
@@ -506,7 +507,20 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 |----|-----|------|-------------|----------|
 | **2.43** | 2.00 | -1.14 | 44.6% | 70.0% |
 
-**Takeaway:** Continues the trend — q28 beats q30 (2.43 vs 2.45). Bias is -1.14 min, still fine for ferry riders. The model benefits from predicting more conservatively than the theoretical optimum. **New best.**
+**Takeaway:** Continues the trend — q28 beats q30 (2.43 vs 2.45). Bias is -1.14 min, still fine for ferry riders. The model benefits from predicting more conservatively than the theoretical optimum.
+
+---
+
+### 36. q25 quantile
+
+**Report:** [exp36-q25.md](exp36-q25.md)
+**Change:** Changed point estimate quantile from q28 to q25 (0.25).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| **2.40** | 2.03 | -1.27 | 45.3% | 70.0% |
+
+**Takeaway:** q25 beats q28 (2.40 vs 2.43). The PL/MAE ratio keeps dropping (1.18×), meaning predictions are increasingly "safe" (underprediction). Bias is -1.27 min — riders arrive ~1.3 min early on average. Still acceptable but approaching the limit. **New best.**
 
 ---
 

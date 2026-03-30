@@ -626,21 +626,29 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 
 8. **L2 loss is wrong for skewed targets.** Ferry delays have a heavy right tail — L2 optimizes the mean, which overpredicts the typical case.
 
-## Best Configuration (Exp 24)
+9. **q25 outperforms the theoretical q33 optimum.** The 1/(1+α) formula assumes a perfect model; real-world miscalibration means pushing further conservative (q25) gains PL from 2.48→2.40 with acceptable bias (-1.27 min).
+
+10. **turnaround_minutes is the #1 feature.** Ablation shows removing it degrades PL by 18.5%. vessel_speed is #2 (1.7% degradation). All other features have negligible individual impact.
+
+11. **Alternative model families (NGBoost) underperform.** Distributional regression with Normal assumption gives worse PL and over-calibrated intervals. HistGBT's native quantile regression + categorical support is hard to beat.
+
+12. **Quantile regression is inherently outlier-robust.** Clipping targets hurts because it distorts the very percentile boundaries the model is learning. Don't preprocess targets for quantile models.
+
+## Best Configuration (Exp 36)
 
 ```
 Model: 3× HistGradientBoostingRegressor
-  - q33 (point estimate, quantile=0.333)
+  - q25 (point estimate, quantile=0.25)
   - q10 (lower bound)
   - q90 (upper bound)
 
 Hyperparameters:
-  max_iter: 600 (CLI override)
-  max_depth: 8 (CLI override)
-  learning_rate: 0.05 (CLI override)
+  max_iter: 600
+  max_depth: 8
+  learning_rate: 0.05
   min_samples_leaf: 20
 
-Features (10):
+Features (11):
   route_abbrev (categorical)
   departing_terminal_id (categorical)
   vessel_id (categorical)

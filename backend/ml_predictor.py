@@ -309,6 +309,10 @@ class DelayPredictor:
             * merged["minutes_until_scheduled_departure"]
         )
         merged["delay_squared"] = merged["current_vessel_delay_minutes"] ** 2
+        merged["delay_horizon_ratio"] = (
+            merged["current_vessel_delay_minutes"]
+            / merged["minutes_until_scheduled_departure"].clip(lower=1)
+        )
 
         # --- Consecutive late sailings (cascading delay signal) ---
         # For each route, count how many preceding sailings were late (>1 min)
@@ -355,6 +359,7 @@ class DelayPredictor:
                 "vessel_speed",
                 "delay_x_horizon",
                 "delay_squared",
+                "delay_horizon_ratio",
                 "is_peak_hour",
                 "previous_sailing_fullness",
                 "turnaround_minutes",

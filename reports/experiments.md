@@ -32,8 +32,24 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 24 | [q33 (optimal)](#24-q33-theoretically-optimal) | **2.76** | 2.22 | 70.0% | **61.2%** | 1/(1+α) = 1/3 ≈ 0.333 |
 | 25 | [q33 + more iters](#25-q33--more-iterations) | 2.77 | 2.22 | 68.8% | 61.0% | 800 iters (no gain, 2× slower) |
 | 26 | [+ L2 regularization](#26-l2-regularization) | 2.79 | 2.24 | 70.0% | 60.8% | l2_regularization=0.1 |
+| 27 | [Rebaseline](#27-rebaseline) | **2.48** | 1.97 | 70.0% | 43.5% | More data (19K events) |
+| 28 | [Tighter bounds (q25/q75)](#28-tighter-bounds-q25q75) | 2.48 | 1.97 | 42.5% | 43.5% | Narrower intervals, same PL |
+| 29 | [Drop turnaround_minutes](#29-drop-turnaround_minutes) | 2.94 | 2.37 | 71.4% | 33.0% | Ablation: turnaround is critical |
+| 30 | [Drop previous_sailing_fullness](#30-drop-previous_sailing_fullness) | 2.49 | 1.97 | 70.0% | 43.3% | Negligible impact |
+| 31 | [Deeper trees (depth=10)](#31-deeper-trees-depth10) | 2.48 | 1.97 | 69.8% | 43.5% | No gain from deeper trees |
+| 32 | [+ consecutive_late_sailings](#32-add-consecutive_late_sailings) | 2.48 | 1.97 | 70.0% | 43.5% | No gain — redundant with current_delay |
+| 33 | [NGBoost (Normal)](#33-ngboost-normal-distribution) | 2.76 | 2.05 | 81.0% | 37.1% | Distributional model, worse PL |
+| 34 | [q30 quantile](#34-q30-quantile) | **2.45** | 1.99 | 70.0% | 44.2% | Slight improvement over q33 |
+| 35 | [q28 quantile](#35-q28-quantile) | **2.43** | 2.00 | 70.0% | 44.6% | Better still |
+| 36 | [q25 quantile](#36-q25-quantile) | **2.40** | 2.03 | 70.0% | 45.3% | Trend continues — new best |
+| 37 | [q22 quantile](#37-q22-quantile) | 2.40 | 2.06 | 70.0% | 45.3% | Plateau — q25 is optimal |
+| 38 | [Clip targets [-10,30]](#38-clip-extreme-targets) | 2.44 | 2.09 | 71.2% | 44.4% | Outlier clipping hurts |
+| 39 | [Higher lr (0.08, 800 iter)](#39-higher-learning-rate) | 2.42 | 2.02 | 66.8% | 44.9% | Slightly overfits, bad coverage |
+| 40 | [Interval regularization](#40-interval-model-regularization) | 2.40 | 2.03 | 69.6% | 45.3% | No gain — already well-regularized |
+| 41 | [+ delay_horizon_ratio](#41-delay-horizon-ratio) | 2.41 | 2.03 | 70.4% | 45.1% | GBT already learns this interaction |
+| 42 | [Drop vessel_speed](#42-drop-vessel_speed) | 2.44 | 2.04 | 70.2% | 44.4% | Ablation: speed still matters |
 
-**Best configuration: Experiment 24** — PL=2.76, 61.2% improvement, 70% coverage.
+**Best configuration: Experiment 36 (q25)** — PL=2.40, 45.3% improvement, 70% coverage.
 
 ## Experiment Log
 
@@ -384,6 +400,214 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 
 ---
 
+### 27. Rebaseline
+
+**Report:** [exp27-rebaseline.md](exp27-rebaseline.md)
+**Change:** Re-run exp24 config on latest data (19,348 events, up from previous runs). Default hyperparams updated to exp24's best (iter=600, depth=8, lr=0.05).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| **2.48** | 1.97 | -0.93 | 43.5% | 70.0% |
+
+**Takeaway:** Absolute PL improved from 2.76→2.48 with more training data. Improvement % dropped to 43.5% because the naive baseline also improved. Fold stability excellent (std=0.32). This is the new starting point for all further experiments.
+
+---
+
+### 28. Tighter bounds (q25/q75)
+
+**Report:** [exp28-tighter-bounds.md](exp28-tighter-bounds.md)
+**Change:** Changed interval bounds from q10/q90 to q25/q75 for narrower prediction intervals.
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.48 | 1.97 | -0.93 | 43.5% | 42.5% |
+
+**Takeaway:** PL and MAE identical — bounds don't affect the point estimate. But coverage dropped from 70%→42.5%, far below the 70% target. Tighter bounds answer the question from the proposal: the problem isn't just wide bounds, we need a different approach to confidence. Keep q10/q90.
+
+---
+
+### 29. Drop turnaround_minutes
+
+**Report:** [exp29-drop-turnaround.md](exp29-drop-turnaround.md)
+**Change:** Ablation — removed turnaround_minutes from features (10→9 features).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.94 | 2.37 | -1.25 | 33.0% | 71.4% |
+
+**Takeaway:** Turnaround time is a critical feature. Removing it degrades PL from 2.48→2.94 (+18.5%). This makes sense: turnaround_minutes captures how long the vessel has been docked — a short turnaround means loading may not be complete, directly predicting departure delay.
+
+---
+
+### 30. Drop previous_sailing_fullness
+
+**Report:** [exp30-drop-fullness.md](exp30-drop-fullness.md)
+**Change:** Ablation — removed previous_sailing_fullness from features (11→10 features).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.49 | 1.97 | -0.93 | 43.3% | 70.0% |
+
+**Takeaway:** Negligible impact (2.48→2.49). Fullness of the previous sailing doesn't meaningfully predict delay for the current sailing. Could be dropped for simplicity, but keeping it costs nothing.
+
+---
+
+### 31. Deeper trees (depth=10)
+
+**Report:** [exp31-deeper-trees.md](exp31-deeper-trees.md)
+**Change:** Increased max_depth from 8 to 10.
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.48 | 1.97 | -0.93 | 43.5% | 69.8% |
+
+**Takeaway:** Identical PL. Depth 8 already captures the interaction complexity in this dataset. Deeper trees risk overfitting without additional signal. Keep depth=8.
+
+---
+
+### 32. Add consecutive_late_sailings
+
+**Report:** [exp32-consecutive-late.md](exp32-consecutive-late.md)
+**Change:** New feature: count of consecutive late sailings (>1 min) on the same route preceding each event. Computed per-route from sailing_events.
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.48 | 1.97 | -0.93 | 43.5% | 70.0% |
+
+**Takeaway:** No improvement. The cascading delay signal is already captured by `current_vessel_delay_minutes` — if the vessel is currently late, previous sailings were already late. The feature is redundant with existing real-time delay information.
+
+---
+
+### 33. NGBoost (Normal distribution)
+
+**Report:** [exp33-ngboost.md](exp33-ngboost.md)
+**Change:** New model: NGBRegressor with Normal distribution, DecisionTree base learner (depth=4), 200 estimators, lr=0.05. Uses q33 percentile for point estimate.
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.76 | 2.05 | -0.65 | 37.1% | 81.0% |
+
+**Takeaway:** NGBoost is worse than quantile GBT (2.76 vs 2.48). Two issues: (1) Normal distribution is symmetric but ferry delays are right-skewed, making intervals too wide (81% coverage vs 70% target). (2) NGBoost base learner is limited to shallow trees (depth=4) without HistGBT's native categorical handling. The quantile GBT approach better fits this problem. ~10× slower training time.
+
+---
+
+### 34. q30 quantile
+
+**Report:** [exp34-q30.md](exp34-q30.md)
+**Change:** Changed point estimate quantile from q33 (0.333) to q30 (0.30).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| **2.45** | 1.99 | -1.06 | 44.2% | 70.0% |
+
+**Takeaway:** Small but real improvement: PL 2.48→2.45. The theoretical optimum of q33 (1/(1+α)) assumes perfect calibration; with real-world model errors, slightly more conservative (q30) helps because the penalty for overprediction (α=2) means it's better to err further on the safe side. Bias increases to -1.06 (1 min conservative), still perfectly acceptable for ferry riders. **New best.**
+
+---
+
+### 35. q28 quantile
+
+**Report:** [exp35-q28.md](exp35-q28.md)
+**Change:** Changed point estimate quantile from q30 to q28 (0.28).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| **2.43** | 2.00 | -1.14 | 44.6% | 70.0% |
+
+**Takeaway:** Continues the trend — q28 beats q30 (2.43 vs 2.45). Bias is -1.14 min, still fine for ferry riders. The model benefits from predicting more conservatively than the theoretical optimum.
+
+---
+
+### 36. q25 quantile
+
+**Report:** [exp36-q25.md](exp36-q25.md)
+**Change:** Changed point estimate quantile from q28 to q25 (0.25).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| **2.40** | 2.03 | -1.27 | 45.3% | 70.0% |
+
+**Takeaway:** q25 beats q28 (2.40 vs 2.43). The PL/MAE ratio keeps dropping (1.18×), meaning predictions are increasingly "safe" (underprediction). Bias is -1.27 min — riders arrive ~1.3 min early on average. Still acceptable but approaching the limit. **New best.**
+
+---
+
+### 37. q22 quantile
+
+**Report:** [exp37-q22.md](exp37-q22.md)
+**Change:** Changed point estimate quantile from q25 to q22 (0.22).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.40 | 2.06 | -1.39 | 45.3% | 70.0% |
+
+**Takeaway:** PL plateaus at 2.40. MAE worsened (2.03→2.06) because predictions are now too conservative (bias -1.39 min). Going below q25 trades accuracy for safety with no PL gain. **q25 is the optimal quantile for this dataset.**
+
+---
+
+### 38. Clip extreme targets
+
+**Report:** [exp38-clip-targets.md](exp38-clip-targets.md)
+**Change:** Clipped training targets to [-10, 30] minutes to reduce outlier influence.
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.44 | 2.09 | -1.40 | 44.4% | 71.2% |
+
+**Takeaway:** Clipping hurts (2.40→2.44). Quantile regression is already robust to outliers — it optimizes percentiles, not means. Clipping targets just distorts the learned quantile boundaries, especially for the tail-sensitive q10/q90 interval models.
+
+---
+
+### 39. Higher learning rate
+
+**Report:** [exp39-higher-lr.md](exp39-higher-lr.md)
+**Change:** lr=0.08, max_iter=800 (was lr=0.05, iter=600).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.42 | 2.02 | -1.21 | 44.9% | 66.8% |
+
+**Takeaway:** PL slightly worse than best (2.42 vs 2.40), and coverage drops to 66.8% (below 70% target). Higher lr causes interval models to overfit, making bounds too narrow. lr=0.05 remains optimal.
+
+---
+
+### 40. Interval model regularization
+
+**Report:** [exp40-interval-reg.md](exp40-interval-reg.md)
+**Change:** Used min_samples_leaf=40 for q10/q90 interval models (keeping 20 for point estimate).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.40 | 2.03 | -1.27 | 45.3% | 69.6% |
+
+**Takeaway:** Identical PL. Coverage slightly below target (69.6% vs 70%). The interval models were already well-regularized at min_samples_leaf=20. Differential regularization adds complexity with no benefit.
+
+---
+
+### 41. Delay-horizon ratio
+
+**Report:** [exp41-delay-ratio.md](exp41-delay-ratio.md)
+**Change:** Added `delay_horizon_ratio = current_delay / max(horizon, 1)` feature. Captures what fraction of remaining time is "eaten" by current delay.
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.41 | 2.03 | -1.27 | 45.1% | 70.4% |
+
+**Takeaway:** No improvement (2.41 vs 2.40). GBT already learns the interaction between delay and horizon through tree splits — an explicit ratio feature adds nothing. Consistent with exp 5/13/14: engineered interactions don't help tree ensembles.
+
+---
+
+### 42. Drop vessel_speed
+
+**Report:** [exp42-drop-speed.md](exp42-drop-speed.md)
+**Change:** Ablation — removed vessel_speed from features (11→10 features).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.44 | 2.04 | -1.25 | 44.4% | 70.2% |
+
+**Takeaway:** vessel_speed still contributes meaningfully: PL degrades from 2.40→2.44 without it. A slow vessel en-route near departure time is a strong real-time delay signal that turnaround_minutes and current_delay alone can't capture. Second most impactful feature after turnaround_minutes.
+
+---
+
 ## Key Learnings
 
 1. **Hyperparameters matter more than features.** Going from default (iter=200, depth=6, lr=0.1) to tuned (iter=600, depth=8, lr=0.05) was worth more than any single feature addition.
@@ -402,21 +626,29 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 
 8. **L2 loss is wrong for skewed targets.** Ferry delays have a heavy right tail — L2 optimizes the mean, which overpredicts the typical case.
 
-## Best Configuration (Exp 24)
+9. **q25 outperforms the theoretical q33 optimum.** The 1/(1+α) formula assumes a perfect model; real-world miscalibration means pushing further conservative (q25) gains PL from 2.48→2.40 with acceptable bias (-1.27 min).
+
+10. **turnaround_minutes is the #1 feature.** Ablation shows removing it degrades PL by 18.5%. vessel_speed is #2 (1.7% degradation). All other features have negligible individual impact.
+
+11. **Alternative model families (NGBoost) underperform.** Distributional regression with Normal assumption gives worse PL and over-calibrated intervals. HistGBT's native quantile regression + categorical support is hard to beat.
+
+12. **Quantile regression is inherently outlier-robust.** Clipping targets hurts because it distorts the very percentile boundaries the model is learning. Don't preprocess targets for quantile models.
+
+## Best Configuration (Exp 36)
 
 ```
 Model: 3× HistGradientBoostingRegressor
-  - q33 (point estimate, quantile=0.333)
+  - q25 (point estimate, quantile=0.25)
   - q10 (lower bound)
   - q90 (upper bound)
 
 Hyperparameters:
-  max_iter: 600 (CLI override)
-  max_depth: 8 (CLI override)
-  learning_rate: 0.05 (CLI override)
+  max_iter: 600
+  max_depth: 8
+  learning_rate: 0.05
   min_samples_leaf: 20
 
-Features (10):
+Features (11):
   route_abbrev (categorical)
   departing_terminal_id (categorical)
   vessel_id (categorical)

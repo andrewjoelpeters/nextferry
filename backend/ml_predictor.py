@@ -309,6 +309,38 @@ class DelayPredictor:
             * merged["minutes_until_scheduled_departure"]
         )
         merged["delay_squared"] = merged["current_vessel_delay_minutes"] ** 2
+        merged["delay_horizon_ratio"] = (
+            merged["current_vessel_delay_minutes"]
+            / merged["minutes_until_scheduled_departure"].clip(lower=1)
+        )
+
+        # --- Consecutive late sailings (cascading delay signal) ---
+        # For each route, count how many preceding sailings were late (>1 min)
+        # Uses events_df (one row per event), then joins back to merged
+        route_events = events_df[
+            ["sailing_event_id", "route_abbrev", "scheduled_departure_dt", "actual_delay_minutes"]
+        ].sort_values(["route_abbrev", "scheduled_departure_dt"])
+
+        consecutive_counts = []
+        for _route, group in route_events.groupby("route_abbrev"):
+            delays = group["actual_delay_minutes"].values
+            counts = np.zeros(len(delays), dtype=int)
+            for i in range(1, len(delays)):
+                if delays[i - 1] > 1.0:
+                    counts[i] = counts[i - 1] + 1
+                else:
+                    counts[i] = 0
+            group = group.copy()
+            group["consecutive_late_sailings"] = counts
+            consecutive_counts.append(group[["sailing_event_id", "consecutive_late_sailings"]])
+
+        if consecutive_counts:
+            consec_df = pd.concat(consecutive_counts, ignore_index=True)
+            merged = merged.merge(consec_df, on="sailing_event_id", how="left")
+            merged["consecutive_late_sailings"] = merged["consecutive_late_sailings"].fillna(0)
+        else:
+            merged["consecutive_late_sailings"] = 0
+        logger.info("Consecutive late sailings feature computed")
 
         result = merged[
             [
@@ -327,9 +359,11 @@ class DelayPredictor:
                 "vessel_speed",
                 "delay_x_horizon",
                 "delay_squared",
+                "delay_horizon_ratio",
                 "is_peak_hour",
                 "previous_sailing_fullness",
                 "turnaround_minutes",
+                "consecutive_late_sailings",
                 "actual_delay_minutes",
             ]
         ].copy()

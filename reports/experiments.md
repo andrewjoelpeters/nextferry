@@ -43,6 +43,7 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 35 | [q28 quantile](#35-q28-quantile) | **2.43** | 2.00 | 70.0% | 44.6% | Better still |
 | 36 | [q25 quantile](#36-q25-quantile) | **2.40** | 2.03 | 70.0% | 45.3% | Trend continues — new best |
 | 37 | [q22 quantile](#37-q22-quantile) | 2.40 | 2.06 | 70.0% | 45.3% | Plateau — q25 is optimal |
+| 38 | [Clip targets [-10,30]](#38-clip-extreme-targets) | 2.44 | 2.09 | 71.2% | 44.4% | Outlier clipping hurts |
 
 **Best configuration: Experiment 36 (q25)** — PL=2.40, 45.3% improvement, 70% coverage.
 
@@ -535,6 +536,19 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 2.40 | 2.06 | -1.39 | 45.3% | 70.0% |
 
 **Takeaway:** PL plateaus at 2.40. MAE worsened (2.03→2.06) because predictions are now too conservative (bias -1.39 min). Going below q25 trades accuracy for safety with no PL gain. **q25 is the optimal quantile for this dataset.**
+
+---
+
+### 38. Clip extreme targets
+
+**Report:** [exp38-clip-targets.md](exp38-clip-targets.md)
+**Change:** Clipped training targets to [-10, 30] minutes to reduce outlier influence.
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.44 | 2.09 | -1.40 | 44.4% | 71.2% |
+
+**Takeaway:** Clipping hurts (2.40→2.44). Quantile regression is already robust to outliers — it optimizes percentiles, not means. Clipping targets just distorts the learned quantile boundaries, especially for the tail-sensitive q10/q90 interval models.
 
 ---
 

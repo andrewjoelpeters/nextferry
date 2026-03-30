@@ -234,16 +234,32 @@ function showFerryDetails(ferry) {
 
     if (ferry.InService && ferry.AtDock) {
         // At dock: show docked time, scheduled departure, predicted departure
-        detailsHtml += `
-            <div class="detail-row">
-                <span class="detail-label">Docked at:</span>
-                <span>${formatTime(ferry.Eta)}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Scheduled Departure:</span>
-                <span>${formatTime(ferry.ScheduledDeparture)}</span>
-            </div>
-        `;
+        // Use WSDOT Eta if available, fall back to DB snapshot DockedSince
+        const dockTime = ferry.Eta || ferry.DockedSince;
+        if (dockTime) {
+            const dockDate = new Date(dockTime);
+            const minutesAgo = Math.floor((new Date() - dockDate) / 60000);
+            let durationStr = '';
+            if (minutesAgo >= 0 && minutesAgo < 60) {
+                durationStr = ` (${minutesAgo}m ago)`;
+            } else if (minutesAgo >= 60) {
+                durationStr = ` (${Math.floor(minutesAgo/60)}h ${minutesAgo%60}m ago)`;
+            }
+            detailsHtml += `
+                <div class="detail-row">
+                    <span class="detail-label">Docked:</span>
+                    <span>${formatTime(dockTime)}${durationStr}</span>
+                </div>
+            `;
+        }
+        if (ferry.ScheduledDeparture) {
+            detailsHtml += `
+                <div class="detail-row">
+                    <span class="detail-label">Scheduled Departure:</span>
+                    <span>${formatTime(ferry.ScheduledDeparture)}</span>
+                </div>
+            `;
+        }
         if (ferry.PredictedDeparture && ferry.DelayMinutes) {
             detailsHtml += `
                 <div class="detail-row">
@@ -254,24 +270,36 @@ function showFerryDetails(ferry) {
         }
     } else if (ferry.InService && !ferry.AtDock) {
         // In transit: show left dock time, scheduled departure, delay
+        if (ferry.ScheduledDeparture) {
+            detailsHtml += `
+                <div class="detail-row">
+                    <span class="detail-label">Scheduled Departure:</span>
+                    <span>${formatTime(ferry.ScheduledDeparture)}</span>
+                </div>
+            `;
+        }
+        if (ferry.LeftDock) {
+            detailsHtml += `
+                <div class="detail-row">
+                    <span class="detail-label">Left Dock:</span>
+                    <span>${formatTime(ferry.LeftDock)}${formatDelay(ferry.DelayMinutes)}</span>
+                </div>
+            `;
+        }
         detailsHtml += `
-            <div class="detail-row">
-                <span class="detail-label">Scheduled Departure:</span>
-                <span>${formatTime(ferry.ScheduledDeparture)}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Left Dock:</span>
-                <span>${formatTime(ferry.LeftDock)}${formatDelay(ferry.DelayMinutes)}</span>
-            </div>
             <div class="detail-row">
                 <span class="detail-label">Speed:</span>
                 <span>${ferry.Speed ? ferry.Speed.toFixed(1) : '0'} knots</span>
             </div>
-            <div class="detail-row">
-                <span class="detail-label">ETA:</span>
-                <span>${formatTime(ferry.Eta)}</span>
-            </div>
         `;
+        if (ferry.Eta) {
+            detailsHtml += `
+                <div class="detail-row">
+                    <span class="detail-label">ETA:</span>
+                    <span>${formatTime(ferry.Eta)}</span>
+                </div>
+            `;
+        }
     }
 
     // Update ferry details panel

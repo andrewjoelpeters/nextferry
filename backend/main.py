@@ -17,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 from .data_collector import collect_data
 from .database import (
     get_dashboard_data,
+    get_docked_since,
     get_metrics_data,
     get_sailing_event_count,
     get_snapshot_count,
@@ -293,6 +294,14 @@ async def get_ferry_positions():
         result = []
         for v in ferry_data:
             data = v.model_dump(by_alias=True)
+            # Add docked_since from DB snapshots when WSDOT Eta is null
+            if v.at_dock and v.eta is None and v.scheduled_departure:
+                docked_since = get_docked_since(
+                    v.vessel_id, v.scheduled_departure.isoformat()
+                )
+                data["DockedSince"] = docked_since.isoformat() if docked_since else None
+            else:
+                data["DockedSince"] = None
             # Add computed delay fields (not in WSDOT response)
             if v.delay:
                 delay_minutes = datetime_to_minutes(v.delay)

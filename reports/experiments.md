@@ -42,6 +42,7 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 34 | [q30 quantile](#34-q30-quantile) | **2.45** | 1.99 | 70.0% | 44.2% | Slight improvement over q33 |
 | 35 | [q28 quantile](#35-q28-quantile) | **2.43** | 2.00 | 70.0% | 44.6% | Better still |
 | 36 | [q25 quantile](#36-q25-quantile) | **2.40** | 2.03 | 70.0% | 45.3% | Trend continues — new best |
+| 37 | [q22 quantile](#37-q22-quantile) | 2.40 | 2.06 | 70.0% | 45.3% | Plateau — q25 is optimal |
 
 **Best configuration: Experiment 36 (q25)** — PL=2.40, 45.3% improvement, 70% coverage.
 
@@ -521,6 +522,19 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | **2.40** | 2.03 | -1.27 | 45.3% | 70.0% |
 
 **Takeaway:** q25 beats q28 (2.40 vs 2.43). The PL/MAE ratio keeps dropping (1.18×), meaning predictions are increasingly "safe" (underprediction). Bias is -1.27 min — riders arrive ~1.3 min early on average. Still acceptable but approaching the limit. **New best.**
+
+---
+
+### 37. q22 quantile
+
+**Report:** [exp37-q22.md](exp37-q22.md)
+**Change:** Changed point estimate quantile from q25 to q22 (0.22).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.40 | 2.06 | -1.39 | 45.3% | 70.0% |
+
+**Takeaway:** PL plateaus at 2.40. MAE worsened (2.03→2.06) because predictions are now too conservative (bias -1.39 min). Going below q25 trades accuracy for safety with no PL gain. **q25 is the optimal quantile for this dataset.**
 
 ---
 

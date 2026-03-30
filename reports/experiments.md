@@ -44,6 +44,7 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 36 | [q25 quantile](#36-q25-quantile) | **2.40** | 2.03 | 70.0% | 45.3% | Trend continues — new best |
 | 37 | [q22 quantile](#37-q22-quantile) | 2.40 | 2.06 | 70.0% | 45.3% | Plateau — q25 is optimal |
 | 38 | [Clip targets [-10,30]](#38-clip-extreme-targets) | 2.44 | 2.09 | 71.2% | 44.4% | Outlier clipping hurts |
+| 39 | [Higher lr (0.08, 800 iter)](#39-higher-learning-rate) | 2.42 | 2.02 | 66.8% | 44.9% | Slightly overfits, bad coverage |
 
 **Best configuration: Experiment 36 (q25)** — PL=2.40, 45.3% improvement, 70% coverage.
 
@@ -549,6 +550,19 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 2.44 | 2.09 | -1.40 | 44.4% | 71.2% |
 
 **Takeaway:** Clipping hurts (2.40→2.44). Quantile regression is already robust to outliers — it optimizes percentiles, not means. Clipping targets just distorts the learned quantile boundaries, especially for the tail-sensitive q10/q90 interval models.
+
+---
+
+### 39. Higher learning rate
+
+**Report:** [exp39-higher-lr.md](exp39-higher-lr.md)
+**Change:** lr=0.08, max_iter=800 (was lr=0.05, iter=600).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.42 | 2.02 | -1.21 | 44.9% | 66.8% |
+
+**Takeaway:** PL slightly worse than best (2.42 vs 2.40), and coverage drops to 66.8% (below 70% target). Higher lr causes interval models to overfit, making bounds too narrow. lr=0.05 remains optimal.
 
 ---
 

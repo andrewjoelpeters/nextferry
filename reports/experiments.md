@@ -45,6 +45,7 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 37 | [q22 quantile](#37-q22-quantile) | 2.40 | 2.06 | 70.0% | 45.3% | Plateau — q25 is optimal |
 | 38 | [Clip targets [-10,30]](#38-clip-extreme-targets) | 2.44 | 2.09 | 71.2% | 44.4% | Outlier clipping hurts |
 | 39 | [Higher lr (0.08, 800 iter)](#39-higher-learning-rate) | 2.42 | 2.02 | 66.8% | 44.9% | Slightly overfits, bad coverage |
+| 40 | [Interval regularization](#40-interval-model-regularization) | 2.40 | 2.03 | 69.6% | 45.3% | No gain — already well-regularized |
 
 **Best configuration: Experiment 36 (q25)** — PL=2.40, 45.3% improvement, 70% coverage.
 
@@ -563,6 +564,19 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 2.42 | 2.02 | -1.21 | 44.9% | 66.8% |
 
 **Takeaway:** PL slightly worse than best (2.42 vs 2.40), and coverage drops to 66.8% (below 70% target). Higher lr causes interval models to overfit, making bounds too narrow. lr=0.05 remains optimal.
+
+---
+
+### 40. Interval model regularization
+
+**Report:** [exp40-interval-reg.md](exp40-interval-reg.md)
+**Change:** Used min_samples_leaf=40 for q10/q90 interval models (keeping 20 for point estimate).
+
+| PL | MAE | Bias | vs Baseline | Coverage |
+|----|-----|------|-------------|----------|
+| 2.40 | 2.03 | -1.27 | 45.3% | 69.6% |
+
+**Takeaway:** Identical PL. Coverage slightly below target (69.6% vs 70%). The interval models were already well-regularized at min_samples_leaf=20. Differential regularization adds complexity with no benefit.
 
 ---
 

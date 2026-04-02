@@ -840,3 +840,15 @@ header h1 {
     color: var(--deck-gray);
     margin-top: var(--sm);
 }
+
+/* HTMX loading indicator */
+.htmx-indicator {
+    display: none;
+}
+
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+    display: flex;
+    justify-content: center;
+    padding: var(--xl);
+}

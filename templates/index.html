@@ -28,30 +28,38 @@
     </header>
 
     <!-- Tab Navigation using HTMX -->
-    <nav class="tab-nav">
-        <button class="tab-button active" 
-                hx-get="/sailings-tab" 
+    <nav class="tab-nav" hx-sync="this:abort">
+        <button class="tab-button active"
+                hx-get="/sailings-tab"
                 hx-target="#tab-content"
+                hx-indicator="#tab-loading"
                 onclick="setActiveTab(this)">
             Next Sailings
         </button>
         <button class="tab-button"
                 hx-get="/map-tab"
                 hx-target="#tab-content"
+                hx-indicator="#tab-loading"
                 onclick="setActiveTab(this)">
             Map
         </button>
         <button class="tab-button"
                 hx-get="/predictions-tab"
                 hx-target="#tab-content"
+                hx-indicator="#tab-loading"
                 onclick="setActiveTab(this)">
             Predictions
         </button>
     </nav>
 
+    <!-- Tab loading indicator -->
+    <div id="tab-loading" class="htmx-indicator loading-state">
+        <div>Loading...</div>
+    </div>
+
     <!-- Main content area where tabs will be loaded -->
-    <div id="tab-content" 
-         hx-get="/sailings-tab" 
+    <div id="tab-content"
+         hx-get="/sailings-tab"
          hx-trigger="load">
         <!-- Loading state - HTMX will replace this -->
         <div class="loading-state">

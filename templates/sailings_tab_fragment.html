@@ -1,15 +1,5 @@
 <!-- Sailings Tab Content -->
 <div class="next-sailings-container">
-    {% if cache_ready %}
-    <!-- Inline cached sailings — no second request needed -->
-    <div id="sailings-content"
-         hx-get="/next-sailings"
-         hx-trigger="every 30s"
-         hx-target="#sailings-content">
-        {% include "next_sailings_fragment.html" %}
-    </div>
-    {% else %}
-    <!-- Cache not ready yet — fetch on load -->
     <div id="sailings-content"
          hx-get="/next-sailings"
          hx-trigger="load, every 30s"
@@ -18,5 +8,4 @@
             <div>Loading next sailings...</div>
         </div>
     </div>
-    {% endif %}
 </div>

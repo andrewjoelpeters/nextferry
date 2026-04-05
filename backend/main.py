@@ -75,7 +75,7 @@ async def update_dashboard_cache():
 
     while True:
         try:
-            dashboard = get_dashboard_data()
+            dashboard = await asyncio.to_thread(get_dashboard_data)
             _dashboard_cache = {
                 "data": dashboard,
                 "cached_at": current_time(),
@@ -344,25 +344,9 @@ async def get_ferry_positions():
 
 @app.get("/sailings-tab", response_class=HTMLResponse)
 async def get_sailings_tab(request: Request):
-    """Return the sailings tab content with inline sailing data.
-
-    Serves cached sailings directly to avoid a double-request
-    (previously the tab fragment triggered a second /next-sailings fetch).
-    """
-    if _sailings_cache is not None:
-        return templates.TemplateResponse(
-            "sailings_tab_fragment.html",
-            {
-                "request": request,
-                "routes": _sailings_cache["routes"],
-                "last_updated": _sailings_cache["last_updated"],
-                "cache_ready": True,
-            },
-        )
-    # Cache not ready yet — return the loading shell with hx-get trigger
+    """Return the sailings tab content."""
     return templates.TemplateResponse(
-        "sailings_tab_fragment.html",
-        {"request": request, "cache_ready": False},
+        "sailings_tab_fragment.html", {"request": request}
     )
 
 

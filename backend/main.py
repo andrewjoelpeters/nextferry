@@ -16,7 +16,6 @@ from fastapi.templating import Jinja2Templates
 
 from .data_collector import collect_data
 from .database import (
-    get_dashboard_data,
     get_docked_since,
     get_metrics_data,
     get_sailing_event_count,
@@ -42,7 +41,6 @@ logger = logging.getLogger(__name__)
 
 # Global caches - shared by all users
 _sailings_cache: dict[str, Any] | None = None
-_dashboard_cache: dict[str, Any] | None = None
 
 
 async def update_sailings_cache():
@@ -71,24 +69,6 @@ async def update_sailings_cache():
             logger.error(f"Error updating sailings cache: {e}")
 
         await asyncio.sleep(30)
-
-
-async def update_dashboard_cache():
-    """Background task to update predictions dashboard cache every 5 minutes."""
-    global _dashboard_cache
-
-    while True:
-        try:
-            dashboard = await asyncio.to_thread(get_dashboard_data)
-            _dashboard_cache = {
-                "data": dashboard,
-                "cached_at": current_time(),
-            }
-            logger.info("Dashboard cache updated")
-        except Exception as e:
-            logger.error(f"Error updating dashboard cache: {e}")
-
-        await asyncio.sleep(300)  # 5 minutes
 
 
 async def retrain_model_daily():
@@ -196,9 +176,6 @@ async def lifespan(app: FastAPI):
     # Start background tasks on startup
     logger.info("Starting sailings cache background task")
     tasks.append(asyncio.create_task(update_sailings_cache()))
-
-    logger.info("Starting dashboard cache background task")
-    tasks.append(asyncio.create_task(update_dashboard_cache()))
 
     if not is_replay:
         # In replay mode, skip data collection and model retraining
@@ -352,67 +329,6 @@ async def get_sailings_tab(request: Request):
     return templates.TemplateResponse(
         "sailings_tab_fragment.html", {"request": request}
     )
-
-
-@app.get("/predictions-tab", response_class=HTMLResponse)
-async def get_predictions_tab(request: Request):
-    """Return the predictions dashboard tab content."""
-    return templates.TemplateResponse(
-        "predictions_tab_fragment.html", {"request": request}
-    )
-
-
-@app.get("/predictions-data")
-async def get_predictions_data():
-    """Return dashboard data as JSON for chart rendering."""
-    if _dashboard_cache is not None:
-        dashboard = _dashboard_cache["data"]
-    else:
-        dashboard = get_dashboard_data()
-
-    # Transform evaluation metrics into the format the frontend expects
-    evaluation = None
-    raw_eval = ml_predictor.last_evaluation
-    if raw_eval:
-        evaluation = {
-            "overall_mae": raw_eval.get("overall_mae"),
-            "overall_mean_error": raw_eval.get("overall_bias"),
-            "improvement_pct": raw_eval.get("overall_improvement_pct"),
-        }
-        # Convert by_horizon dict into error_by_horizon array
-        by_horizon = raw_eval.get("by_horizon", {})
-        if by_horizon:
-            error_by_horizon = []
-            for label, metrics in by_horizon.items():
-                # Parse midpoint from label like "2–4m" → 3
-                parts = label.rstrip("m").split("–")
-                lo, hi = float(parts[0]), float(parts[1])
-                error_by_horizon.append(
-                    {
-                        "minutes_out": int((lo + hi) / 2),
-                        "mae": metrics.get("mae"),
-                        "mean_error": metrics.get("bias"),
-                        "error_p88": metrics.get("error_p90"),
-                        "error_p12": (
-                            round(-abs(metrics.get("error_p90", 0)), 2)
-                            if metrics.get("error_p90") is not None
-                            else None
-                        ),
-                    }
-                )
-            error_by_horizon.sort(key=lambda d: d["minutes_out"])
-            evaluation["error_by_horizon"] = error_by_horizon
-
-    model_info = {
-        "is_trained": ml_predictor.is_trained,
-        "last_trained": (
-            ml_predictor.last_trained.isoformat() if ml_predictor.last_trained else None
-        ),
-        "training_data_size": ml_predictor.training_data_size,
-        "evaluation": evaluation,
-    }
-
-    return {**dashboard, "model": model_info}
 
 
 @app.get("/metrics-data")

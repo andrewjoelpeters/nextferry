@@ -52,9 +52,13 @@ async def update_sailings_cache():
     while True:
         try:
             logger.info("Updating shared sailings cache")
-            routes_data = get_next_sailings()
-            space_lookup = get_sailing_space_lookup()
-            processed_routes = process_routes_for_display(routes_data, space_lookup)
+
+            def _build_cache():
+                routes_data = get_next_sailings()
+                space_lookup = get_sailing_space_lookup()
+                return process_routes_for_display(routes_data, space_lookup)
+
+            processed_routes = await asyncio.to_thread(_build_cache)
 
             _sailings_cache = {
                 "routes": processed_routes,

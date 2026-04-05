@@ -40,8 +40,9 @@ from .utils import datetime_to_minutes
 
 logger = logging.getLogger(__name__)
 
-# Global cache - shared by all users
+# Global caches - shared by all users
 _sailings_cache: dict[str, Any] | None = None
+_dashboard_cache: dict[str, Any] | None = None
 
 
 async def update_sailings_cache():
@@ -51,9 +52,13 @@ async def update_sailings_cache():
     while True:
         try:
             logger.info("Updating shared sailings cache")
-            routes_data = get_next_sailings()
-            space_lookup = get_sailing_space_lookup()
-            processed_routes = process_routes_for_display(routes_data, space_lookup)
+
+            def _build_cache():
+                routes_data = get_next_sailings()
+                space_lookup = get_sailing_space_lookup()
+                return process_routes_for_display(routes_data, space_lookup)
+
+            processed_routes = await asyncio.to_thread(_build_cache)
 
             _sailings_cache = {
                 "routes": processed_routes,
@@ -66,6 +71,24 @@ async def update_sailings_cache():
             logger.error(f"Error updating sailings cache: {e}")
 
         await asyncio.sleep(30)
+
+
+async def update_dashboard_cache():
+    """Background task to update predictions dashboard cache every 5 minutes."""
+    global _dashboard_cache
+
+    while True:
+        try:
+            dashboard = await asyncio.to_thread(get_dashboard_data)
+            _dashboard_cache = {
+                "data": dashboard,
+                "cached_at": current_time(),
+            }
+            logger.info("Dashboard cache updated")
+        except Exception as e:
+            logger.error(f"Error updating dashboard cache: {e}")
+
+        await asyncio.sleep(300)  # 5 minutes
 
 
 async def retrain_model_daily():
@@ -170,9 +193,12 @@ async def lifespan(app: FastAPI):
 
     tasks = []
 
-    # Start background task on startup
+    # Start background tasks on startup
     logger.info("Starting sailings cache background task")
     tasks.append(asyncio.create_task(update_sailings_cache()))
+
+    logger.info("Starting dashboard cache background task")
+    tasks.append(asyncio.create_task(update_dashboard_cache()))
 
     if not is_replay:
         # In replay mode, skip data collection and model retraining
@@ -322,7 +348,7 @@ async def get_ferry_positions():
 
 @app.get("/sailings-tab", response_class=HTMLResponse)
 async def get_sailings_tab(request: Request):
-    """Return the sailings tab content"""
+    """Return the sailings tab content."""
     return templates.TemplateResponse(
         "sailings_tab_fragment.html", {"request": request}
     )
@@ -339,7 +365,10 @@ async def get_predictions_tab(request: Request):
 @app.get("/predictions-data")
 async def get_predictions_data():
     """Return dashboard data as JSON for chart rendering."""
-    dashboard = get_dashboard_data()
+    if _dashboard_cache is not None:
+        dashboard = _dashboard_cache["data"]
+    else:
+        dashboard = get_dashboard_data()
 
     # Transform evaluation metrics into the format the frontend expects
     evaluation = None

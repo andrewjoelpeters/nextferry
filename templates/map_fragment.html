@@ -310,16 +310,9 @@ function showFerryDetails(ferry) {
     document.getElementById('ferry-info-panel').classList.remove('hidden');
 }
 
-// Initialize map when this fragment loads
-function initMap() {
-    // Use a small delay to ensure DOM is ready
-    setTimeout(function() {
-        if (document.getElementById('map')) {
-            initializeFerryMap();
-        }
-    }, 100);
+// Initialize map when this fragment loads — DOM is already ready
+// since this script runs after the map div is parsed
+if (document.getElementById('map')) {
+    initializeFerryMap();
 }
-
-// Call initialization
-initMap();
 </script>

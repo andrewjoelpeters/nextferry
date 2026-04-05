@@ -27,37 +27,50 @@
         <h1>When's the Next Ferry?</h1>
     </header>
 
+    <!-- Sync group: ensures a tab click cancels any in-flight request -->
+    <div id="tab-sync" hx-sync="this:replace">
+
     <!-- Tab Navigation using HTMX -->
     <nav class="tab-nav">
-        <button class="tab-button active" 
-                hx-get="/sailings-tab" 
+        <button class="tab-button active"
+                hx-get="/sailings-tab"
                 hx-target="#tab-content"
+                hx-indicator="#tab-loading"
                 onclick="setActiveTab(this)">
             Next Sailings
         </button>
         <button class="tab-button"
                 hx-get="/map-tab"
                 hx-target="#tab-content"
+                hx-indicator="#tab-loading"
                 onclick="setActiveTab(this)">
             Map
         </button>
         <button class="tab-button"
                 hx-get="/predictions-tab"
                 hx-target="#tab-content"
+                hx-indicator="#tab-loading"
                 onclick="setActiveTab(this)">
             Predictions
         </button>
     </nav>
 
+    <!-- Tab loading indicator -->
+    <div id="tab-loading" class="htmx-indicator loading-state">
+        <div>Loading...</div>
+    </div>
+
     <!-- Main content area where tabs will be loaded -->
-    <div id="tab-content" 
-         hx-get="/sailings-tab" 
+    <div id="tab-content"
+         hx-get="/sailings-tab"
          hx-trigger="load">
         <!-- Loading state - HTMX will replace this -->
         <div class="loading-state">
             <div>Loading...</div>
         </div>
     </div>
+
+    </div> <!-- /tab-sync -->
     <!-- Leaflet JavaScript for mapping -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     

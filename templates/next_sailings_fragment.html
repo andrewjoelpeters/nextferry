@@ -45,7 +45,7 @@
                             {% if sailing.capacity %}
                             <div class="sailing-row-capacity">
                                 <div class="capacity-bar">
-                                    <div class="capacity-fill {% if sailing.capacity.percent > 50 %}capacity-ok{% elif sailing.capacity.percent > 20 %}capacity-low{% else %}capacity-full{% endif %}" style="width: {{ sailing.capacity.percent }}%"></div>
+                                    <div class="capacity-fill {% if sailing.capacity.percent > 80 %}capacity-full{% elif sailing.capacity.percent > 50 %}capacity-low{% else %}capacity-ok{% endif %}" style="width: {{ sailing.capacity.percent }}%"></div>
                                 </div>
                                 <span class="capacity-text">{{ sailing.capacity.spaces }} spaces</span>
                             </div>

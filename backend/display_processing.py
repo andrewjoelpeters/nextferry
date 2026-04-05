@@ -184,15 +184,24 @@ def process_routes_for_display(
                         (schedule.departing_terminal_id, time_key)
                     )
                     if space_info and space_info["max_space_count"] > 0:
-                        pct = int(
-                            space_info["drive_up_space_count"]
-                            / space_info["max_space_count"]
-                            * 100
+                        fill_pct = max(
+                            0,
+                            min(
+                                100,
+                                int(
+                                    (
+                                        space_info["max_space_count"]
+                                        - space_info["drive_up_space_count"]
+                                    )
+                                    / space_info["max_space_count"]
+                                    * 100
+                                ),
+                            ),
                         )
                         capacity = {
                             "spaces": space_info["drive_up_space_count"],
                             "total": space_info["max_space_count"],
-                            "percent": pct,
+                            "percent": fill_pct,
                         }
 
                 # Fill risk prediction (skip for departed sailings — show actual data instead)

@@ -430,4 +430,90 @@ Features (10):
   turnaround_minutes (numeric)
 ```
 
+---
+
+## ETA-Based Next-Sailing Prediction Experiments
+
+The experiments above (1–26) tuned the **en-route GBT model**, which predicts departure delay from pre-departure snapshots. The experiments below explore a different question: **how to predict the next sailing's delay while a vessel is en-route**, using WSDOT's real-time ETA.
+
+### Context
+
+When a vessel is crossing, we want to predict delay for sailings at the opposite terminal. The current production behavior is flat propagation (copy the departing vessel's delay forward). We investigated whether WSDOT's ETA + turnaround time estimation could do better.
+
+**Dataset:** 17,873 next-sailing prediction pairs on sea-bi + ed-king, using the last sane en-route ETA snapshot per sailing (sanity filter: reject ETAs > 2× crossing time, which removes 1.4% of glitched ETAs).
+
+**Terminology:**
+- **Flat propagation:** next_delay = current_vessel_delay
+- **ETA + TA:** next_delay = max(0, (ETA + turnaround) - scheduled_departure)
+- **Clamped:** max(flat_delay, ETA-implied floor) — uses flat propagation but clamps to physical reality
+- **Blend:** weighted interpolation from flat→ETA as crossing progresses
+- **Howler:** prediction where departure is before ETA + p10 turnaround (physically impossible)
+
+### 27. ETA Baseline Analysis
+
+**Report:** [eta_backtest_2026-04-04.md](eta_backtest_2026-04-04.md)
+
+Initial analysis across all routes. Key findings:
+- ETA MAE is 5.72 min overall, but 3.42 (ed-king) and 3.88 (sea-bi) on target routes
+- 1.4% of ETAs are glitched (off by hours) — simple sanity filter fixes this
+- Turnaround variance (±6 min std) is the dominant error source after filtering
+- Error decomposition: ETA error correlates 0.97 with total error before filtering, but only 0.27 after (turnaround takes over)
+
+---
+
+### 28. Head-to-Head: ETA+Turnaround vs Flat Propagation
+
+Compared on identical sailings (sea-bi + ed-king only):
+
+| Approach | MAE | Bias | ±3min | ±5min | Missed (<-5) |
+|---|---|---|---|---|---|
+| Flat propagation | 2.40 | -0.13 | 77.7% | 87.7% | 6.6% |
+| ETA + median TA | 3.24 | -1.07 | 66.1% | 81.1% | 10.3% |
+
+**Takeaway:** Flat propagation wins overall because most delays are minor (1–5 min) and persist across sailings. ETA+turnaround adds noise via turnaround variance. But flat propagation produces **howlers** — it has no concept of physical constraints.
+
+---
+
+### 29. Deep Dive: Prediction Strategy Comparison
+
+**Report:** [eta_deep_dive_2026-04-05.md](eta_deep_dive_2026-04-05.md)
+
+Tested 7 strategies on the same 17,873 prediction pairs:
+
+| Experiment | MAE | Bias | ±3min | ±5min | Missed | Howlers |
+|---|---|---|---|---|---|---|
+| **Flat propagation** | 2.40 | -0.1 | 77.7% | 87.7% | 6.6% | 894 (5.0%) |
+| ETA + median TA | 3.24 | -1.1 | 66.1% | 81.1% | 10.2% | 0 |
+| **Clamped (p10 TA)** | **2.39** | **+0.0** | **77.6%** | **87.7%** | **6.3%** | **0** |
+| Clamped (p25 TA) | 2.47 | +0.2 | 75.4% | 87.1% | 6.1% | 0 |
+| Clamped (median TA) | 2.84 | +0.8 | 69.9% | 82.4% | 5.1% | 0 |
+| Blend (median TA) | 2.92 | -0.7 | 69.6% | 83.3% | 8.7% | 5 |
+| Blend (p25 TA) | 3.12 | -2.2 | 70.7% | 83.0% | 15.1% | 15 |
+
+**Winner: Clamped (p10 TA)** — matches flat propagation on every metric (MAE 2.39 vs 2.40, ±3min 77.6% vs 77.7%) while eliminating all 894 howlers (5% of predictions).
+
+**How it works:**
+```python
+flat_delay = current_vessel_delay
+eta_floor = max(0, (ETA + p10_turnaround) - scheduled_departure)
+predicted_delay = max(flat_delay, eta_floor)
+```
+
+**Why it works:** The p10 turnaround (sea-bi: 9.3 min, ed-king: 14.8 min) is a conservative floor — only 10% of turnarounds are faster. This means the clamp only fires when flat propagation is making a physically impossible prediction. In the common case (75% of sailings with ≤5 min delay), flat propagation is already correct and the clamp never fires.
+
+**Interpretability:**
+- When clamp doesn't fire: "The boat is running X min late"
+- When clamp fires: "The inbound ferry won't arrive until [ETA], so earliest departure is [ETA + turnaround]"
+
+**By delay bucket (Clamped p10 vs Flat):**
+
+| Delay | Flat MAE | Clamped MAE | Winner |
+|---|---|---|---|
+| On-time (≤1) | 1.68 | 1.79 | Flat (+0.11) |
+| Minor (1–5) | 1.45 | 1.50 | Flat (+0.05) |
+| Moderate (5–15) | 4.11 | 4.05 | **Clamped** (-0.06) |
+| Major (15+) | 6.78 | 6.45 | **Clamped** (-0.33) |
+
+The clamp slightly hurts on-time/minor predictions (clamp fires unnecessarily ~occasionally) but helps on moderate/major delays (catches cases where flat propagation underestimates). The net effect is a wash on MAE, but howlers drop from 894→0.
+
 *Add new experiments above the Key Learnings section.*

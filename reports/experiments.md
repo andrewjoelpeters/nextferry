@@ -45,6 +45,7 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 30 | [Smart Clamp](#30-smart-clamp-floor--ceiling) | 2.33 | -0.6 | 77.3% | 0 | Floor + conditional median ceiling |
 | **31** | [**Cond Ceil p75**](#31-conditional-ceiling-with-p75-turnaround) | **2.26** | **-0.3** | **78.3%** | **0** | **Floor + conditional p75 ceiling (best)** |
 | 32 | [Late ETA Override](#32-late-crossing-eta-override-negative-result) | 2.46 | -0.3 | 76.3% | 0 | ETA as primary signal near arrival (worse) |
+| **33** | [**Trained TA Model**](#33-trained-turnaround-model-linear--gbt) | **2.20** | **-0.5** | **79.2%** | **0** | **GBT turnaround bounds from vehicle load (new best)** |
 
 ## Experiment Log
 
@@ -653,7 +654,9 @@ The progress threshold (50% vs 70%) makes almost no difference, confirming that 
 
 ## Recommendation
 
-**Proposed approach: Conditional Ceiling p75 (>10)**
+Two viable options depending on complexity appetite:
+
+### Option A: Fixed Percentile Ceiling (simple)
 
 ```python
 def predict_next_sailing_delay(current_delay, eta, scheduled_departure, route):
@@ -669,17 +672,79 @@ def predict_next_sailing_delay(current_delay, eta, scheduled_departure, route):
     return max(current_delay, eta_floor)
 ```
 
-**Why this is the best approach:**
+**MAE 2.26** — 6% better than flat propagation. Zero howlers. ~10 lines of code, two constants per route.
 
-1. **Accuracy**: MAE 2.26 — 6% better than flat propagation (2.40) and all alternatives tested
-2. **Zero howlers**: physically impossible predictions eliminated (was 894 / 5% with flat)
-3. **Interpretable**: three clear cases users can understand:
+### Option B: GBT Turnaround Model (more accurate)
+
+Replace fixed p10/p75 turnaround constants with a `HistGradientBoostingRegressor` trained on vehicle load features (`arriving_fullness`, `outbound_fullness`, `minutes_until_next_scheduled`, `route`, `hour`).
+
+**MAE 2.20** — 8% better than flat propagation, 3% better than fixed percentiles. Zero howlers. Requires vehicle data from `sailing_space_snapshots` at prediction time (already available via WSDOT API).
+
+### Both share:
+
+1. **Zero howlers**: physically impossible predictions eliminated (was 894 / 5% with flat)
+2. **Interpretable**: three clear cases users can understand:
    - "The boat is running X min late" (normal — flat prediction stands)
    - "The inbound ferry won't arrive until [ETA], earliest departure is [time]" (floor fires)
    - "The inbound ferry is making good time, delay reduced to ~Y min" (ceiling fires)
-4. **Simple**: ~10 lines of code, two turnaround constants per route, one threshold
-5. **Robust**: flat propagation handles the 75% common case (small delays). ETA only overrides when flat makes a prediction that's physically impossible (floor) or clearly stale (ceiling for large delays)
+3. **Robust**: flat propagation handles the 75% common case (small delays). ETA only overrides when flat makes a prediction that's physically impossible (floor) or clearly stale (ceiling for large delays)
 
-**Key insight from 6 experiments:** ETA is most useful as *bounds on flat propagation*, not as a replacement. Turnaround variance (±6 min std) makes direct ETA-based prediction noisy, but using ETA to constrain flat propagation captures the best of both signals.
+**Key insight from 9 experiments:** ETA is most useful as *bounds on flat propagation*, not as a replacement. Turnaround variance (±6 min std) makes direct ETA-based prediction noisy, but using ETA to constrain flat propagation captures the best of both signals. Vehicle load features (especially unloading pressure) explain 39% of turnaround variance — using a model to predict turnaround produces better-calibrated bounds than fixed percentiles.
+
+---
+
+### 33. Trained Turnaround Model (Linear + GBT)
+
+Replaced fixed turnaround percentile constants with trained models that predict turnaround time from vehicle load features. The hypothesis: knowing how many cars need to unload/load should produce better-calibrated turnaround bounds.
+
+**Features (5):**
+- `arriving_fullness` — how full the arriving vessel is (cars to unload, 0–1)
+- `outbound_fullness` — how many cars are waiting at terminal (cars to load, 0–1)
+- `minutes_until_next_scheduled` — schedule gap (crew urgency)
+- `route_code` — binary, sea-bi vs ed-king
+- `hour_of_day` — time of day
+
+**Feature coverage:** 100% (17871/17873 rows had vehicle data from `sailing_space_snapshots`)
+
+**Model A — LinearRegression + residual quantiles (R²=0.387):**
+
+| Feature | Coefficient | Interpretation |
+|---|---|---|
+| arriving_fullness | +4.03 | Each 100% fullness increase adds 4 min to turnaround |
+| outbound_fullness | +0.69 | Each 100% fullness increase adds 0.7 min |
+| minutes_until_next_scheduled | +0.30 | Each extra min of slack adds 0.3 min (crews use available time) |
+| route_code (sea-bi=1) | -1.50 | Sea-bi turnarounds are 1.5 min faster than ed-king |
+| hour_of_day | +0.09 | Negligible |
+| (intercept) | 12.58 | Baseline turnaround with empty vessel and no slack |
+
+Key insight: **unloading is 6x more important than loading** (4.03 vs 0.69). Vehicles drive off in a controlled stream but drive on in order — unloading time dominates. Also, **crews use available slack** — each extra minute of schedule gap adds 0.3 min to actual turnaround.
+
+**Model B — HistGBT quantile pair (max_iter=100, max_depth=4):**
+Directly predicts p10 and p75 turnaround quantiles. No linear assumption.
+
+**Results (all with hard p10 floor to prevent howlers):**
+
+| Approach | MAE | Bias | ±3min | ±5min | Missed | Howlers |
+|---|---|---|---|---|---|---|
+| Fixed p75 ceiling | 2.26 | -0.3 | 78.3% | 88.5% | 6.8% | 0 |
+| Linear model | 2.37 | -0.7 | 77.5% | 87.8% | 9.0% | 0 |
+| **GBT model** | **2.20** | **-0.5** | **79.2%** | **89.4%** | 7.4% | **0** |
+
+**By delay bucket:**
+
+| Delay | Fixed p75 MAE | Linear MAE | GBT MAE |
+|---|---|---|---|
+| On-time (≤1) | 1.64 | 1.63 | 1.64 |
+| Minor (1–5) | 1.37 | 1.34 | **1.31** |
+| Moderate (5–15) | 3.74 | **3.50** | 3.57 |
+| Major (15+) | **6.53** | 8.34 | 6.61 |
+
+**Verdict:**
+- **GBT wins overall** — MAE 2.20 beats fixed percentiles (2.26) by 3%, zero howlers, best ±3min (79.2%)
+- **Linear disappoints** — MAE 2.37 is worse than fixed percentiles despite R²=0.387. The residual quantile approach produces bounds that are too wide, causing over-correction especially on major delays (MAE 8.34)
+- GBT's advantage is on minor/moderate delays where vehicle load actually matters
+- The tradeoff: GBT model adds complexity (need vehicle data at prediction time + trained model) for a 3% MAE improvement over fixed percentiles
+
+**Report:** [eta_deep_dive_2026-04-05.md](eta_deep_dive_2026-04-05.md)
 
 *Add new experiments above the Recommendation section.*

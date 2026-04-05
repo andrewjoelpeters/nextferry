@@ -12,7 +12,10 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.linear_model import LinearRegression
 
 from backend.database import get_connection, init_db
 
@@ -119,6 +122,9 @@ def load_experiment_data(conn: sqlite3.Connection) -> pd.DataFrame:
             ).total_seconds() / 60
             if gap < 5 or gap > 60:
                 continue
+            sched_gap = (
+                nxt["scheduled_departure"] - curr["actual_arrival"]
+            ).total_seconds() / 60
             next_rows.append(
                 {
                     "event_id": curr["event_id"],
@@ -127,6 +133,11 @@ def load_experiment_data(conn: sqlite3.Connection) -> pd.DataFrame:
                     "next_delay": float(nxt["delay_minutes"]),
                     "actual_turnaround": gap,
                     "current_delay": float(curr["delay_minutes"]),
+                    "turnaround_terminal_id": int(curr["arriving_terminal_id"]),
+                    "next_scheduled_departure": nxt["scheduled_departure"],
+                    "minutes_until_next_scheduled": sched_gap,
+                    "ta_hour_of_day": int(curr["hour_of_day"]),
+                    "ta_day_of_week": int(curr["day_of_week"]),
                 }
             )
     next_df = pd.DataFrame(next_rows)
@@ -161,6 +172,8 @@ def load_experiment_data(conn: sqlite3.Connection) -> pd.DataFrame:
             "delay_minutes",
             "vessel_name",
             "actual_departure",
+            "departing_terminal_id",
+            "arriving_terminal_id",
         ]
     ].dropna(subset=["actual_arrival"])
 
@@ -191,6 +204,115 @@ def load_experiment_data(conn: sqlite3.Connection) -> pd.DataFrame:
 
     result = best_eta.merge(next_df, on="event_id", how="inner")
     logger.info(f"Final dataset: {len(result)} prediction opportunities")
+
+    # --- Join vehicle fullness from sailing_space_snapshots ---
+    logger.info("Loading sailing space snapshots for turnaround features...")
+    space_df = pd.read_sql_query(
+        """
+        SELECT departing_terminal_id, arriving_terminal_id, departure_time,
+               collected_at, max_space_count, drive_up_space_count
+        FROM sailing_space_snapshots
+        WHERE max_space_count > 0
+        """,
+        conn,
+    )
+    if not space_df.empty:
+        space_df["collected_at_dt"] = pd.to_datetime(
+            space_df["collected_at"], format="ISO8601", utc=True
+        )
+        space_df["departure_time_dt"] = pd.to_datetime(
+            space_df["departure_time"], format="ISO8601", utc=True
+        )
+        space_df["fullness"] = (
+            1.0 - space_df["drive_up_space_count"] / space_df["max_space_count"]
+        )
+
+        # A. arriving_fullness: how full was the inbound vessel (cars to unload)
+        # Last snapshot per inbound sailing = best estimate of final load
+        inbound = (
+            space_df.sort_values("collected_at_dt")
+            .groupby(["arriving_terminal_id", "departure_time"])
+            .last()
+            .reset_index()
+        )
+        arr_parts = []
+        for term_id in result["arriving_terminal_id"].dropna().unique():
+            r_term = result.loc[result["arriving_terminal_id"] == term_id].sort_values(
+                "actual_arrival"
+            )
+            i_term = inbound.loc[
+                inbound["arriving_terminal_id"] == term_id
+            ].sort_values("departure_time_dt")
+            if i_term.empty:
+                continue
+            matched = pd.merge_asof(
+                r_term[["event_id", "actual_arrival"]],
+                i_term[["departure_time_dt", "fullness"]].rename(
+                    columns={
+                        "departure_time_dt": "actual_arrival",
+                        "fullness": "arriving_fullness",
+                    }
+                ),
+                on="actual_arrival",
+                direction="backward",
+            )
+            arr_parts.append(matched[["event_id", "arriving_fullness"]])
+        if arr_parts:
+            result = result.merge(
+                pd.concat(arr_parts, ignore_index=True),
+                on="event_id",
+                how="left",
+            )
+        else:
+            result["arriving_fullness"] = np.nan
+
+        # B. outbound_fullness: how many cars waiting at turnaround terminal
+        # Space snapshot for the NEXT departure at the turnaround terminal,
+        # taken closest to (but before) vessel arrival
+        out_parts = []
+        for term_id in result["turnaround_terminal_id"].dropna().unique():
+            r_term = result.loc[
+                result["turnaround_terminal_id"] == term_id
+            ].sort_values("actual_arrival")
+            o_term = space_df.loc[
+                space_df["departing_terminal_id"] == term_id
+            ].sort_values("collected_at_dt")
+            if o_term.empty:
+                continue
+            matched = pd.merge_asof(
+                r_term[["event_id", "actual_arrival"]],
+                o_term[["collected_at_dt", "fullness"]].rename(
+                    columns={
+                        "collected_at_dt": "actual_arrival",
+                        "fullness": "outbound_fullness",
+                    }
+                ),
+                on="actual_arrival",
+                direction="backward",
+            )
+            out_parts.append(matched[["event_id", "outbound_fullness"]])
+        if out_parts:
+            result = result.merge(
+                pd.concat(out_parts, ignore_index=True),
+                on="event_id",
+                how="left",
+            )
+        else:
+            result["outbound_fullness"] = np.nan
+
+        n_arr = result["arriving_fullness"].notna().sum()
+        n_out = result["outbound_fullness"].notna().sum()
+        logger.info(
+            f"Vehicle features: arriving_fullness={n_arr}/{len(result)} "
+            f"({n_arr / len(result) * 100:.0f}%), "
+            f"outbound_fullness={n_out}/{len(result)} "
+            f"({n_out / len(result) * 100:.0f}%)"
+        )
+    else:
+        result["arriving_fullness"] = np.nan
+        result["outbound_fullness"] = np.nan
+        logger.warning("No sailing space snapshots found")
+
     return result
 
 
@@ -275,6 +397,134 @@ def predict_late_eta_override(
 
 
 # ---------------------------------------------------------------------------
+# Turnaround models
+# ---------------------------------------------------------------------------
+
+TA_FEATURE_COLS = [
+    "arriving_fullness",
+    "outbound_fullness",
+    "minutes_until_next_scheduled",
+    "route_code",
+    "ta_hour_of_day",
+]
+
+
+def build_turnaround_models(df: pd.DataFrame) -> dict:
+    """Train linear and GBT turnaround models, return predictions + diagnostics."""
+    work = df.copy()
+    work["route_code"] = (work["route_abbrev"] == "sea-bi").astype(int)
+    work = work.dropna(subset=["arriving_fullness", "outbound_fullness"])
+
+    X = work[TA_FEATURE_COLS].values
+    y = work["actual_turnaround"].values
+    logger.info(f"Turnaround model training: {len(work)} rows with vehicle features")
+
+    # --- Model A: LinearRegression + residual quantiles ---
+    lr = LinearRegression()
+    lr.fit(X, y)
+    lr_pred = lr.predict(X)
+    residuals = y - lr_pred
+    r2 = float(1 - np.var(residuals) / np.var(y))
+
+    # Per-route residual quantiles for better calibration
+    route_residual_q = {}
+    for route_code, _route_name in [(0, "ed-king"), (1, "sea-bi")]:
+        mask = work["route_code"].values == route_code
+        if mask.sum() > 0:
+            r = residuals[mask]
+            route_residual_q[route_code] = {
+                "p10": float(np.quantile(r, 0.10)),
+                "p75": float(np.quantile(r, 0.75)),
+            }
+
+    # Global fallback
+    global_q = {
+        "p10": float(np.quantile(residuals, 0.10)),
+        "p75": float(np.quantile(residuals, 0.75)),
+    }
+
+    logger.info(f"Linear turnaround model: R²={r2:.3f}")
+    logger.info(f"  Coefficients: {dict(zip(TA_FEATURE_COLS, lr.coef_, strict=True))}")
+    logger.info(f"  Intercept: {lr.intercept_:.2f}")
+    logger.info(f"  Residual p10={global_q['p10']:.1f} p75={global_q['p75']:.1f}")
+
+    # --- Model B: HistGBT quantile pair ---
+    gbt_p10 = HistGradientBoostingRegressor(
+        loss="quantile", quantile=0.10, max_iter=100, max_depth=4
+    )
+    gbt_p75 = HistGradientBoostingRegressor(
+        loss="quantile", quantile=0.75, max_iter=100, max_depth=4
+    )
+    gbt_p10.fit(X, y)
+    gbt_p75.fit(X, y)
+    gbt_p10_pred = gbt_p10.predict(X)
+    gbt_p75_pred = gbt_p75.predict(X)
+    logger.info(
+        f"GBT turnaround model: p10 MAE={np.abs(y - gbt_p10_pred).mean():.2f}, "
+        f"p75 MAE={np.abs(y - gbt_p75_pred).mean():.2f}"
+    )
+
+    return {
+        "linear": lr,
+        "linear_r2": r2,
+        "linear_coefs": dict(zip(TA_FEATURE_COLS, lr.coef_, strict=True)),
+        "linear_intercept": lr.intercept_,
+        "route_residual_q": route_residual_q,
+        "global_q": global_q,
+        "gbt_p10": gbt_p10,
+        "gbt_p75": gbt_p75,
+        "n_train": len(work),
+        "feature_cols": TA_FEATURE_COLS,
+    }
+
+
+# Hard floor for model-predicted turnaround — never go below observed p10
+_TA_HARD_FLOOR = {"sea-bi": 9.3, "ed-king": 14.8}
+
+
+def _predict_ta_linear(row: pd.Series, models: dict, quantile: str) -> float:
+    """Predict turnaround using linear model + residual quantiles."""
+    features = np.array([[row[c] for c in TA_FEATURE_COLS]])
+    median = models["linear"].predict(features)[0]
+    route_code = int(row["route_code"])
+    rq = models["route_residual_q"].get(route_code, models["global_q"])
+    route = "sea-bi" if route_code == 1 else "ed-king"
+    hard_floor = _TA_HARD_FLOOR[route]
+    return float(np.clip(median + rq[quantile], hard_floor, 45.0))
+
+
+def _predict_ta_gbt(row: pd.Series, models: dict, quantile: str) -> float:
+    """Predict turnaround using GBT quantile model."""
+    features = np.array([[row[c] for c in TA_FEATURE_COLS]])
+    if quantile == "p10":
+        val = models["gbt_p10"].predict(features)[0]
+    else:
+        val = models["gbt_p75"].predict(features)[0]
+    route_code = int(row["route_code"])
+    route = "sea-bi" if route_code == 1 else "ed-king"
+    hard_floor = _TA_HARD_FLOOR[route]
+    return float(np.clip(val, hard_floor, 45.0))
+
+
+def predict_conditional_ceiling_model(
+    row: pd.Series,
+    models: dict,
+    threshold: float,
+    ta_fn,
+) -> float:
+    """Conditional ceiling using model-predicted turnaround bounds."""
+    min_ta = ta_fn(row, models, "p10")
+    max_ta = max(min_ta + 2.0, ta_fn(row, models, "p75"))
+
+    flat = row["current_delay"]
+    eta_floor = predict_eta_ta(row, min_ta)
+    if flat > threshold:
+        eta_ceiling = predict_eta_ta(row, max_ta)
+        return max(eta_floor, min(flat, eta_ceiling))
+    return max(flat, eta_floor)
+
+
+# ---------------------------------------------------------------------------
 # Evaluation
 # ---------------------------------------------------------------------------
 
@@ -335,9 +585,25 @@ def eval_buckets(df: pd.DataFrame, predictions: pd.Series, label: str) -> dict:
 def run_experiments(df: pd.DataFrame) -> list[dict]:
     """Run all prediction experiments."""
     ta_p10 = {"sea-bi": 9.3, "ed-king": 14.8}
-    ta_med = {"sea-bi": 16.8, "ed-king": 21.4}
     ta_p75 = {"sea-bi": 22.0, "ed-king": 26.0}
-    crossing = {"sea-bi": 35.0, "ed-king": 25.0}
+
+    # Train turnaround models
+    ta_models = build_turnaround_models(df)
+
+    # Add route_code column for model-based predictions
+    df = df.copy()
+    df["route_code"] = (df["route_abbrev"] == "sea-bi").astype(int)
+    has_features = df["arriving_fullness"].notna() & df["outbound_fullness"].notna()
+
+    def _model_or_fallback(row, ta_fn):
+        """Use model if features available, else fixed percentiles."""
+        if pd.notna(row.get("arriving_fullness")) and pd.notna(
+            row.get("outbound_fullness")
+        ):
+            return predict_conditional_ceiling_model(row, ta_models, 10.0, ta_fn)
+        return predict_conditional_ceiling(
+            row, ta_p10[row["route_abbrev"]], ta_p75[row["route_abbrev"]], 10.0
+        )
 
     strategies = [
         ("Flat propagation", lambda r: predict_flat(r)),
@@ -349,48 +615,12 @@ def run_experiments(df: pd.DataFrame) -> list[dict]:
             ),
         ),
         (
-            "Late ETA (70%/>10)",
-            lambda r: predict_late_eta_override(
-                r,
-                ta_p10[r["route_abbrev"]],
-                ta_med[r["route_abbrev"]],
-                crossing[r["route_abbrev"]],
-                10.0,
-                0.7,
-            ),
+            "Cond ceil LINEAR (>10)",
+            lambda r: _model_or_fallback(r, _predict_ta_linear),
         ),
         (
-            "Late ETA (50%/>10)",
-            lambda r: predict_late_eta_override(
-                r,
-                ta_p10[r["route_abbrev"]],
-                ta_med[r["route_abbrev"]],
-                crossing[r["route_abbrev"]],
-                10.0,
-                0.5,
-            ),
-        ),
-        (
-            "Late ETA p75 (70%/>10)",
-            lambda r: predict_late_eta_override(
-                r,
-                ta_p10[r["route_abbrev"]],
-                ta_p75[r["route_abbrev"]],
-                crossing[r["route_abbrev"]],
-                10.0,
-                0.7,
-            ),
-        ),
-        (
-            "Late ETA p75 (50%/>10)",
-            lambda r: predict_late_eta_override(
-                r,
-                ta_p10[r["route_abbrev"]],
-                ta_p75[r["route_abbrev"]],
-                crossing[r["route_abbrev"]],
-                10.0,
-                0.5,
-            ),
+            "Cond ceil GBT (>10)",
+            lambda r: _model_or_fallback(r, _predict_ta_gbt),
         ),
     ]
 
@@ -405,6 +635,13 @@ def run_experiments(df: pd.DataFrame) -> list[dict]:
             f"±3={o['within_3']}% howlers={o['howler_n']}"
         )
 
+    # Log feature coverage
+    logger.info(
+        f"Feature coverage: {has_features.sum()}/{len(df)} "
+        f"({has_features.mean() * 100:.0f}%) rows had vehicle features"
+    )
+
+    experiments.append({"ta_models": ta_models})
     return experiments
 
 
@@ -414,6 +651,10 @@ def run_experiments(df: pd.DataFrame) -> list[dict]:
 
 
 def generate_report(experiments: list[dict], df: pd.DataFrame) -> str:
+    # Separate strategy results from model diagnostics
+    strategy_exps = [e for e in experiments if "results" in e]
+    ta_models = next((e["ta_models"] for e in experiments if "ta_models" in e), None)
+
     lines = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -429,7 +670,7 @@ def generate_report(experiments: list[dict], df: pd.DataFrame) -> str:
     lines.append("")
     lines.append("| Experiment | MAE | Bias | ±3min | ±5min | Missed | Howlers |")
     lines.append("|---|---|---|---|---|---|---|")
-    for exp in experiments:
+    for exp in strategy_exps:
         o = exp["results"]["overall"]
         lines.append(
             f"| **{o['label']}** | {o['mae']} | {o['bias']:+.1f} | "
@@ -438,13 +679,45 @@ def generate_report(experiments: list[dict], df: pd.DataFrame) -> str:
         )
     lines.append("")
 
+    # Turnaround model diagnostics
+    if ta_models:
+        lines.append("## Turnaround Model Diagnostics")
+        lines.append("")
+        lines.append(f"**Training rows:** {ta_models['n_train']}")
+        lines.append(f"**Linear R²:** {ta_models['linear_r2']:.3f}")
+        lines.append("")
+        lines.append("**Linear model coefficients:**")
+        lines.append("")
+        lines.append("| Feature | Coefficient | Interpretation |")
+        lines.append("|---|---|---|")
+        interp = {
+            "arriving_fullness": "min added per 100% fullness increase (cars to unload)",
+            "outbound_fullness": "min added per 100% fullness increase (cars to load)",
+            "minutes_until_next_scheduled": "min added per min of schedule gap",
+            "route_code": "min added for sea-bi vs ed-king",
+            "ta_hour_of_day": "min added per hour of day",
+        }
+        for feat, coef in ta_models["linear_coefs"].items():
+            lines.append(f"| {feat} | {coef:+.3f} | {interp.get(feat, '')} |")
+        lines.append(f"| (intercept) | {ta_models['linear_intercept']:.2f} | |")
+        lines.append("")
+
+        lines.append("**Residual quantiles (for turnaround bounds):**")
+        lines.append("")
+        lines.append("| Route | p10 (floor offset) | p75 (ceiling offset) |")
+        lines.append("|---|---|---|")
+        for rc, rname in [(0, "ed-king"), (1, "sea-bi")]:
+            rq = ta_models["route_residual_q"].get(rc, ta_models["global_q"])
+            lines.append(f"| {rname} | {rq['p10']:+.1f} min | {rq['p75']:+.1f} min |")
+        lines.append("")
+
     # By route
     for route in ROUTES:
         lines.append(f"### {route}")
         lines.append("")
         lines.append("| Experiment | MAE | Bias | ±3min | Howlers |")
         lines.append("|---|---|---|---|---|")
-        for exp in experiments:
+        for exp in strategy_exps:
             r = exp["results"].get(route)
             if r:
                 lines.append(
@@ -466,7 +739,7 @@ def generate_report(experiments: list[dict], df: pd.DataFrame) -> str:
         lines.append("")
         lines.append("| Experiment | MAE | Bias | ±5min |")
         lines.append("|---|---|---|---|")
-        for exp in experiments:
+        for exp in strategy_exps:
             r = exp["results"].get(bkt)
             if r:
                 lines.append(
@@ -482,13 +755,13 @@ def generate_report(experiments: list[dict], df: pd.DataFrame) -> str:
         "inbound vessel can physically arrive and turn around (ETA + p10 turnaround)."
     )
     lines.append("")
-    flat = experiments[0]["results"]["overall"]
+    flat = strategy_exps[0]["results"]["overall"]
     lines.append(
         f"Flat propagation produces **{flat['howler_n']} howlers** "
         f"out of {flat['n']} predictions ({flat['howler_pct']}%)."
     )
     lines.append("")
-    for exp in experiments:
+    for exp in strategy_exps:
         o = exp["results"]["overall"]
         if o["howler_n"] == 0:
             lines.append(f"- **{o['label']}**: zero howlers ✓")

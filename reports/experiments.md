@@ -33,7 +33,17 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 25 | [q33 + more iters](#25-q33--more-iterations) | 2.77 | 2.22 | 68.8% | 61.0% | 800 iters (no gain, 2× slower) |
 | 26 | [+ L2 regularization](#26-l2-regularization) | 2.79 | 2.24 | 70.0% | 60.8% | l2_regularization=0.1 |
 
-**Best configuration: Experiment 24** — PL=2.76, 61.2% improvement, 70% coverage.
+**Best en-route GBT configuration: Experiment 24** — PL=2.76, 61.2% improvement, 70% coverage.
+
+### ETA-Based Next-Sailing Predictions (Experiments 27–31)
+
+| # | Experiment | MAE | Bias | ±3min | Howlers | Key Change |
+|---|-----------|-----|------|-------|---------|------------|
+| 27 | [ETA Baseline Analysis](#27-eta-baseline-analysis) | — | — | — | — | Initial ETA quality investigation |
+| 28 | [Head-to-Head](#28-head-to-head-etaturnaround-vs-flat-propagation) | 3.24 | -1.1 | 66.1% | 0 | ETA+median TA (worse than flat) |
+| 29 | [Strategy Comparison](#29-deep-dive-prediction-strategy-comparison) | 2.39 | +0.0 | 77.6% | 0 | Clamped p10 TA (matches flat, zero howlers) |
+| 30 | [Smart Clamp](#30-smart-clamp-floor--ceiling) | 2.33 | -0.6 | 77.3% | 0 | Floor + conditional median ceiling |
+| **31** | [**Cond Ceil p75**](#31-conditional-ceiling-with-p75-turnaround) | **2.26** | **-0.3** | **78.3%** | **0** | **Floor + conditional p75 ceiling (best)** |
 
 ## Experiment Log
 
@@ -516,4 +526,106 @@ predicted_delay = max(flat_delay, eta_floor)
 
 The clamp slightly hurts on-time/minor predictions (clamp fires unnecessarily ~occasionally) but helps on moderate/major delays (catches cases where flat propagation underestimates). The net effect is a wash on MAE, but howlers drop from 894→0.
 
-*Add new experiments above the Key Learnings section.*
+---
+
+### 30. Smart Clamp: Floor + Ceiling
+
+Tested whether adding a **ceiling** (based on ETA + turnaround) could catch schedule recovery — when flat propagation overpredicts because the ferry recovered time during crossing.
+
+**Strategy:** `predicted_delay = max(eta_floor, min(flat_delay, eta_ceiling))`
+
+**Unconditional smart clamp (p10 floor / median ceiling):**
+
+| Experiment | MAE | Bias | ±3min | Howlers |
+|---|---|---|---|---|
+| Flat propagation | 2.40 | -0.1 | 77.7% | 894 |
+| Clamped (p10 TA) | 2.39 | +0.0 | 77.6% | 0 |
+| Smart clamp (p10/med) | 2.80 | -1.9 | 73.8% | 0 |
+
+The unconditional ceiling hurts overall: MAE 2.80, bias -1.88. The median turnaround ceiling fires too aggressively — it caps delays that are actually real. It does dramatically help the 89 worst overpredictions (MAE 27.2 → 10.0 in the major bucket), but the collateral damage outweighs the gains.
+
+**Conditional ceiling (only when flat delay > threshold):**
+
+| Experiment | MAE | Bias | ±3min | ±5min | Missed | Howlers |
+|---|---|---|---|---|---|---|
+| Cond ceil med (>10) | 2.33 | -0.6 | 77.3% | 87.8% | 8.6% | 0 |
+| Cond ceil med (>15) | 2.34 | -0.4 | 77.3% | 87.5% | 7.8% | 0 |
+| Cond ceil med (>20) | 2.35 | -0.3 | 77.3% | 87.5% | 7.4% | 0 |
+
+Better — the conditional ceiling only fires for large flat delays, so it doesn't hurt the common case. But the median turnaround is still too aggressive a ceiling: missed-delay rate climbs to 8.6% (vs 6.3% for plain clamp).
+
+---
+
+### 31. Conditional Ceiling with p75 Turnaround
+
+Used a wider ceiling (p75 turnaround: sea-bi 22 min, ed-king 26 min) to avoid over-correcting while still catching schedule recovery.
+
+| Experiment | MAE | Bias | ±3min | ±5min | Missed | Howlers |
+|---|---|---|---|---|---|---|
+| Flat propagation | 2.40 | -0.1 | 77.7% | 87.7% | 6.6% | 894 |
+| Clamped (p10 TA) | 2.39 | +0.0 | 77.6% | 87.7% | 6.3% | 0 |
+| **Cond ceil p75 (>10)** | **2.26** | **-0.3** | **78.3%** | **88.5%** | **6.8%** | **0** |
+| Cond ceil p75 (>15) | 2.29 | -0.2 | 77.9% | 88.1% | 6.7% | 0 |
+| Cond ceil p75 (>20) | 2.32 | -0.1 | 77.7% | 87.9% | 6.6% | 0 |
+
+**Winner: Conditional ceiling p75 (>10).** MAE 2.26 — 6% better than flat propagation, zero howlers.
+
+**By delay bucket:**
+
+| Delay | Flat MAE | Clamp-only MAE | Cond p75 (>10) MAE |
+|---|---|---|---|
+| On-time (≤1) | 1.68 | 1.79 | 1.64 |
+| Minor (1–5) | 1.45 | 1.50 | 1.37 |
+| Moderate (5–15) | 4.11 | 4.05 | 3.74 |
+| Major (15+) | 6.78 | 6.45 | 6.53 |
+
+The p75 ceiling helps across the board except for a tiny cost on major delays (6.53 vs 6.45 clamp-only). This is because when a big delay persists and the ceiling fires incorrectly, the wider p75 ceiling limits the damage.
+
+**By route:**
+
+| Route | Flat MAE | Cond p75 (>10) MAE |
+|---|---|---|
+| sea-bi | 2.71 | 2.52 |
+| ed-king | 2.12 | 2.02 |
+
+Both routes improve. sea-bi gains more because its longer crossing gives more room for schedule recovery.
+
+**How it works:**
+```python
+flat_delay = current_vessel_delay
+eta_floor = max(0, (ETA + p10_turnaround) - scheduled_departure)
+if flat_delay > 10:
+    eta_ceiling = max(0, (ETA + p75_turnaround) - scheduled_departure)
+    predicted_delay = max(eta_floor, min(flat_delay, eta_ceiling))
+else:
+    predicted_delay = max(flat_delay, eta_floor)
+```
+
+**Interpretability:**
+- Normal case: "The boat is running X min late"
+- Floor fires: "The inbound ferry won't arrive until [ETA], so earliest departure is [ETA + turnaround]"
+- Ceiling fires: "The inbound ferry is making good time — ETA suggests the delay has reduced to ~Y min"
+
+**Report:** [eta_deep_dive_2026-04-05.md](eta_deep_dive_2026-04-05.md)
+
+---
+
+### Current Best: Conditional Ceiling p75 (>10)
+
+| Metric | Flat Propagation | Clamped (p10) | Cond Ceil p75 (>10) |
+|---|---|---|---|
+| MAE | 2.40 | 2.39 | **2.26** |
+| Bias | -0.1 | +0.0 | -0.3 |
+| ±3min | 77.7% | 77.6% | **78.3%** |
+| ±5min | 87.7% | 87.7% | **88.5%** |
+| Howlers | 894 (5.0%) | 0 | **0** |
+| Missed (<-5) | 6.6% | 6.3% | 6.8% |
+
+The conditional ceiling p75 (>10) is the best approach found so far. It:
+1. Beats flat propagation on MAE by 6%
+2. Eliminates all howlers (physically impossible predictions)
+3. Improves ±3min accuracy from 77.7% to 78.3%
+4. Has a slight increase in missed delays (6.8% vs 6.3%) — acceptable tradeoff for the MAE gain
+5. Is fully interpretable: floor = "can't depart before arrival", ceiling = "delay has reduced in transit"
+
+*Add new experiments above this line.*

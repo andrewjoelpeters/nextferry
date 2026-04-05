@@ -229,6 +229,26 @@ def predict_blend(row: pd.Series, turnaround: float, crossing_time: float) -> fl
     return (1 - progress) * flat + progress * eta_based
 
 
+def predict_smart_clamp(row: pd.Series, min_ta: float, max_ta: float) -> float:
+    """Floor + ceiling: clamp flat between physical bounds."""
+    flat = row["current_delay"]
+    eta_floor = predict_eta_ta(row, min_ta)
+    eta_ceiling = predict_eta_ta(row, max_ta)
+    return max(eta_floor, min(flat, eta_ceiling))
+
+
+def predict_conditional_ceiling(
+    row: pd.Series, min_ta: float, max_ta: float, threshold: float
+) -> float:
+    """Floor always, ceiling only when current delay exceeds threshold."""
+    flat = row["current_delay"]
+    eta_floor = predict_eta_ta(row, min_ta)
+    if flat > threshold:
+        eta_ceiling = predict_eta_ta(row, max_ta)
+        return max(eta_floor, min(flat, eta_ceiling))
+    return max(flat, eta_floor)
+
+
 # ---------------------------------------------------------------------------
 # Evaluation
 # ---------------------------------------------------------------------------
@@ -290,29 +310,40 @@ def eval_buckets(df: pd.DataFrame, predictions: pd.Series, label: str) -> dict:
 def run_experiments(df: pd.DataFrame) -> list[dict]:
     """Run all prediction experiments."""
     ta_p10 = {"sea-bi": 9.3, "ed-king": 14.8}
-    ta_p25 = {"sea-bi": 12.0, "ed-king": 17.5}
     ta_med = {"sea-bi": 16.8, "ed-king": 21.4}
-    crossing = {"sea-bi": 35.0, "ed-king": 25.0}
+    ta_p75 = {"sea-bi": 22.0, "ed-king": 26.0}
 
     strategies = [
         ("Flat propagation", lambda r: predict_flat(r)),
-        ("ETA + median TA", lambda r: predict_eta_ta(r, ta_med[r["route_abbrev"]])),
         ("Clamped (p10 TA)", lambda r: predict_clamped(r, ta_p10[r["route_abbrev"]])),
-        ("Clamped (p25 TA)", lambda r: predict_clamped(r, ta_p25[r["route_abbrev"]])),
         (
-            "Clamped (median TA)",
-            lambda r: predict_clamped(r, ta_med[r["route_abbrev"]]),
-        ),
-        (
-            "Blend (median TA)",
-            lambda r: predict_blend(
-                r, ta_med[r["route_abbrev"]], crossing[r["route_abbrev"]]
+            "Cond ceil med (>10)",
+            lambda r: predict_conditional_ceiling(
+                r, ta_p10[r["route_abbrev"]], ta_med[r["route_abbrev"]], 10.0
             ),
         ),
         (
-            "Blend (p25 TA)",
-            lambda r: predict_blend(
-                r, ta_p25[r["route_abbrev"]], crossing[r["route_abbrev"]]
+            "Cond ceil med (>15)",
+            lambda r: predict_conditional_ceiling(
+                r, ta_p10[r["route_abbrev"]], ta_med[r["route_abbrev"]], 15.0
+            ),
+        ),
+        (
+            "Cond ceil p75 (>10)",
+            lambda r: predict_conditional_ceiling(
+                r, ta_p10[r["route_abbrev"]], ta_p75[r["route_abbrev"]], 10.0
+            ),
+        ),
+        (
+            "Cond ceil p75 (>15)",
+            lambda r: predict_conditional_ceiling(
+                r, ta_p10[r["route_abbrev"]], ta_p75[r["route_abbrev"]], 15.0
+            ),
+        ),
+        (
+            "Cond ceil p75 (>20)",
+            lambda r: predict_conditional_ceiling(
+                r, ta_p10[r["route_abbrev"]], ta_p75[r["route_abbrev"]], 20.0
             ),
         ),
     ]

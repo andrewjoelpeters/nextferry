@@ -249,6 +249,31 @@ def predict_conditional_ceiling(
     return max(flat, eta_floor)
 
 
+def predict_late_eta_override(
+    row: pd.Series,
+    min_ta: float,
+    max_ta: float,
+    crossing_time: float,
+    delay_threshold: float = 10.0,
+    progress_threshold: float = 0.7,
+) -> float:
+    """Use ETA-based prediction near end of crossing for large delays.
+
+    Early crossing: clamped flat (floor only).
+    Late crossing + large delay: ETA + median turnaround.
+    Always: physics floor (p10 turnaround).
+    """
+    flat = row["current_delay"]
+    eta_floor = predict_eta_ta(row, min_ta)
+    elapsed = (row["collected_at"] - row["actual_departure"]).total_seconds() / 60
+    progress = min(1.0, max(0.0, elapsed / crossing_time))
+
+    if progress >= progress_threshold and flat > delay_threshold:
+        eta_pred = predict_eta_ta(row, max_ta)
+        return max(eta_floor, eta_pred)
+    return max(flat, eta_floor)
+
+
 # ---------------------------------------------------------------------------
 # Evaluation
 # ---------------------------------------------------------------------------
@@ -312,22 +337,11 @@ def run_experiments(df: pd.DataFrame) -> list[dict]:
     ta_p10 = {"sea-bi": 9.3, "ed-king": 14.8}
     ta_med = {"sea-bi": 16.8, "ed-king": 21.4}
     ta_p75 = {"sea-bi": 22.0, "ed-king": 26.0}
+    crossing = {"sea-bi": 35.0, "ed-king": 25.0}
 
     strategies = [
         ("Flat propagation", lambda r: predict_flat(r)),
         ("Clamped (p10 TA)", lambda r: predict_clamped(r, ta_p10[r["route_abbrev"]])),
-        (
-            "Cond ceil med (>10)",
-            lambda r: predict_conditional_ceiling(
-                r, ta_p10[r["route_abbrev"]], ta_med[r["route_abbrev"]], 10.0
-            ),
-        ),
-        (
-            "Cond ceil med (>15)",
-            lambda r: predict_conditional_ceiling(
-                r, ta_p10[r["route_abbrev"]], ta_med[r["route_abbrev"]], 15.0
-            ),
-        ),
         (
             "Cond ceil p75 (>10)",
             lambda r: predict_conditional_ceiling(
@@ -335,15 +349,47 @@ def run_experiments(df: pd.DataFrame) -> list[dict]:
             ),
         ),
         (
-            "Cond ceil p75 (>15)",
-            lambda r: predict_conditional_ceiling(
-                r, ta_p10[r["route_abbrev"]], ta_p75[r["route_abbrev"]], 15.0
+            "Late ETA (70%/>10)",
+            lambda r: predict_late_eta_override(
+                r,
+                ta_p10[r["route_abbrev"]],
+                ta_med[r["route_abbrev"]],
+                crossing[r["route_abbrev"]],
+                10.0,
+                0.7,
             ),
         ),
         (
-            "Cond ceil p75 (>20)",
-            lambda r: predict_conditional_ceiling(
-                r, ta_p10[r["route_abbrev"]], ta_p75[r["route_abbrev"]], 20.0
+            "Late ETA (50%/>10)",
+            lambda r: predict_late_eta_override(
+                r,
+                ta_p10[r["route_abbrev"]],
+                ta_med[r["route_abbrev"]],
+                crossing[r["route_abbrev"]],
+                10.0,
+                0.5,
+            ),
+        ),
+        (
+            "Late ETA p75 (70%/>10)",
+            lambda r: predict_late_eta_override(
+                r,
+                ta_p10[r["route_abbrev"]],
+                ta_p75[r["route_abbrev"]],
+                crossing[r["route_abbrev"]],
+                10.0,
+                0.7,
+            ),
+        ),
+        (
+            "Late ETA p75 (50%/>10)",
+            lambda r: predict_late_eta_override(
+                r,
+                ta_p10[r["route_abbrev"]],
+                ta_p75[r["route_abbrev"]],
+                crossing[r["route_abbrev"]],
+                10.0,
+                0.5,
             ),
         ),
     ]

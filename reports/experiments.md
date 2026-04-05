@@ -44,6 +44,7 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 29 | [Strategy Comparison](#29-deep-dive-prediction-strategy-comparison) | 2.39 | +0.0 | 77.6% | 0 | Clamped p10 TA (matches flat, zero howlers) |
 | 30 | [Smart Clamp](#30-smart-clamp-floor--ceiling) | 2.33 | -0.6 | 77.3% | 0 | Floor + conditional median ceiling |
 | **31** | [**Cond Ceil p75**](#31-conditional-ceiling-with-p75-turnaround) | **2.26** | **-0.3** | **78.3%** | **0** | **Floor + conditional p75 ceiling (best)** |
+| 32 | [Late ETA Override](#32-late-crossing-eta-override-negative-result) | 2.46 | -0.3 | 76.3% | 0 | ETA as primary signal near arrival (worse) |
 
 ## Experiment Log
 
@@ -628,4 +629,57 @@ The conditional ceiling p75 (>10) is the best approach found so far. It:
 4. Has a slight increase in missed delays (6.8% vs 6.3%) — acceptable tradeoff for the MAE gain
 5. Is fully interpretable: floor = "can't depart before arrival", ceiling = "delay has reduced in transit"
 
-*Add new experiments above this line.*
+---
+
+### 32. Late-Crossing ETA Override (Negative Result)
+
+Tested switching from flat propagation to ETA-based prediction when the vessel is near the end of its crossing (>50% or >70% progress) and the delay is large (>10 min). The idea: ETA becomes more accurate as the vessel approaches, so use it directly instead of just as bounds.
+
+| Experiment | MAE | Bias | ±3min | ±5min | Howlers |
+|---|---|---|---|---|---|
+| Cond ceil p75 (>10) | **2.26** | -0.3 | **78.3%** | **88.5%** | 0 |
+| Late ETA med (70%/>10) | 2.47 | -0.3 | 76.3% | 86.7% | 0 |
+| Late ETA med (50%/>10) | 2.46 | -0.4 | 76.4% | 86.8% | 0 |
+| Late ETA p75 (70%/>10) | 2.47 | +0.3 | 77.2% | 87.1% | 0 |
+| Late ETA p75 (50%/>10) | 2.48 | +0.3 | 77.2% | 87.1% | 0 |
+
+**Result: Doesn't help.** All variants have MAE 2.46-2.48, worse than conditional ceiling at 2.26.
+
+**Why:** Switching entirely to ETA-based prediction adds turnaround variance even when the ETA itself is accurate. The conditional ceiling is smarter — it keeps flat propagation as the base (which is already good for most cases) and only clips when flat makes an extreme prediction that ETA contradicts. The ceiling uses ETA as a *bound*, not a *replacement*, which limits the turnaround noise to one direction.
+
+The progress threshold (50% vs 70%) makes almost no difference, confirming that ETA quality isn't the issue — turnaround variance is.
+
+---
+
+## Recommendation
+
+**Proposed approach: Conditional Ceiling p75 (>10)**
+
+```python
+def predict_next_sailing_delay(current_delay, eta, scheduled_departure, route):
+    p10_turnaround = {"sea-bi": 9.3, "ed-king": 14.8}[route]
+    p75_turnaround = {"sea-bi": 22.0, "ed-king": 26.0}[route]
+
+    eta_floor = max(0, (eta + p10_turnaround) - scheduled_departure)
+
+    if current_delay > 10:
+        eta_ceiling = max(0, (eta + p75_turnaround) - scheduled_departure)
+        return max(eta_floor, min(current_delay, eta_ceiling))
+
+    return max(current_delay, eta_floor)
+```
+
+**Why this is the best approach:**
+
+1. **Accuracy**: MAE 2.26 — 6% better than flat propagation (2.40) and all alternatives tested
+2. **Zero howlers**: physically impossible predictions eliminated (was 894 / 5% with flat)
+3. **Interpretable**: three clear cases users can understand:
+   - "The boat is running X min late" (normal — flat prediction stands)
+   - "The inbound ferry won't arrive until [ETA], earliest departure is [time]" (floor fires)
+   - "The inbound ferry is making good time, delay reduced to ~Y min" (ceiling fires)
+4. **Simple**: ~10 lines of code, two turnaround constants per route, one threshold
+5. **Robust**: flat propagation handles the 75% common case (small delays). ETA only overrides when flat makes a prediction that's physically impossible (floor) or clearly stale (ceiling for large delays)
+
+**Key insight from 6 experiments:** ETA is most useful as *bounds on flat propagation*, not as a replacement. Turnaround variance (±6 min std) makes direct ETA-based prediction noisy, but using ETA to constrain flat propagation captures the best of both signals.
+
+*Add new experiments above the Recommendation section.*

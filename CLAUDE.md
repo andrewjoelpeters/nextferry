@@ -42,7 +42,7 @@ uv run mypy backend/
 
 **Data flow:** WSDOT API → Pydantic serializers → SQLite (`data/ferry.db`) → `next_sailings.py` computes delays → ML predictor adds confidence intervals → `display_processing.py` formats for templates → Jinja2 HTMX fragments
 
-**Frontend (`templates/` + `static/`):** Server-rendered HTML fragments loaded on-demand via HTMX `hx-get`. No client-side framework. Leaflet for maps, Chart.js for charts (both via CDN). PWA with service worker for ferry arrival notifications.
+**Frontend (`templates/` + `static/`):** Server-rendered HTML fragments loaded on-demand via HTMX `hx-get`. No client-side framework. Leaflet for maps (via CDN). PWA with service worker for ferry arrival notifications.
 
 **ML models (`backend/ml_predictor.py`, `backend/fill_predictor.py`):**
 - Delay predictor: Three HistGradientBoostingRegressors (quantiles q15/q50/q85) trained on `sailing_events` table

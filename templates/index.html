@@ -27,8 +27,8 @@
         <h1>When's the Next Ferry?</h1>
     </header>
 
-    <!-- Sync group: ensures a tab click aborts the initial load (and vice versa) -->
-    <div id="tab-sync" hx-sync="this:abort">
+    <!-- Sync group: ensures a tab click cancels any in-flight request -->
+    <div id="tab-sync" hx-sync="this:replace">
 
     <!-- Tab Navigation using HTMX -->
     <nav class="tab-nav">

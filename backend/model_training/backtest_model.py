@@ -48,9 +48,9 @@ def is_peak_hour(hour: int) -> bool:
 # ---------------------------------------------------------------------------
 
 DEFAULT_HYPERPARAMS = {
-    "max_iter": 200,
-    "max_depth": 6,
-    "learning_rate": 0.1,
+    "max_iter": 600,
+    "max_depth": 8,
+    "learning_rate": 0.05,
     "min_samples_leaf": 20,
     "random_state": 42,
 }
@@ -122,7 +122,7 @@ class QuantileGBTModel:
         X_train = self._encode(train_df)
         y_train = train_df[TARGET_COL].values
 
-        for name, quantile in [("q50", 0.333), ("q10", 0.10), ("q90", 0.90)]:
+        for name, quantile in [("q50", 0.25), ("q10", 0.10), ("q90", 0.90)]:
             model = HistGradientBoostingRegressor(
                 loss="quantile",
                 quantile=quantile,
@@ -222,3 +222,67 @@ class QuantileGBTModel:
         instance._category_maps = data["category_maps"]
         instance._feature_cols = data.get("feature_cols", list(FEATURE_COLS))
         return instance
+
+
+class NGBoostModel:
+    """NGBoost distributional model — fits a Normal distribution per prediction.
+
+    Jointly optimizes location (mu) and scale (sigma), producing coherent
+    intervals and a natural confidence measure.
+    """
+
+    def __init__(self):
+        self._category_maps: dict[str, dict] = {}
+        self._feature_cols: list[str] = list(FEATURE_COLS)
+        self.model = None
+
+    def _learn_categories(self, df: pd.DataFrame) -> None:
+        for col in CATEGORICAL_COLS:
+            categories = sorted(df[col].unique())
+            self._category_maps[col] = {
+                cat: code for code, cat in enumerate(categories)
+            }
+
+    def _encode(self, df: pd.DataFrame) -> np.ndarray:
+        X = df[self._feature_cols].copy()
+        for col in CATEGORICAL_COLS:
+            mapping = self._category_maps[col]
+            X[col] = X[col].map(mapping).fillna(UNSEEN_CATEGORY_CODE).astype(int)
+        return X.values
+
+    def fit(self, train_df: pd.DataFrame) -> None:
+        from ngboost import NGBRegressor
+        from ngboost.distns import Normal
+        from sklearn.tree import DecisionTreeRegressor
+
+        self._learn_categories(train_df)
+        X_train = self._encode(train_df)
+        y_train = train_df[TARGET_COL].values
+
+        base_learner = DecisionTreeRegressor(
+            max_depth=4,
+            min_samples_leaf=20,
+        )
+
+        self.model = NGBRegressor(
+            Dist=Normal,
+            Base=base_learner,
+            n_estimators=200,
+            learning_rate=0.05,
+            random_state=42,
+            verbose=False,
+        )
+        self.model.fit(X_train, y_train)
+
+    def predict(self, test_df: pd.DataFrame) -> pd.DataFrame:
+        X_test = self._encode(test_df)
+        dist = self.model.pred_dist(X_test)
+        mu = dist.loc
+        sigma = dist.scale
+
+        out = test_df.copy()
+        # Use q33 for point estimate (matches asymmetric pinball loss)
+        out["predicted_delay"] = dist.ppf(0.333)
+        out["lower_bound"] = dist.ppf(0.10)
+        out["upper_bound"] = dist.ppf(0.90)
+        return out

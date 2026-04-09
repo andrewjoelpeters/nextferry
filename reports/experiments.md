@@ -46,6 +46,7 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | **31** | [**Cond Ceil p75**](#31-conditional-ceiling-with-p75-turnaround) | **2.26** | **-0.3** | **78.3%** | **0** | **Floor + conditional p75 ceiling (best)** |
 | 32 | [Late ETA Override](#32-late-crossing-eta-override-negative-result) | 2.46 | -0.3 | 76.3% | 0 | ETA as primary signal near arrival (worse) |
 | **33** | [**Trained TA Model**](#33-trained-turnaround-model-linear--gbt) | **2.20** | **-0.5** | **79.2%** | **0** | **GBT turnaround bounds from vehicle load (new best)** |
+| 34 | [Dock Model Value](#34-dock-model-value-test-negative-result) | 2.29 | -0.4 | — | 0 | At-dock model adds no value over Option A persisted |
 
 ## Experiment Log
 
@@ -665,14 +666,24 @@ def predict_next_sailing_delay(current_delay, eta, scheduled_departure, route):
 
     eta_floor = max(0, (eta + p10_turnaround) - scheduled_departure)
 
-    if current_delay > 10:
+    if current_delay > 4:
         eta_ceiling = max(0, (eta + p75_turnaround) - scheduled_departure)
         return max(eta_floor, min(current_delay, eta_ceiling))
 
     return max(current_delay, eta_floor)
 ```
 
-**MAE 2.26** — 6% better than flat propagation. Zero howlers. ~10 lines of code, two constants per route.
+**MAE 2.23** — 7% better than flat propagation. Zero howlers. ~10 lines of code, two constants per route.
+
+Threshold sweep showed >4 is optimal (boats routinely recover from 5–10 min delays too):
+
+| Threshold | MAE | Bias | ±3min |
+|---|---|---|---|
+| >0 (always) | 2.42 | -0.73 | 77.5% |
+| >3 | 2.23 | -0.44 | 79.0% |
+| **>4** | **2.23** | **-0.40** | **79.2%** |
+| >5 | 2.23 | -0.36 | 79.1% |
+| >10 (original) | 2.26 | -0.26 | 78.3% |
 
 ### Option B: GBT Turnaround Model (more accurate)
 
@@ -687,9 +698,10 @@ Replace fixed p10/p75 turnaround constants with a `HistGradientBoostingRegressor
    - "The boat is running X min late" (normal — flat prediction stands)
    - "The inbound ferry won't arrive until [ETA], earliest departure is [time]" (floor fires)
    - "The inbound ferry is making good time, delay reduced to ~Y min" (ceiling fires)
-3. **Robust**: flat propagation handles the 75% common case (small delays). ETA only overrides when flat makes a prediction that's physically impossible (floor) or clearly stale (ceiling for large delays)
+3. **Robust**: flat propagation handles the common case (small delays ≤4 min). ETA only overrides when flat makes a prediction that's physically impossible (floor) or clearly stale (ceiling for delays >4 min)
+4. **No at-dock model needed**: Experiment 34 showed that persisting the last en-route prediction through docking beats the at-dock HistGBT model (MAE 2.29 vs 2.43). The ETA already encodes arrival timing, so dock-phase features add no signal. Just freeze the en-route prediction when the vessel docks.
 
-**Key insight from 9 experiments:** ETA is most useful as *bounds on flat propagation*, not as a replacement. Turnaround variance (±6 min std) makes direct ETA-based prediction noisy, but using ETA to constrain flat propagation captures the best of both signals. Vehicle load features (especially unloading pressure) explain 39% of turnaround variance — using a model to predict turnaround produces better-calibrated bounds than fixed percentiles.
+**Key insight from 10 experiments:** ETA is most useful as *bounds on flat propagation*, not as a replacement. Turnaround variance (±6 min std) makes direct ETA-based prediction noisy, but using ETA to constrain flat propagation captures the best of both signals. Vehicle load features (especially unloading pressure) explain 39% of turnaround variance — using a model to predict turnaround produces better-calibrated bounds than fixed percentiles.
 
 ---
 
@@ -746,5 +758,52 @@ Directly predicts p10 and p75 turnaround quantiles. No linear assumption.
 - The tradeoff: GBT model adds complexity (need vehicle data at prediction time + trained model) for a 3% MAE improvement over fixed percentiles
 
 **Report:** [eta_deep_dive_2026-04-05.md](eta_deep_dive_2026-04-05.md)
+
+---
+
+### 34. Dock Model Value Test (Negative Result)
+
+Tested whether the production at-dock model (HistGBT quantile, 11 features) adds value over simply persisting Option A's last en-route prediction through docking.
+
+**Setup:** For each of 18,352 next-sailing pairs, compared:
+1. **Option A persisted** — last en-route conditional ceiling prediction, frozen when vessel docks
+2. **Option A + dock model** — transitions to dock model prediction (q33 quantile) once vessel is at dock
+
+The dock model matches the production `at_dock_model.py` architecture: HistGBT with 11 features including `minutes_at_dock`, `current_fullness`, `incoming_vehicle_fullness`, `minutes_until_scheduled_departure`, trained on 107K at-dock snapshots.
+
+**Aggregate results (n=16,774 pairs with both predictions):**
+
+| Approach | MAE | Bias |
+|---|---|---|
+| **Option A persisted** | **2.29** | -0.42 |
+| Dock model (last snapshot) | 2.43 | -0.20 |
+
+**By delay bucket:**
+
+| Delay | Option A MAE | Dock MAE | Δ |
+|---|---|---|---|
+| On-time (≤1) | 1.61 | 1.71 | -0.09 |
+| Minor (1–5) | 1.32 | 1.43 | -0.11 |
+| Moderate (5–15) | 3.86 | 4.10 | -0.23 |
+| Major (15+) | 7.07 | 7.27 | -0.20 |
+
+**By route:**
+
+| Route | Option A MAE | Dock MAE | Δ |
+|---|---|---|---|
+| sea-bi | 2.58 | 2.73 | -0.16 |
+| ed-king | 2.03 | 2.15 | -0.12 |
+
+**Head-to-head:** Option A wins 8,583 / Dock wins 8,191 / Ties 0.
+
+Option A persisted beats the dock model across **every delay bucket** and **both routes**.
+
+**Why the dock model loses:** Option A uses the last en-route ETA, which updates continuously during crossing. By the time a boat docks — even late — Option A has already incorporated that information through the floor/ceiling mechanism. The dock model's features (`minutes_at_dock`, `current_fullness`) don't add meaningful signal beyond what the ETA already encoded. The dock model's `current_vessel_delay_minutes` feature dominates its predictions, so it essentially echoes back the departure delay without the benefit of ETA-based bounds.
+
+**Timeline analysis** confirmed this across five scenarios (howler, recovery, persistent, dock-better, option-a-better). In the one scenario where the dock model won, the boat arrived on time but had a slow turnaround — a rare case that doesn't move the aggregate.
+
+**Verdict: Drop the at-dock model for next-sailing prediction.** Persist Option A's last en-route prediction through docking. Simpler, more accurate, one less model to maintain.
+
+**Script:** `scripts/backtest_dock_value.py`
 
 *Add new experiments above the Recommendation section.*

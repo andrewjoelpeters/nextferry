@@ -151,8 +151,6 @@ class TerminalSpace(BaseModel):
 class RouteSailing(BaseModel):
     scheduled_departure: datetime | None
     delay_in_minutes: int | None = None
-    delay_lower_bound: int | None = None
-    delay_upper_bound: int | None = None
     vessel_name: str
     vessel_position_num: int
     departed: bool = False
@@ -186,8 +184,6 @@ class DirectionalSailing(RouteSailing):
                 include={
                     "scheduled_departure",
                     "delay_in_minutes",
-                    "delay_lower_bound",
-                    "delay_upper_bound",
                     "vessel_name",
                     "vessel_position_num",
                     "departed",

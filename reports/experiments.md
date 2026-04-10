@@ -33,7 +33,20 @@ Tracking model experiments, ideas, and results. Each entry describes the model c
 | 25 | [q33 + more iters](#25-q33--more-iterations) | 2.77 | 2.22 | 68.8% | 61.0% | 800 iters (no gain, 2× slower) |
 | 26 | [+ L2 regularization](#26-l2-regularization) | 2.79 | 2.24 | 70.0% | 60.8% | l2_regularization=0.1 |
 
-**Best configuration: Experiment 24** — PL=2.76, 61.2% improvement, 70% coverage.
+**Best en-route GBT configuration: Experiment 24** — PL=2.76, 61.2% improvement, 70% coverage.
+
+### ETA-Based Next-Sailing Predictions (Experiments 27–31)
+
+| # | Experiment | MAE | Bias | ±3min | Howlers | Key Change |
+|---|-----------|-----|------|-------|---------|------------|
+| 27 | [ETA Baseline Analysis](#27-eta-baseline-analysis) | — | — | — | — | Initial ETA quality investigation |
+| 28 | [Head-to-Head](#28-head-to-head-etaturnaround-vs-flat-propagation) | 3.24 | -1.1 | 66.1% | 0 | ETA+median TA (worse than flat) |
+| 29 | [Strategy Comparison](#29-deep-dive-prediction-strategy-comparison) | 2.39 | +0.0 | 77.6% | 0 | Clamped p10 TA (matches flat, zero howlers) |
+| 30 | [Smart Clamp](#30-smart-clamp-floor--ceiling) | 2.33 | -0.6 | 77.3% | 0 | Floor + conditional median ceiling |
+| **31** | [**Cond Ceil p75**](#31-conditional-ceiling-with-p75-turnaround) | **2.26** | **-0.3** | **78.3%** | **0** | **Floor + conditional p75 ceiling (best)** |
+| 32 | [Late ETA Override](#32-late-crossing-eta-override-negative-result) | 2.46 | -0.3 | 76.3% | 0 | ETA as primary signal near arrival (worse) |
+| **33** | [**Trained TA Model**](#33-trained-turnaround-model-linear--gbt) | **2.20** | **-0.5** | **79.2%** | **0** | **GBT turnaround bounds from vehicle load (new best)** |
+| 34 | [Dock Model Value](#34-dock-model-value-test-negative-result) | 2.29 | -0.4 | — | 0 | At-dock model adds no value over Option A persisted |
 
 ## Experiment Log
 
@@ -430,4 +443,367 @@ Features (10):
   turnaround_minutes (numeric)
 ```
 
-*Add new experiments above the Key Learnings section.*
+---
+
+## ETA-Based Next-Sailing Prediction Experiments
+
+The experiments above (1–26) tuned the **en-route GBT model**, which predicts departure delay from pre-departure snapshots. The experiments below explore a different question: **how to predict the next sailing's delay while a vessel is en-route**, using WSDOT's real-time ETA.
+
+### Context
+
+When a vessel is crossing, we want to predict delay for sailings at the opposite terminal. The current production behavior is flat propagation (copy the departing vessel's delay forward). We investigated whether WSDOT's ETA + turnaround time estimation could do better.
+
+**Dataset:** 17,873 next-sailing prediction pairs on sea-bi + ed-king, using the last sane en-route ETA snapshot per sailing (sanity filter: reject ETAs > 2× crossing time, which removes 1.4% of glitched ETAs).
+
+**Terminology:**
+- **Flat propagation:** next_delay = current_vessel_delay
+- **ETA + TA:** next_delay = max(0, (ETA + turnaround) - scheduled_departure)
+- **Clamped:** max(flat_delay, ETA-implied floor) — uses flat propagation but clamps to physical reality
+- **Blend:** weighted interpolation from flat→ETA as crossing progresses
+- **Howler:** prediction where departure is before ETA + p10 turnaround (physically impossible)
+
+### 27. ETA Baseline Analysis
+
+**Report:** [eta_backtest_2026-04-04.md](eta_backtest_2026-04-04.md)
+
+Initial analysis across all routes. Key findings:
+- ETA MAE is 5.72 min overall, but 3.42 (ed-king) and 3.88 (sea-bi) on target routes
+- 1.4% of ETAs are glitched (off by hours) — simple sanity filter fixes this
+- Turnaround variance (±6 min std) is the dominant error source after filtering
+- Error decomposition: ETA error correlates 0.97 with total error before filtering, but only 0.27 after (turnaround takes over)
+
+---
+
+### 28. Head-to-Head: ETA+Turnaround vs Flat Propagation
+
+Compared on identical sailings (sea-bi + ed-king only):
+
+| Approach | MAE | Bias | ±3min | ±5min | Missed (<-5) |
+|---|---|---|---|---|---|
+| Flat propagation | 2.40 | -0.13 | 77.7% | 87.7% | 6.6% |
+| ETA + median TA | 3.24 | -1.07 | 66.1% | 81.1% | 10.3% |
+
+**Takeaway:** Flat propagation wins overall because most delays are minor (1–5 min) and persist across sailings. ETA+turnaround adds noise via turnaround variance. But flat propagation produces **howlers** — it has no concept of physical constraints.
+
+---
+
+### 29. Deep Dive: Prediction Strategy Comparison
+
+**Report:** [eta_deep_dive_2026-04-05.md](eta_deep_dive_2026-04-05.md)
+
+Tested 7 strategies on the same 17,873 prediction pairs:
+
+| Experiment | MAE | Bias | ±3min | ±5min | Missed | Howlers |
+|---|---|---|---|---|---|---|
+| **Flat propagation** | 2.40 | -0.1 | 77.7% | 87.7% | 6.6% | 894 (5.0%) |
+| ETA + median TA | 3.24 | -1.1 | 66.1% | 81.1% | 10.2% | 0 |
+| **Clamped (p10 TA)** | **2.39** | **+0.0** | **77.6%** | **87.7%** | **6.3%** | **0** |
+| Clamped (p25 TA) | 2.47 | +0.2 | 75.4% | 87.1% | 6.1% | 0 |
+| Clamped (median TA) | 2.84 | +0.8 | 69.9% | 82.4% | 5.1% | 0 |
+| Blend (median TA) | 2.92 | -0.7 | 69.6% | 83.3% | 8.7% | 5 |
+| Blend (p25 TA) | 3.12 | -2.2 | 70.7% | 83.0% | 15.1% | 15 |
+
+**Winner: Clamped (p10 TA)** — matches flat propagation on every metric (MAE 2.39 vs 2.40, ±3min 77.6% vs 77.7%) while eliminating all 894 howlers (5% of predictions).
+
+**How it works:**
+```python
+flat_delay = current_vessel_delay
+eta_floor = max(0, (ETA + p10_turnaround) - scheduled_departure)
+predicted_delay = max(flat_delay, eta_floor)
+```
+
+**Why it works:** The p10 turnaround (sea-bi: 9.3 min, ed-king: 14.8 min) is a conservative floor — only 10% of turnarounds are faster. This means the clamp only fires when flat propagation is making a physically impossible prediction. In the common case (75% of sailings with ≤5 min delay), flat propagation is already correct and the clamp never fires.
+
+**Interpretability:**
+- When clamp doesn't fire: "The boat is running X min late"
+- When clamp fires: "The inbound ferry won't arrive until [ETA], so earliest departure is [ETA + turnaround]"
+
+**By delay bucket (Clamped p10 vs Flat):**
+
+| Delay | Flat MAE | Clamped MAE | Winner |
+|---|---|---|---|
+| On-time (≤1) | 1.68 | 1.79 | Flat (+0.11) |
+| Minor (1–5) | 1.45 | 1.50 | Flat (+0.05) |
+| Moderate (5–15) | 4.11 | 4.05 | **Clamped** (-0.06) |
+| Major (15+) | 6.78 | 6.45 | **Clamped** (-0.33) |
+
+The clamp slightly hurts on-time/minor predictions (clamp fires unnecessarily ~occasionally) but helps on moderate/major delays (catches cases where flat propagation underestimates). The net effect is a wash on MAE, but howlers drop from 894→0.
+
+---
+
+### 30. Smart Clamp: Floor + Ceiling
+
+Tested whether adding a **ceiling** (based on ETA + turnaround) could catch schedule recovery — when flat propagation overpredicts because the ferry recovered time during crossing.
+
+**Strategy:** `predicted_delay = max(eta_floor, min(flat_delay, eta_ceiling))`
+
+**Unconditional smart clamp (p10 floor / median ceiling):**
+
+| Experiment | MAE | Bias | ±3min | Howlers |
+|---|---|---|---|---|
+| Flat propagation | 2.40 | -0.1 | 77.7% | 894 |
+| Clamped (p10 TA) | 2.39 | +0.0 | 77.6% | 0 |
+| Smart clamp (p10/med) | 2.80 | -1.9 | 73.8% | 0 |
+
+The unconditional ceiling hurts overall: MAE 2.80, bias -1.88. The median turnaround ceiling fires too aggressively — it caps delays that are actually real. It does dramatically help the 89 worst overpredictions (MAE 27.2 → 10.0 in the major bucket), but the collateral damage outweighs the gains.
+
+**Conditional ceiling (only when flat delay > threshold):**
+
+| Experiment | MAE | Bias | ±3min | ±5min | Missed | Howlers |
+|---|---|---|---|---|---|---|
+| Cond ceil med (>10) | 2.33 | -0.6 | 77.3% | 87.8% | 8.6% | 0 |
+| Cond ceil med (>15) | 2.34 | -0.4 | 77.3% | 87.5% | 7.8% | 0 |
+| Cond ceil med (>20) | 2.35 | -0.3 | 77.3% | 87.5% | 7.4% | 0 |
+
+Better — the conditional ceiling only fires for large flat delays, so it doesn't hurt the common case. But the median turnaround is still too aggressive a ceiling: missed-delay rate climbs to 8.6% (vs 6.3% for plain clamp).
+
+---
+
+### 31. Conditional Ceiling with p75 Turnaround
+
+Used a wider ceiling (p75 turnaround: sea-bi 22 min, ed-king 26 min) to avoid over-correcting while still catching schedule recovery.
+
+| Experiment | MAE | Bias | ±3min | ±5min | Missed | Howlers |
+|---|---|---|---|---|---|---|
+| Flat propagation | 2.40 | -0.1 | 77.7% | 87.7% | 6.6% | 894 |
+| Clamped (p10 TA) | 2.39 | +0.0 | 77.6% | 87.7% | 6.3% | 0 |
+| **Cond ceil p75 (>10)** | **2.26** | **-0.3** | **78.3%** | **88.5%** | **6.8%** | **0** |
+| Cond ceil p75 (>15) | 2.29 | -0.2 | 77.9% | 88.1% | 6.7% | 0 |
+| Cond ceil p75 (>20) | 2.32 | -0.1 | 77.7% | 87.9% | 6.6% | 0 |
+
+**Winner: Conditional ceiling p75 (>10).** MAE 2.26 — 6% better than flat propagation, zero howlers.
+
+**By delay bucket:**
+
+| Delay | Flat MAE | Clamp-only MAE | Cond p75 (>10) MAE |
+|---|---|---|---|
+| On-time (≤1) | 1.68 | 1.79 | 1.64 |
+| Minor (1–5) | 1.45 | 1.50 | 1.37 |
+| Moderate (5–15) | 4.11 | 4.05 | 3.74 |
+| Major (15+) | 6.78 | 6.45 | 6.53 |
+
+The p75 ceiling helps across the board except for a tiny cost on major delays (6.53 vs 6.45 clamp-only). This is because when a big delay persists and the ceiling fires incorrectly, the wider p75 ceiling limits the damage.
+
+**By route:**
+
+| Route | Flat MAE | Cond p75 (>10) MAE |
+|---|---|---|
+| sea-bi | 2.71 | 2.52 |
+| ed-king | 2.12 | 2.02 |
+
+Both routes improve. sea-bi gains more because its longer crossing gives more room for schedule recovery.
+
+**How it works:**
+```python
+flat_delay = current_vessel_delay
+eta_floor = max(0, (ETA + p10_turnaround) - scheduled_departure)
+if flat_delay > 10:
+    eta_ceiling = max(0, (ETA + p75_turnaround) - scheduled_departure)
+    predicted_delay = max(eta_floor, min(flat_delay, eta_ceiling))
+else:
+    predicted_delay = max(flat_delay, eta_floor)
+```
+
+**Interpretability:**
+- Normal case: "The boat is running X min late"
+- Floor fires: "The inbound ferry won't arrive until [ETA], so earliest departure is [ETA + turnaround]"
+- Ceiling fires: "The inbound ferry is making good time — ETA suggests the delay has reduced to ~Y min"
+
+**Report:** [eta_deep_dive_2026-04-05.md](eta_deep_dive_2026-04-05.md)
+
+---
+
+### Current Best: Conditional Ceiling p75 (>10)
+
+| Metric | Flat Propagation | Clamped (p10) | Cond Ceil p75 (>10) |
+|---|---|---|---|
+| MAE | 2.40 | 2.39 | **2.26** |
+| Bias | -0.1 | +0.0 | -0.3 |
+| ±3min | 77.7% | 77.6% | **78.3%** |
+| ±5min | 87.7% | 87.7% | **88.5%** |
+| Howlers | 894 (5.0%) | 0 | **0** |
+| Missed (<-5) | 6.6% | 6.3% | 6.8% |
+
+The conditional ceiling p75 (>10) is the best approach found so far. It:
+1. Beats flat propagation on MAE by 6%
+2. Eliminates all howlers (physically impossible predictions)
+3. Improves ±3min accuracy from 77.7% to 78.3%
+4. Has a slight increase in missed delays (6.8% vs 6.3%) — acceptable tradeoff for the MAE gain
+5. Is fully interpretable: floor = "can't depart before arrival", ceiling = "delay has reduced in transit"
+
+---
+
+### 32. Late-Crossing ETA Override (Negative Result)
+
+Tested switching from flat propagation to ETA-based prediction when the vessel is near the end of its crossing (>50% or >70% progress) and the delay is large (>10 min). The idea: ETA becomes more accurate as the vessel approaches, so use it directly instead of just as bounds.
+
+| Experiment | MAE | Bias | ±3min | ±5min | Howlers |
+|---|---|---|---|---|---|
+| Cond ceil p75 (>10) | **2.26** | -0.3 | **78.3%** | **88.5%** | 0 |
+| Late ETA med (70%/>10) | 2.47 | -0.3 | 76.3% | 86.7% | 0 |
+| Late ETA med (50%/>10) | 2.46 | -0.4 | 76.4% | 86.8% | 0 |
+| Late ETA p75 (70%/>10) | 2.47 | +0.3 | 77.2% | 87.1% | 0 |
+| Late ETA p75 (50%/>10) | 2.48 | +0.3 | 77.2% | 87.1% | 0 |
+
+**Result: Doesn't help.** All variants have MAE 2.46-2.48, worse than conditional ceiling at 2.26.
+
+**Why:** Switching entirely to ETA-based prediction adds turnaround variance even when the ETA itself is accurate. The conditional ceiling is smarter — it keeps flat propagation as the base (which is already good for most cases) and only clips when flat makes an extreme prediction that ETA contradicts. The ceiling uses ETA as a *bound*, not a *replacement*, which limits the turnaround noise to one direction.
+
+The progress threshold (50% vs 70%) makes almost no difference, confirming that ETA quality isn't the issue — turnaround variance is.
+
+---
+
+## Recommendation
+
+Two viable options depending on complexity appetite:
+
+### Option A: Fixed Percentile Ceiling (simple)
+
+```python
+def predict_next_sailing_delay(current_delay, eta, scheduled_departure, route):
+    p10_turnaround = {"sea-bi": 9.3, "ed-king": 14.8}[route]
+    p75_turnaround = {"sea-bi": 22.0, "ed-king": 26.0}[route]
+
+    eta_floor = max(0, (eta + p10_turnaround) - scheduled_departure)
+
+    if current_delay > 4:
+        eta_ceiling = max(0, (eta + p75_turnaround) - scheduled_departure)
+        return max(eta_floor, min(current_delay, eta_ceiling))
+
+    return max(current_delay, eta_floor)
+```
+
+**MAE 2.23** — 7% better than flat propagation. Zero howlers. ~10 lines of code, two constants per route.
+
+Threshold sweep showed >4 is optimal (boats routinely recover from 5–10 min delays too):
+
+| Threshold | MAE | Bias | ±3min |
+|---|---|---|---|
+| >0 (always) | 2.42 | -0.73 | 77.5% |
+| >3 | 2.23 | -0.44 | 79.0% |
+| **>4** | **2.23** | **-0.40** | **79.2%** |
+| >5 | 2.23 | -0.36 | 79.1% |
+| >10 (original) | 2.26 | -0.26 | 78.3% |
+
+### Option B: GBT Turnaround Model (more accurate)
+
+Replace fixed p10/p75 turnaround constants with a `HistGradientBoostingRegressor` trained on vehicle load features (`arriving_fullness`, `outbound_fullness`, `minutes_until_next_scheduled`, `route`, `hour`).
+
+**MAE 2.20** — 8% better than flat propagation, 3% better than fixed percentiles. Zero howlers. Requires vehicle data from `sailing_space_snapshots` at prediction time (already available via WSDOT API).
+
+### Both share:
+
+1. **Zero howlers**: physically impossible predictions eliminated (was 894 / 5% with flat)
+2. **Interpretable**: three clear cases users can understand:
+   - "The boat is running X min late" (normal — flat prediction stands)
+   - "The inbound ferry won't arrive until [ETA], earliest departure is [time]" (floor fires)
+   - "The inbound ferry is making good time, delay reduced to ~Y min" (ceiling fires)
+3. **Robust**: flat propagation handles the common case (small delays ≤4 min). ETA only overrides when flat makes a prediction that's physically impossible (floor) or clearly stale (ceiling for delays >4 min)
+4. **No at-dock model needed**: Experiment 34 showed that persisting the last en-route prediction through docking beats the at-dock HistGBT model (MAE 2.29 vs 2.43). The ETA already encodes arrival timing, so dock-phase features add no signal. Just freeze the en-route prediction when the vessel docks.
+
+**Key insight from 10 experiments:** ETA is most useful as *bounds on flat propagation*, not as a replacement. Turnaround variance (±6 min std) makes direct ETA-based prediction noisy, but using ETA to constrain flat propagation captures the best of both signals. Vehicle load features (especially unloading pressure) explain 39% of turnaround variance — using a model to predict turnaround produces better-calibrated bounds than fixed percentiles.
+
+---
+
+### 33. Trained Turnaround Model (Linear + GBT)
+
+Replaced fixed turnaround percentile constants with trained models that predict turnaround time from vehicle load features. The hypothesis: knowing how many cars need to unload/load should produce better-calibrated turnaround bounds.
+
+**Features (5):**
+- `arriving_fullness` — how full the arriving vessel is (cars to unload, 0–1)
+- `outbound_fullness` — how many cars are waiting at terminal (cars to load, 0–1)
+- `minutes_until_next_scheduled` — schedule gap (crew urgency)
+- `route_code` — binary, sea-bi vs ed-king
+- `hour_of_day` — time of day
+
+**Feature coverage:** 100% (17871/17873 rows had vehicle data from `sailing_space_snapshots`)
+
+**Model A — LinearRegression + residual quantiles (R²=0.387):**
+
+| Feature | Coefficient | Interpretation |
+|---|---|---|
+| arriving_fullness | +4.03 | Each 100% fullness increase adds 4 min to turnaround |
+| outbound_fullness | +0.69 | Each 100% fullness increase adds 0.7 min |
+| minutes_until_next_scheduled | +0.30 | Each extra min of slack adds 0.3 min (crews use available time) |
+| route_code (sea-bi=1) | -1.50 | Sea-bi turnarounds are 1.5 min faster than ed-king |
+| hour_of_day | +0.09 | Negligible |
+| (intercept) | 12.58 | Baseline turnaround with empty vessel and no slack |
+
+Key insight: **unloading is 6x more important than loading** (4.03 vs 0.69). Vehicles drive off in a controlled stream but drive on in order — unloading time dominates. Also, **crews use available slack** — each extra minute of schedule gap adds 0.3 min to actual turnaround.
+
+**Model B — HistGBT quantile pair (max_iter=100, max_depth=4):**
+Directly predicts p10 and p75 turnaround quantiles. No linear assumption.
+
+**Results (all with hard p10 floor to prevent howlers):**
+
+| Approach | MAE | Bias | ±3min | ±5min | Missed | Howlers |
+|---|---|---|---|---|---|---|
+| Fixed p75 ceiling | 2.26 | -0.3 | 78.3% | 88.5% | 6.8% | 0 |
+| Linear model | 2.37 | -0.7 | 77.5% | 87.8% | 9.0% | 0 |
+| **GBT model** | **2.20** | **-0.5** | **79.2%** | **89.4%** | 7.4% | **0** |
+
+**By delay bucket:**
+
+| Delay | Fixed p75 MAE | Linear MAE | GBT MAE |
+|---|---|---|---|
+| On-time (≤1) | 1.64 | 1.63 | 1.64 |
+| Minor (1–5) | 1.37 | 1.34 | **1.31** |
+| Moderate (5–15) | 3.74 | **3.50** | 3.57 |
+| Major (15+) | **6.53** | 8.34 | 6.61 |
+
+**Verdict:**
+- **GBT wins overall** — MAE 2.20 beats fixed percentiles (2.26) by 3%, zero howlers, best ±3min (79.2%)
+- **Linear disappoints** — MAE 2.37 is worse than fixed percentiles despite R²=0.387. The residual quantile approach produces bounds that are too wide, causing over-correction especially on major delays (MAE 8.34)
+- GBT's advantage is on minor/moderate delays where vehicle load actually matters
+- The tradeoff: GBT model adds complexity (need vehicle data at prediction time + trained model) for a 3% MAE improvement over fixed percentiles
+
+**Report:** [eta_deep_dive_2026-04-05.md](eta_deep_dive_2026-04-05.md)
+
+---
+
+### 34. Dock Model Value Test (Negative Result)
+
+Tested whether the production at-dock model (HistGBT quantile, 11 features) adds value over simply persisting Option A's last en-route prediction through docking.
+
+**Setup:** For each of 18,352 next-sailing pairs, compared:
+1. **Option A persisted** — last en-route conditional ceiling prediction, frozen when vessel docks
+2. **Option A + dock model** — transitions to dock model prediction (q33 quantile) once vessel is at dock
+
+The dock model matches the production `at_dock_model.py` architecture: HistGBT with 11 features including `minutes_at_dock`, `current_fullness`, `incoming_vehicle_fullness`, `minutes_until_scheduled_departure`, trained on 107K at-dock snapshots.
+
+**Aggregate results (n=16,774 pairs with both predictions):**
+
+| Approach | MAE | Bias |
+|---|---|---|
+| **Option A persisted** | **2.29** | -0.42 |
+| Dock model (last snapshot) | 2.43 | -0.20 |
+
+**By delay bucket:**
+
+| Delay | Option A MAE | Dock MAE | Δ |
+|---|---|---|---|
+| On-time (≤1) | 1.61 | 1.71 | -0.09 |
+| Minor (1–5) | 1.32 | 1.43 | -0.11 |
+| Moderate (5–15) | 3.86 | 4.10 | -0.23 |
+| Major (15+) | 7.07 | 7.27 | -0.20 |
+
+**By route:**
+
+| Route | Option A MAE | Dock MAE | Δ |
+|---|---|---|---|
+| sea-bi | 2.58 | 2.73 | -0.16 |
+| ed-king | 2.03 | 2.15 | -0.12 |
+
+**Head-to-head:** Option A wins 8,583 / Dock wins 8,191 / Ties 0.
+
+Option A persisted beats the dock model across **every delay bucket** and **both routes**.
+
+**Why the dock model loses:** Option A uses the last en-route ETA, which updates continuously during crossing. By the time a boat docks — even late — Option A has already incorporated that information through the floor/ceiling mechanism. The dock model's features (`minutes_at_dock`, `current_fullness`) don't add meaningful signal beyond what the ETA already encoded. The dock model's `current_vessel_delay_minutes` feature dominates its predictions, so it essentially echoes back the departure delay without the benefit of ETA-based bounds.
+
+**Timeline analysis** confirmed this across five scenarios (howler, recovery, persistent, dock-better, option-a-better). In the one scenario where the dock model won, the boat arrived on time but had a slow turnaround — a rare case that doesn't move the aggregate.
+
+**Verdict: Drop the at-dock model for next-sailing prediction.** Persist Option A's last en-route prediction through docking. Simpler, more accurate, one less model to maintain.
+
+**Script:** `scripts/backtest_dock_value.py`
+
+*Add new experiments above the Recommendation section.*

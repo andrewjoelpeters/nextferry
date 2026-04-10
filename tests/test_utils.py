@@ -2,7 +2,6 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from backend.utils import (
-    format_confidence_text,
     format_delay_text,
     format_time_until,
     is_peak_hour,
@@ -90,22 +89,6 @@ class TestFormatDelayText:
         text, status = format_delay_text(-3)
         assert text == " (-3m)"
         assert status == "status-early"
-
-
-class TestFormatConfidenceText:
-    def test_none_bounds(self):
-        assert format_confidence_text(None, None) == ""
-        assert format_confidence_text(None, 5) == ""
-        assert format_confidence_text(5, None) == ""
-
-    def test_zero_bounds(self):
-        assert format_confidence_text(0, 0) == ""
-
-    def test_positive_bounds(self):
-        assert format_confidence_text(1, 5) == "(+1 to +5m)"
-
-    def test_mixed_bounds(self):
-        assert format_confidence_text(-2, 5) == "(-2 to +5m)"
 
 
 class TestIsPeakHour:

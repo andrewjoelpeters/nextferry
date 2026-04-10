@@ -23,10 +23,8 @@ from .database import (
     init_db,
 )
 from .display_processing import process_routes_for_display
-from .dock_predictor import dock_predictor
 from .fill_predictor import fill_predictor
 from .metrics import track_request
-from .ml_predictor import predictor as ml_predictor
 from .next_sailings import (
     CACHED_DELAYS,
     get_last_predictions,
@@ -71,40 +69,10 @@ async def update_sailings_cache():
         await asyncio.sleep(30)
 
 
-async def retrain_model_daily():
-    """Background task to load/train ML models, then retrain daily at 2 AM Pacific."""
-    # On startup, try to load saved models from volume
-    logger.info("Attempting to load saved ML models...")
-    ml_predictor.load()
+async def retrain_fill_model_daily():
+    """Background task to load/train fill risk model, then retrain daily at 2 AM Pacific."""
+    logger.info("Attempting to load saved fill risk model...")
     fill_predictor.load()
-    dock_predictor.load()
-
-    # If no models found, try an immediate background train
-    if not ml_predictor.is_trained:
-        logger.info("No delay model found, attempting background train...")
-        try:
-            if ml_predictor.train():
-                ml_predictor.save()
-                logger.info(
-                    f"Initial delay model trained on {ml_predictor.training_data_size} rows"
-                )
-            else:
-                logger.info("Delay model training skipped (insufficient data)")
-        except Exception as e:
-            logger.error(f"Initial delay model training failed: {e}")
-
-    if not dock_predictor.is_trained:
-        logger.info("No at-dock model found, attempting background train...")
-        try:
-            if dock_predictor.train():
-                dock_predictor.save()
-                logger.info(
-                    f"Initial at-dock model trained on {dock_predictor.training_data_size} rows"
-                )
-            else:
-                logger.info("At-dock model training skipped (insufficient data)")
-        except Exception as e:
-            logger.error(f"Initial at-dock model training failed: {e}")
 
     if not fill_predictor.is_trained:
         logger.info("No fill risk model found, attempting background train...")
@@ -122,41 +90,28 @@ async def retrain_model_daily():
     while True:
         try:
             now = datetime.now(tz=ZoneInfo("America/Los_Angeles"))
-            # Calculate seconds until next 2 AM
             next_2am = now.replace(hour=2, minute=0, second=0, microsecond=0)
             if now.hour >= 2:
                 next_2am += timedelta(days=1)
             wait_seconds = (next_2am - now).total_seconds()
 
             logger.info(
-                f"Next model retrain scheduled in {wait_seconds / 3600:.1f} hours"
+                f"Next fill model retrain scheduled in {wait_seconds / 3600:.1f} hours"
             )
             await asyncio.sleep(wait_seconds)
 
-            logger.info("Starting daily model retraining...")
-            if ml_predictor.train():
-                ml_predictor.save()
-                logger.info(
-                    f"Delay model retrained on {ml_predictor.training_data_size} rows"
-                )
-
+            logger.info("Starting daily fill model retraining...")
             if fill_predictor.train():
                 fill_predictor.save()
                 logger.info(
                     f"Fill risk model retrained on {fill_predictor.training_data_size} sailings"
                 )
 
-            if dock_predictor.train():
-                dock_predictor.save()
-                logger.info(
-                    f"At-dock model retrained on {dock_predictor.training_data_size} rows"
-                )
-
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.error(f"Model retraining failed: {e}")
-            await asyncio.sleep(3600)  # retry in 1 hour on error
+            logger.error(f"Fill model retraining failed: {e}")
+            await asyncio.sleep(3600)
 
 
 @asynccontextmanager
@@ -182,8 +137,8 @@ async def lifespan(app: FastAPI):
         logger.info("Starting data collector background tasks")
         tasks.append(asyncio.create_task(collect_data()))
 
-        logger.info("Starting ML model retraining task")
-        tasks.append(asyncio.create_task(retrain_model_daily()))
+        logger.info("Starting fill model retraining task")
+        tasks.append(asyncio.create_task(retrain_fill_model_daily()))
     else:
         logger.info("Replay mode: skipping data collector and model retraining")
 
@@ -355,28 +310,8 @@ async def debug_cache_status():
 
 @app.get("/debug/model-status")
 async def debug_model_status():
-    """Debug endpoint showing ML model status and evaluation metrics."""
+    """Debug endpoint showing model status."""
     return {
-        "delay_model": {
-            "is_trained": ml_predictor.is_trained,
-            "last_trained": (
-                ml_predictor.last_trained.isoformat()
-                if ml_predictor.last_trained
-                else None
-            ),
-            "training_data_size": ml_predictor.training_data_size,
-            "evaluation_metrics": ml_predictor.last_evaluation,
-        },
-        "dock_model": {
-            "is_trained": dock_predictor.is_trained,
-            "last_trained": (
-                dock_predictor.last_trained.isoformat()
-                if dock_predictor.last_trained
-                else None
-            ),
-            "training_data_size": dock_predictor.training_data_size,
-            "evaluation_metrics": dock_predictor.last_evaluation,
-        },
         "fill_risk_model": {
             "is_trained": fill_predictor.is_trained,
             "last_trained": (

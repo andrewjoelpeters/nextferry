@@ -6,6 +6,8 @@ from backend.next_sailings import (
     get_next_sailings_by_boat,
     get_route_schedule_by_boat,
     get_route_vessels,
+    predict_eta_bounded_delay,
+    propigate_delays,
 )
 from backend.serializers import (
     DirectionalSailing,
@@ -240,3 +242,76 @@ class TestGetDirectionalSchedules:
         result = get_directional_schedules({1: [s1, s2]})
         times = result[0].times
         assert times[0].scheduled_departure < times[1].scheduled_departure
+
+
+class TestPredictEtaBoundedDelay:
+    def test_low_delay_floor_only(self):
+        """Delay ≤ threshold: floor clamp applies, no ceiling."""
+        eta = datetime(2026, 4, 9, 15, 43, tzinfo=PT)
+        sched = datetime(2026, 4, 9, 15, 45, tzinfo=PT)
+        # ETA + 9.3min floor = 15:52.3, sched = 15:45 → floor = 7.3 → round(7.3)=7
+        # delay=2 < 4 → result = max(2, 7) = 7
+        result = predict_eta_bounded_delay(2, eta, sched, "sea-bi")
+        assert result == 7
+
+    def test_high_delay_ceiling_fires(self):
+        """Delay > threshold: ceiling caps the prediction."""
+        eta = datetime(2026, 4, 9, 15, 40, tzinfo=PT)
+        sched = datetime(2026, 4, 9, 15, 45, tzinfo=PT)
+        # floor = (15:40 + 9.3 - 15:45) = 4.3 min
+        # ceiling = (15:40 + 22 - 15:45) = 17 min
+        # delay=18 > 4 → result = max(4.3, min(18, 17)) = max(4.3, 17) = 17
+        result = predict_eta_bounded_delay(18, eta, sched, "sea-bi")
+        assert result == 17
+
+    def test_on_time_returns_zero(self):
+        """On-time vessel with early ETA → 0 delay."""
+        eta = datetime(2026, 4, 9, 15, 30, tzinfo=PT)
+        sched = datetime(2026, 4, 9, 15, 45, tzinfo=PT)
+        # floor = (15:30 + 9.3 - 15:45) = -5.7 → clamped to 0
+        # delay=0 ≤ 4 → result = max(0, 0) = 0
+        result = predict_eta_bounded_delay(0, eta, sched, "sea-bi")
+        assert result == 0
+
+    def test_unknown_route_returns_none(self):
+        """Unknown route falls back gracefully."""
+        eta = datetime(2026, 4, 9, 15, 43, tzinfo=PT)
+        sched = datetime(2026, 4, 9, 15, 45, tzinfo=PT)
+        result = predict_eta_bounded_delay(5, eta, sched, "unknown-route")
+        assert result is None
+
+    def test_floor_never_negative(self):
+        """Very early ETA still produces non-negative floor."""
+        eta = datetime(2026, 4, 9, 15, 0, tzinfo=PT)
+        sched = datetime(2026, 4, 9, 15, 45, tzinfo=PT)
+        # floor = (15:00 + 9.3 - 15:45) = -35.7 → clamped to 0
+        result = predict_eta_bounded_delay(0, eta, sched, "sea-bi")
+        assert result == 0
+
+    def test_edmonds_kingston_route(self):
+        """Ed-King route uses different turnaround constants."""
+        eta = datetime(2026, 4, 9, 15, 43, tzinfo=PT)
+        sched = datetime(2026, 4, 9, 15, 45, tzinfo=PT)
+        # floor = (15:43 + 14.8 - 15:45) = 12.8 → round = 13
+        # delay=3 ≤ 4 → result = max(3, 13) = 13
+        result = predict_eta_bounded_delay(3, eta, sched, "ed-king")
+        assert result == 13
+
+
+class TestPropigateDelaysZeroDelay:
+    """Verify timedelta(0) is treated as a real delay, not skipped."""
+
+    def test_zero_delay_propagates(self):
+        """timedelta(0) should set delay_in_minutes=0 on all sailings."""
+        sailings = [
+            _make_directional_sailing(10),
+            _make_directional_sailing(40),
+        ]
+        result = propigate_delays(timedelta(0), sailings)
+        assert all(s.delay_in_minutes == 0 for s in result)
+
+    def test_none_delay_skips_propagation(self):
+        """None delay should leave sailings untouched."""
+        sailings = [_make_directional_sailing(10)]
+        result = propigate_delays(None, sailings)
+        assert result[0].delay_in_minutes is None

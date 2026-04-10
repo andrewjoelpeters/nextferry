@@ -33,7 +33,6 @@ class TestShouldTrack:
         assert _should_track("/") is True
         assert _should_track("/sailings-tab") is True
         assert _should_track("/map-tab") is True
-        assert _should_track("/predictions-tab") is True
         assert _should_track("/metrics-tab") is True
 
 

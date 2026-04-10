@@ -16,7 +16,6 @@ from fastapi.templating import Jinja2Templates
 
 from .data_collector import collect_data
 from .database import (
-    get_dashboard_data,
     get_docked_since,
     get_metrics_data,
     get_sailing_event_count,
@@ -38,7 +37,7 @@ from .utils import datetime_to_minutes
 
 logger = logging.getLogger(__name__)
 
-# Global cache - shared by all users
+# Global caches - shared by all users
 _sailings_cache: dict[str, Any] | None = None
 
 
@@ -49,9 +48,13 @@ async def update_sailings_cache():
     while True:
         try:
             logger.info("Updating shared sailings cache")
-            routes_data = get_next_sailings()
-            space_lookup = get_sailing_space_lookup()
-            processed_routes = process_routes_for_display(routes_data, space_lookup)
+
+            def _build_cache():
+                routes_data = get_next_sailings()
+                space_lookup = get_sailing_space_lookup()
+                return process_routes_for_display(routes_data, space_lookup)
+
+            processed_routes = await asyncio.to_thread(_build_cache)
 
             _sailings_cache = {
                 "routes": processed_routes,
@@ -125,7 +128,7 @@ async def lifespan(app: FastAPI):
 
     tasks = []
 
-    # Start background task on startup
+    # Start background tasks on startup
     logger.info("Starting sailings cache background task")
     tasks.append(asyncio.create_task(update_sailings_cache()))
 
@@ -277,38 +280,10 @@ async def get_ferry_positions():
 
 @app.get("/sailings-tab", response_class=HTMLResponse)
 async def get_sailings_tab(request: Request):
-    """Return the sailings tab content"""
+    """Return the sailings tab content."""
     return templates.TemplateResponse(
         "sailings_tab_fragment.html", {"request": request}
     )
-
-
-@app.get("/predictions-tab", response_class=HTMLResponse)
-async def get_predictions_tab(request: Request):
-    """Return the predictions dashboard tab content."""
-    return templates.TemplateResponse(
-        "predictions_tab_fragment.html", {"request": request}
-    )
-
-
-@app.get("/predictions-data")
-async def get_predictions_data():
-    """Return dashboard data as JSON for chart rendering."""
-    dashboard = get_dashboard_data()
-
-    model_info = {
-        "fill_model": {
-            "is_trained": fill_predictor.is_trained,
-            "last_trained": (
-                fill_predictor.last_trained.isoformat()
-                if fill_predictor.last_trained
-                else None
-            ),
-            "training_data_size": fill_predictor.training_data_size,
-        },
-    }
-
-    return {**dashboard, "model": model_info}
 
 
 @app.get("/metrics-data")

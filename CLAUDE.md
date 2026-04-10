@@ -42,7 +42,7 @@ uv run mypy backend/
 
 **Data flow:** WSDOT API → Pydantic serializers → SQLite (`data/ferry.db`) → `next_sailings.py` computes delays (ETA-bounded prediction) → `display_processing.py` formats for templates → Jinja2 HTMX fragments
 
-**Frontend (`templates/` + `static/`):** Server-rendered HTML fragments loaded on-demand via HTMX `hx-get`. No client-side framework. Leaflet for maps, Chart.js for charts (both via CDN). PWA with service worker for ferry arrival notifications.
+**Frontend (`templates/` + `static/`):** Server-rendered HTML fragments loaded on-demand via HTMX `hx-get`. No client-side framework. Leaflet for maps (via CDN). PWA with service worker for ferry arrival notifications.
 
 **Delay prediction (`backend/next_sailings.py`):**
 - `predict_eta_bounded_delay()` — stateless ETA-bounded algorithm using floor (p10 turnaround) + conditional ceiling (p75 turnaround when delay > 4 min)

@@ -71,19 +71,6 @@ def datetime_to_minutes(dt: timedelta) -> int:
     return int(dt.total_seconds() // 60)
 
 
-def format_confidence_text(lower_bound: int | None, upper_bound: int | None) -> str:
-    """Format the confidence interval as display text, e.g. '(+1 to +5m)'."""
-    if lower_bound is None or upper_bound is None:
-        return ""
-    if lower_bound == 0 and upper_bound == 0:
-        return ""
-
-    def fmt(val):
-        return f"+{val}" if val >= 0 else str(val)
-
-    return f"({fmt(lower_bound)} to {fmt(upper_bound)}m)"
-
-
 def minutes_until(dt: datetime) -> float:
     """Minutes from now until dt. Returns 0 if dt is in the past."""
     now = current_time()

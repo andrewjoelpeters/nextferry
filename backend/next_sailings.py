@@ -91,7 +91,7 @@ def get_vessels_with_delays():
             if v.scheduled_departure and v.left_dock
             else None
         )
-        if vessel_delay:
+        if vessel_delay is not None:
             logging.debug(
                 f"Updating cache to show {vessel_delay} delay for {v.vessel_name}"
             )
@@ -179,7 +179,7 @@ def predict_eta_bounded_delay(
     eta: datetime,
     scheduled_departure: datetime,
     route_abbrev: str,
-) -> float | None:
+) -> int | None:
     """Predict next-sailing delay using ETA + turnaround bounds.
 
     Floor: earliest departure = ETA + fastest turnaround (p10).
@@ -211,7 +211,7 @@ def propigate_delays(
     vessel_name: str | None = None,
 ) -> list[DirectionalSailing]:
     """Apply flat delay propagation to all sailings."""
-    if not delay:
+    if delay is None:
         return sailings
 
     delay_minutes = datetime_to_minutes(delay)
@@ -327,7 +327,7 @@ def get_next_sailings_by_boat(
 
         # Step 2: ETA-bounded override for first opposite-terminal sailing
         # Only fires when vessel is en-route with an ETA
-        if vessel and not vessel.at_dock and vessel.eta and vessel.delay:
+        if vessel and not vessel.at_dock and vessel.eta and vessel.delay is not None:
             delay_minutes = datetime_to_minutes(vessel.delay)
             for i, s in enumerate(next_sailings):
                 if (

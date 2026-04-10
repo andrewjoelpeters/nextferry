@@ -7,6 +7,7 @@ from backend.next_sailings import (
     get_route_schedule_by_boat,
     get_route_vessels,
     predict_eta_bounded_delay,
+    propigate_delays,
 )
 from backend.serializers import (
     DirectionalSailing,
@@ -295,3 +296,22 @@ class TestPredictEtaBoundedDelay:
         # delay=3 ≤ 4 → result = max(3, 13) = 13
         result = predict_eta_bounded_delay(3, eta, sched, "ed-king")
         assert result == 13
+
+
+class TestPropigateDelaysZeroDelay:
+    """Verify timedelta(0) is treated as a real delay, not skipped."""
+
+    def test_zero_delay_propagates(self):
+        """timedelta(0) should set delay_in_minutes=0 on all sailings."""
+        sailings = [
+            _make_directional_sailing(10),
+            _make_directional_sailing(40),
+        ]
+        result = propigate_delays(timedelta(0), sailings)
+        assert all(s.delay_in_minutes == 0 for s in result)
+
+    def test_none_delay_skips_propagation(self):
+        """None delay should leave sailings untouched."""
+        sailings = [_make_directional_sailing(10)]
+        result = propigate_delays(None, sailings)
+        assert result[0].delay_in_minutes is None

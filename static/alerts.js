@@ -279,7 +279,8 @@
     // doesn't clip the picker on mobile.
     const btnRect = btn.getBoundingClientRect();
     const pickerWidth = 220;
-    const left = Math.max(8, Math.min(btnRect.right - pickerWidth, window.innerWidth - pickerWidth - 8));
+    const edgeMargin = 8; // minimum gap from viewport edges
+    const left = Math.max(edgeMargin, Math.min(btnRect.right - pickerWidth, window.innerWidth - pickerWidth - edgeMargin));
     const top = btnRect.bottom + 4;
     picker.style.position = 'fixed';
     picker.style.left = left + 'px';

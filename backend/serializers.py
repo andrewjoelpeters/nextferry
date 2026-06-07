@@ -170,6 +170,9 @@ class RouteSailing(BaseModel):
     inbound_vessel_from_terminal: str | None = None
     inbound_vessel_scheduled_departure: datetime | None = None
     inbound_vessel_delay_minutes: int | None = None
+    # Estimated arrival at our terminal, derived from crossing-time constants when
+    # WSDOT has not yet provided an ETA (vessel still at dock).
+    inbound_vessel_estimated_arrival: datetime | None = None
 
 
 class DirectionalSailing(RouteSailing):
@@ -199,6 +202,7 @@ class DirectionalSailing(RouteSailing):
                     "inbound_vessel_from_terminal",
                     "inbound_vessel_scheduled_departure",
                     "inbound_vessel_delay_minutes",
+                    "inbound_vessel_estimated_arrival",
                 }
             )
         )

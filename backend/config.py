@@ -12,3 +12,10 @@ ROUTES = [
         "route_name": "ed-king",
     },
 ]
+
+# Approximate crossing times in minutes, used to estimate inbound vessel arrival
+# when WSDOT does not yet provide an ETA (vessel still at dock).
+CROSSING_TIME_MINUTES = {
+    "sea-bi": 35,
+    "ed-king": 25,
+}

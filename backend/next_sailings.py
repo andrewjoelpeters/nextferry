@@ -3,7 +3,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from backend.config import ROUTES
+from backend.config import CROSSING_TIME_MINUTES, ROUTES
 
 from .database import get_docked_since
 from .replay import current_time
@@ -395,6 +395,29 @@ def get_next_sailings_by_boat(
                             vessel.scheduled_departure
                         )
                         s.inbound_vessel_delay_minutes = vessel_first_delay
+                        # Estimate arrival at our terminal using route crossing time.
+                        # WSDOT only provides an ETA once the vessel is en route, so
+                        # while it's still docked we compute our own estimate so the
+                        # frontend can show a complete departure chain without needing
+                        # any conditional display logic.
+                        if vessel.scheduled_departure:
+                            inbound_predicted_dep = (
+                                vessel.scheduled_departure
+                                + timedelta(minutes=vessel_first_delay or 0)
+                            )
+                            route_abbrev = _route_abbrev_for_terminal(
+                                s.departing_terminal_id
+                            )
+                            crossing_mins = (
+                                CROSSING_TIME_MINUTES.get(route_abbrev)
+                                if route_abbrev
+                                else None
+                            )
+                            if crossing_mins is not None:
+                                s.inbound_vessel_estimated_arrival = (
+                                    inbound_predicted_dep
+                                    + timedelta(minutes=crossing_mins)
+                                )
                     else:
                         s.inbound_vessel_left_dock = vessel.left_dock
                         s.inbound_vessel_eta = vessel.eta

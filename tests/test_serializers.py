@@ -105,3 +105,27 @@ class TestDirectionalSailing:
         )
         route_sailing = sailing.to_route_sailing()
         assert route_sailing.inbound_vessel_delay_minutes == 10
+
+    def test_to_route_sailing_preserves_inbound_estimated_arrival(self):
+        """inbound_vessel_estimated_arrival must be transferred so the template can show
+        the crossing-time-derived ETA when WSDOT hasn't yet provided one."""
+        from datetime import timedelta
+
+        sched = datetime(2024, 1, 1, 9, 45, tzinfo=PT)
+        estimated_arrival = sched + timedelta(minutes=35)
+        sailing = DirectionalSailing(
+            departing_terminal_id=3,
+            arriving_terminal_id=7,
+            departing_terminal_name="Seattle",
+            arriving_terminal_name="Bainbridge Island",
+            scheduled_departure=datetime(2024, 1, 1, 10, 30, tzinfo=PT),
+            vessel_name="Walla Walla",
+            vessel_position_num=1,
+            inbound_vessel_name="Wenatchee",
+            inbound_vessel_at_dock=True,
+            inbound_vessel_from_terminal="Bainbridge Island",
+            inbound_vessel_scheduled_departure=sched,
+            inbound_vessel_estimated_arrival=estimated_arrival,
+        )
+        route_sailing = sailing.to_route_sailing()
+        assert route_sailing.inbound_vessel_estimated_arrival == estimated_arrival

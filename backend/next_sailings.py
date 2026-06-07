@@ -403,7 +403,11 @@ def get_next_sailings_by_boat(
                         if vessel.scheduled_departure:
                             inbound_predicted_dep = (
                                 vessel.scheduled_departure
-                                + timedelta(minutes=vessel_first_delay or 0)
+                                + timedelta(
+                                    minutes=vessel_first_delay
+                                    if vessel_first_delay is not None
+                                    else 0
+                                )
                             )
                             route_abbrev = _route_abbrev_for_terminal(
                                 s.departing_terminal_id

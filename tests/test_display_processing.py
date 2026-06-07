@@ -289,9 +289,13 @@ class TestProcessRoutesForDisplay:
         lines = displayed["inbound_detail_lines"]
         assert len(lines) == 2
         assert "Bainbridge Island" in lines[0]["text"]
-        # Second line should reference the estimated arrival
-        assert "(est.)" in lines[1]["text"]
-        assert "Seattle" in lines[1]["text"]
+        # Second line: "Expected to arrive Seattle ~HH:MM (est.), expected departure HH:MM"
+        estimated_arr_str = estimated_arr.strftime("%I:%M %p").lstrip("0")
+        assert (
+            f"Expected to arrive Seattle ~{estimated_arr_str} (est.)"
+            in lines[1]["text"]
+        )
+        assert "expected departure" in lines[1]["text"]
 
     def test_inbound_at_dock_wsdot_eta_preferred_over_estimate(self):
         """When WSDOT provides an ETA, it is shown instead of the crossing-time estimate."""

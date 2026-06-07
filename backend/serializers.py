@@ -198,6 +198,7 @@ class DirectionalSailing(RouteSailing):
                     "inbound_vessel_eta",
                     "inbound_vessel_from_terminal",
                     "inbound_vessel_scheduled_departure",
+                    "inbound_vessel_delay_minutes",
                 }
             )
         )

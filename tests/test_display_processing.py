@@ -221,3 +221,50 @@ class TestProcessRoutesForDisplay:
 
         displayed = result[0]["schedules"][0]["sailings"][0]
         assert displayed["fill_risk"] is None
+
+    def test_inbound_at_dock_shows_predicted_departure_when_delayed(self):
+        """When inbound vessel is at dock with a delay, predicted_departure should reflect
+        the adjusted time (scheduled + delay), not the raw scheduled departure."""
+        now = datetime.now(PT)
+        inbound_sched = now + timedelta(minutes=5)
+        sailing = _make_sailing(60)
+        sailing.inbound_vessel_name = "Wenatchee"
+        sailing.inbound_vessel_at_dock = True
+        sailing.inbound_vessel_from_terminal = "Bainbridge Island"
+        sailing.inbound_vessel_scheduled_departure = inbound_sched
+        sailing.inbound_vessel_delay_minutes = 15
+
+        route = _make_route([sailing])
+        result = process_routes_for_display([route])
+
+        inbound_info = result[0]["schedules"][0]["sailings"][0]["inbound_info"]
+        assert inbound_info is not None
+        assert inbound_info["at_dock"] is True
+        # predicted_departure should be scheduled + 15 min delay
+        expected_predicted = (
+            (inbound_sched + timedelta(minutes=15)).strftime("%I:%M %p").lstrip("0")
+        )
+        assert inbound_info["predicted_departure"] == expected_predicted
+        # scheduled_departure should still be the raw scheduled time
+        expected_scheduled = inbound_sched.strftime("%I:%M %p").lstrip("0")
+        assert inbound_info["scheduled_departure"] == expected_scheduled
+
+    def test_inbound_at_dock_no_delay_shows_scheduled_as_predicted(self):
+        """When inbound vessel is at dock with no delay, predicted_departure is None
+        and scheduled_departure provides the expected departure time."""
+        now = datetime.now(PT)
+        inbound_sched = now + timedelta(minutes=10)
+        sailing = _make_sailing(60)
+        sailing.inbound_vessel_name = "Wenatchee"
+        sailing.inbound_vessel_at_dock = True
+        sailing.inbound_vessel_from_terminal = "Bainbridge Island"
+        sailing.inbound_vessel_scheduled_departure = inbound_sched
+
+        route = _make_route([sailing])
+        result = process_routes_for_display([route])
+
+        inbound_info = result[0]["schedules"][0]["sailings"][0]["inbound_info"]
+        assert inbound_info is not None
+        assert inbound_info["predicted_departure"] is None
+        expected_scheduled = inbound_sched.strftime("%I:%M %p").lstrip("0")
+        assert inbound_info["scheduled_departure"] == expected_scheduled

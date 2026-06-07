@@ -86,3 +86,22 @@ class TestDirectionalSailing:
             not hasattr(route_sailing, "departing_terminal_id")
             or "departing_terminal_id" not in route_sailing.model_fields
         )
+
+    def test_to_route_sailing_preserves_inbound_delay_minutes(self):
+        """inbound_vessel_delay_minutes must be transferred so predicted departure is computed."""
+        sailing = DirectionalSailing(
+            departing_terminal_id=3,
+            arriving_terminal_id=7,
+            departing_terminal_name="Seattle",
+            arriving_terminal_name="Bainbridge Island",
+            scheduled_departure=datetime(2024, 1, 1, 10, 0, tzinfo=PT),
+            vessel_name="Walla Walla",
+            vessel_position_num=1,
+            inbound_vessel_name="Wenatchee",
+            inbound_vessel_at_dock=True,
+            inbound_vessel_from_terminal="Bainbridge Island",
+            inbound_vessel_scheduled_departure=datetime(2024, 1, 1, 9, 45, tzinfo=PT),
+            inbound_vessel_delay_minutes=10,
+        )
+        route_sailing = sailing.to_route_sailing()
+        assert route_sailing.inbound_vessel_delay_minutes == 10

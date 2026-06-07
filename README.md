@@ -62,4 +62,4 @@ To deploy this application to Railway, you will need to:
 2. **Link your GitHub repository to the project.**
 3. **Add the `WSDOT_API_KEY` as a secret in your Railway project.**
 
-Railway will then automatically build and deploy the application. The `startCommand` in the `railway.toml` file is configured to run the application using `uvicorn`.
+Railway will then automatically build and deploy the application. The `startCommand` in the `railway.toml` file is configured to run the application using `uvicorn`, and the repository-level `nixpacks.toml` pins the `uv` version needed for Nixpacks builds.

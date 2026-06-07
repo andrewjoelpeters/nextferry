@@ -20,6 +20,155 @@ def _get_route_abbrev(departing_terminal_id: int) -> str:
     return "unknown"
 
 
+def _build_vessel_detail_lines(
+    vessel_info: dict,
+    departing_terminal_name: str,
+    arriving_terminal_name: str,
+    departed: bool,
+) -> list[dict]:
+    """Build pre-formatted detail lines for the outbound vessel's live status.
+
+    Returns a list of dicts with keys:
+      - ``text``: the display string
+      - ``css_class``: optional extra CSS class(es) for the span (empty string = none)
+    """
+    lines: list[dict] = []
+    if not vessel_info:
+        return lines
+
+    key = vessel_info.get("vessel_status_key")
+
+    if key == "at_dock":
+        docked_at = vessel_info.get("docked_at")
+        docked_duration = vessel_info.get("docked_duration")
+        predicted_departure = vessel_info.get("predicted_departure")
+        overdue = vessel_info.get("overdue")
+        minutes_overdue = vessel_info.get("minutes_overdue")
+
+        if overdue:
+            # Show dock time without expected departure, then two overdue lines
+            if docked_at:
+                dock_str = f"Docked at {docked_at}"
+                if docked_duration:
+                    dock_str += f" ({docked_duration})"
+            else:
+                dock_str = "Docked"
+            lines.append({"text": dock_str, "css_class": ""})
+            if predicted_departure:
+                lines.append(
+                    {
+                        "text": f"Predicted departure: {predicted_departure}",
+                        "css_class": "detail-overdue",
+                    }
+                )
+            lines.append(
+                {
+                    "text": f"Expected to depart {minutes_overdue}m ago — status uncertain",
+                    "css_class": "overdue-alert",
+                }
+            )
+        else:
+            if docked_at:
+                dock_str = f"Docked at {docked_at}"
+                if docked_duration:
+                    dock_str += f" ({docked_duration})"
+            else:
+                dock_str = "Docked"
+            if predicted_departure:
+                dock_str += f", expected to depart {departing_terminal_name} at {predicted_departure}"
+            lines.append({"text": dock_str, "css_class": ""})
+
+    elif key == "en_route":
+        left_dock = vessel_info.get("left_dock")
+        departure_delay = vessel_info.get("departure_delay")
+
+        if left_dock:
+            # Departed sailings left from the departing terminal; upcoming sailings
+            # have the vessel crossing from the arriving terminal toward us.
+            other_terminal = (
+                departing_terminal_name if departed else arriving_terminal_name
+            )
+            line = f"Left {other_terminal}: {left_dock}"
+            if departure_delay:
+                line += f" ({departure_delay})"
+            lines.append({"text": line, "css_class": ""})
+
+    return lines
+
+
+def _build_inbound_detail_lines(
+    inbound_info: dict | None,
+    departing_terminal_name: str,
+    estimated_departure: str,
+    departed: bool,
+) -> list[dict]:
+    """Build pre-formatted detail lines for the inbound vessel's live status.
+
+    Returns a list of dicts with keys:
+      - ``text``: the display string
+      - ``css_class``: optional extra CSS class(es) for the span (empty string = none)
+    """
+    lines: list[dict] = []
+    if not inbound_info:
+        return lines
+
+    at_dock = inbound_info.get("at_dock")
+    from_terminal = inbound_info.get("from_terminal", "")
+    vessel_name = inbound_info.get("vessel_name", "")
+    predicted_departure = inbound_info.get("predicted_departure")
+    scheduled_departure = inbound_info.get("scheduled_departure")
+    eta = inbound_info.get("eta")
+    estimated_arrival = inbound_info.get("estimated_arrival")
+    left_dock = inbound_info.get("left_dock")
+
+    if at_dock:
+        dep_str = predicted_departure or scheduled_departure or ""
+        line1 = f"Currently docked at {from_terminal}"
+        if dep_str:
+            line1 += f", expected departure {dep_str}"
+        lines.append({"text": line1, "css_class": ""})
+
+        # Second line bridges through to the departure the user cares about.
+        # Prefer the official WSDOT ETA; fall back to our crossing-time estimate.
+        if eta:
+            lines.append(
+                {
+                    "text": (
+                        f"Expected to arrive {departing_terminal_name} ~{eta},"
+                        f" expected departure {estimated_departure}"
+                    ),
+                    "css_class": "",
+                }
+            )
+        elif estimated_arrival and not departed:
+            lines.append(
+                {
+                    "text": (
+                        f"Expected to arrive {departing_terminal_name}"
+                        f" ~{estimated_arrival} (est.),"
+                        f" expected departure {estimated_departure}"
+                    ),
+                    "css_class": "",
+                }
+            )
+        elif not departed:
+            lines.append(
+                {
+                    "text": f"Expected departure from {departing_terminal_name} at {estimated_departure}",
+                    "css_class": "",
+                }
+            )
+    else:
+        line = f"{vessel_name} left {from_terminal}"
+        if left_dock:
+            line += f" at {left_dock}"
+        if eta:
+            line += f", arriving {departing_terminal_name} ~{eta}"
+        lines.append({"text": line, "css_class": ""})
+
+    return lines
+
+
 def _format_vessel_status(sailing) -> dict:
     """Build display info for the vessel's live status on the current sailing."""
     if sailing.vessel_at_dock is None:
@@ -274,7 +423,25 @@ def process_routes_for_display(
                             sailing.inbound_vessel_scheduled_departure
                         ),
                         "predicted_departure": _fmt_time(inbound_predicted_departure),
+                        # Our own arrival estimate, used when WSDOT has no ETA yet
+                        "estimated_arrival": _fmt_time(
+                            sailing.inbound_vessel_estimated_arrival
+                        ),
                     }
+
+                vessel_info = _format_vessel_status(sailing)
+                vessel_detail_lines = _build_vessel_detail_lines(
+                    vessel_info,
+                    schedule.departing_terminal_name,
+                    schedule.arriving_terminal_name,
+                    sailing.departed,
+                )
+                inbound_detail_lines = _build_inbound_detail_lines(
+                    inbound_info,
+                    schedule.departing_terminal_name,
+                    estimated_time_str,
+                    sailing.departed,
+                )
 
                 sailing_data = {
                     "time_until": time_until,
@@ -288,8 +455,10 @@ def process_routes_for_display(
                     "status_class": final_status,
                     "departed": sailing.departed,
                     "has_delay": has_delay,
-                    "vessel_info": _format_vessel_status(sailing),
+                    "vessel_info": vessel_info,
+                    "vessel_detail_lines": vessel_detail_lines,
                     "inbound_info": inbound_info,
+                    "inbound_detail_lines": inbound_detail_lines,
                     "capacity": capacity,
                     "departing_terminal_name": schedule.departing_terminal_name,
                     "scheduled_departure_iso": (

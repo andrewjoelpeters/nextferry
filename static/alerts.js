@@ -275,8 +275,16 @@
       picker.appendChild(cancelBtn);
     }
 
-    btn.closest('.vessel-live-info').style.position = 'relative';
-    btn.closest('.vessel-live-info').appendChild(picker);
+    // Append to body with fixed positioning so overflow:hidden on parent cards
+    // doesn't clip the picker on mobile.
+    const btnRect = btn.getBoundingClientRect();
+    const pickerWidth = 220;
+    const left = Math.max(8, Math.min(btnRect.right - pickerWidth, window.innerWidth - pickerWidth - 8));
+    const top = btnRect.bottom + 4;
+    picker.style.position = 'fixed';
+    picker.style.left = left + 'px';
+    picker.style.top = top + 'px';
+    document.body.appendChild(picker);
     input.focus();
     input.select();
 

@@ -1,6 +1,7 @@
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from backend.config import ROUTES
@@ -25,10 +26,10 @@ CACHED_DELAYS = {}
 # Stores the most recent prediction for every sailing across all vessels.
 # Keyed by vessel_id → list of sailing predictions (first = current/next).
 # Overwritten each cache cycle (~30s).
-_last_predictions: dict[int, list[dict]] = {}
+_last_predictions: dict[int, dict[str, Any]] = {}
 
 
-def get_last_predictions() -> dict[int, list[dict]]:
+def get_last_predictions() -> dict[int, dict[str, Any]]:
     return _last_predictions
 
 

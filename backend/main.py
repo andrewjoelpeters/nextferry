@@ -1,16 +1,18 @@
 import asyncio
 import contextlib
 import hashlib
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -36,6 +38,7 @@ from .sailing_space import get_sailing_space_lookup
 from .utils import datetime_to_minutes
 
 logger = logging.getLogger(__name__)
+GITHUB_NEW_ISSUE_URL = "https://github.com/andrewjoelpeters/nextferry/issues/new"
 
 # Global caches - shared by all users
 _sailings_cache: dict[str, Any] | None = None
@@ -187,6 +190,122 @@ ASSET_VERSION = _compute_asset_version()
 templates.env.globals["asset_version"] = ASSET_VERSION
 
 
+def _serialize_report_value(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: _serialize_report_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_serialize_report_value(v) for v in value]
+    return value
+
+
+def _find_prediction_report_context(
+    vessel_name: str | None,
+    scheduled_departure: str,
+    departing_terminal: str,
+    arriving_terminal: str,
+) -> dict[str, Any] | None:
+    last_predictions = get_last_predictions()
+
+    for vessel_prediction in last_predictions.values():
+        if vessel_name and vessel_prediction.get("vessel_name") != vessel_name:
+            continue
+
+        for sailing in vessel_prediction.get("sailings", []):
+            if (
+                sailing.get("scheduled_departure") == scheduled_departure
+                and sailing.get("departing") == departing_terminal
+                and sailing.get("arriving") == arriving_terminal
+            ):
+                return {
+                    "vessel_id": vessel_prediction.get("vessel_id"),
+                    "vessel_name": vessel_prediction.get("vessel_name"),
+                    "matched_sailing": sailing,
+                    "all_vessel_sailings": vessel_prediction.get("sailings", []),
+                }
+
+    if vessel_name:
+        for vessel_prediction in last_predictions.values():
+            if vessel_prediction.get("vessel_name") == vessel_name:
+                return {
+                    "vessel_id": vessel_prediction.get("vessel_id"),
+                    "vessel_name": vessel_prediction.get("vessel_name"),
+                    "matched_sailing": None,
+                    "all_vessel_sailings": vessel_prediction.get("sailings", []),
+                }
+
+    return None
+
+
+def _build_prediction_report_url(
+    route_name: str,
+    departing_terminal: str,
+    arriving_terminal: str,
+    scheduled_departure: str,
+    displayed_time: str,
+    time_until: str,
+    last_updated: str,
+    vessel_name: str | None = None,
+    delay_text: str | None = None,
+    referrer: str | None = None,
+) -> str:
+    replay_time = get_replay_time()
+    report_context = {
+        "reported_at": current_time().isoformat(),
+        "referrer": referrer,
+        "replay_time": replay_time.isoformat() if replay_time is not None else None,
+        "sailings_cache": (
+            {
+                "last_updated": _sailings_cache.get("last_updated"),
+                "cached_at": _sailings_cache.get("cached_at"),
+            }
+            if _sailings_cache
+            else None
+        ),
+        "reported_sailing": {
+            "route_name": route_name,
+            "departing_terminal": departing_terminal,
+            "arriving_terminal": arriving_terminal,
+            "scheduled_departure": scheduled_departure,
+            "displayed_time": displayed_time,
+            "time_until": time_until,
+            "delay_text": delay_text,
+            "vessel_name": vessel_name,
+            "last_updated_on_page": last_updated,
+        },
+        "prediction_debug": _find_prediction_report_context(
+            vessel_name=vessel_name,
+            scheduled_departure=scheduled_departure,
+            departing_terminal=departing_terminal,
+            arriving_terminal=arriving_terminal,
+        ),
+    }
+
+    issue_title = (
+        f"Prediction error: {route_name} {departing_terminal} → "
+        f"{arriving_terminal} {scheduled_departure[:16]}"
+    )
+    issue_body = "\n".join(
+        [
+            "## What looked wrong?",
+            "",
+            "<!-- Please briefly describe what you expected to see instead. -->",
+            "",
+            "## Captured app context",
+            "```json",
+            json.dumps(
+                _serialize_report_value(report_context),
+                indent=2,
+                sort_keys=True,
+                ensure_ascii=False,
+            ),
+            "```",
+        ]
+    )
+    return f"{GITHUB_NEW_ISSUE_URL}?{urlencode({'title': issue_title, 'body': issue_body})}"
+
+
 @app.get("/sw.js")
 async def service_worker():
     """Serve service worker from root scope for full app control"""
@@ -283,6 +402,36 @@ async def get_sailings_tab(request: Request):
     """Return the sailings tab content."""
     return templates.TemplateResponse(
         "sailings_tab_fragment.html", {"request": request}
+    )
+
+
+@app.get("/report-prediction-error", name="report_prediction_error")
+async def report_prediction_error(
+    request: Request,
+    route_name: str,
+    departing_terminal: str,
+    arriving_terminal: str,
+    scheduled_departure: str,
+    displayed_time: str,
+    time_until: str,
+    last_updated: str,
+    vessel_name: str | None = None,
+    delay_text: str | None = None,
+):
+    """Prefill a GitHub issue with the current prediction context."""
+    return RedirectResponse(
+        _build_prediction_report_url(
+            route_name=route_name,
+            departing_terminal=departing_terminal,
+            arriving_terminal=arriving_terminal,
+            scheduled_departure=scheduled_departure,
+            displayed_time=displayed_time,
+            time_until=time_until,
+            last_updated=last_updated,
+            vessel_name=vessel_name or None,
+            delay_text=delay_text,
+            referrer=request.headers.get("referer"),
+        )
     )
 
 

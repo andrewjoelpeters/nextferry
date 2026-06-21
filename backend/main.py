@@ -191,6 +191,7 @@ templates.env.globals["asset_version"] = ASSET_VERSION
 
 
 def _serialize_report_value(value: Any) -> Any:
+    """Recursively convert datetimes to ISO strings for JSON-safe report data."""
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, dict):

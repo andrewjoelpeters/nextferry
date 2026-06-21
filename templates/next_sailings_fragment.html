@@ -115,7 +115,7 @@
                                         <span class="alert-btn-label">Report prediction issue</span>
                                     </button>
                                 </form>
-                            {% if sailing.vessel_name and sailing.status_class != 'status-departed' %}
+                            {% if sailing.vessel_name %}
                                 <button class="alert-btn"
                                         onclick="openAlertPicker(this)"
                                         title="Set arrival alert">

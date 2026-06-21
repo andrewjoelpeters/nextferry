@@ -213,12 +213,14 @@ def _find_prediction_report_context(
     if that fails, falls back to returning the broader vessel-level context.
     Returns None when no relevant prediction context is available.
     """
-    last_predictions = get_last_predictions()
+    last_predictions = list(get_last_predictions().values())
+    candidate_predictions = (
+        [p for p in last_predictions if p.get("vessel_name") == vessel_name]
+        if vessel_name
+        else last_predictions
+    )
 
-    for vessel_prediction in last_predictions.values():
-        if vessel_name and vessel_prediction.get("vessel_name") != vessel_name:
-            continue
-
+    for vessel_prediction in candidate_predictions:
         for sailing in vessel_prediction.get("sailings", []):
             if (
                 sailing.get("scheduled_departure") == scheduled_departure
@@ -232,15 +234,14 @@ def _find_prediction_report_context(
                     "all_vessel_sailings": vessel_prediction.get("sailings", []),
                 }
 
-    if vessel_name:
-        for vessel_prediction in last_predictions.values():
-            if vessel_prediction.get("vessel_name") == vessel_name:
-                return {
-                    "vessel_id": vessel_prediction.get("vessel_id"),
-                    "vessel_name": vessel_prediction.get("vessel_name"),
-                    "matched_sailing": None,
-                    "all_vessel_sailings": vessel_prediction.get("sailings", []),
-                }
+    if candidate_predictions:
+        vessel_prediction = candidate_predictions[0]
+        return {
+            "vessel_id": vessel_prediction.get("vessel_id"),
+            "vessel_name": vessel_prediction.get("vessel_name"),
+            "matched_sailing": None,
+            "all_vessel_sailings": vessel_prediction.get("sailings", []),
+        }
 
     return None
 

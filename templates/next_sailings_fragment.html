@@ -105,7 +105,9 @@
                                     <input type="hidden" name="displayed_time" value="{{ sailing.display_time }}">
                                     <input type="hidden" name="time_until" value="{{ sailing.time_until }}">
                                     <input type="hidden" name="delay_text" value="{{ sailing.delay_text }}">
-                                    <input type="hidden" name="vessel_name" value="{{ sailing.vessel_name or '' }}">
+                                    {% if sailing.vessel_name %}
+                                    <input type="hidden" name="vessel_name" value="{{ sailing.vessel_name }}">
+                                    {% endif %}
                                     <input type="hidden" name="last_updated" value="{{ last_updated }}">
                                     <button class="alert-btn report-btn"
                                             type="submit"

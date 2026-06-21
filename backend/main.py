@@ -1,7 +1,6 @@
 import asyncio
 import contextlib
 import hashlib
-import html
 import json
 import logging
 import os
@@ -318,22 +317,6 @@ def _build_prediction_report_url(
     return f"{GITHUB_NEW_ISSUE_URL}?{urlencode({'title': issue_title, 'body': issue_body})}"
 
 
-def _build_report_launch_page(issue_url: str) -> HTMLResponse:
-    """Return a small page that opens the prefilled GitHub issue."""
-    safe_issue_url = html.escape(issue_url, quote=True)
-    issue_url_json = json.dumps(issue_url)
-    return HTMLResponse(
-
-            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-            "<title>Opening report…</title></head><body>"
-            "<p>Opening GitHub issue… "
-            f'If nothing happens, <a href="{safe_issue_url}">continue</a>.</p>'
-            f"<script>window.location.replace({issue_url_json});</script>"
-            "</body></html>"
-
-    )
-
-
 @app.get("/sw.js")
 async def service_worker():
     """Serve service worker from root scope for full app control"""
@@ -447,19 +430,23 @@ async def report_prediction_error(
     delay_text: str | None = None,
 ):
     """Prefill a GitHub issue with the current prediction context."""
-    return _build_report_launch_page(
-        _build_prediction_report_url(
-            route_name=route_name,
-            departing_terminal=departing_terminal,
-            arriving_terminal=arriving_terminal,
-            scheduled_departure=scheduled_departure,
-            displayed_time=displayed_time,
-            time_until=time_until,
-            last_updated=last_updated,
-            vessel_name=vessel_name if vessel_name else None,
-            delay_text=delay_text,
-            referrer=request.headers.get("referer"),
-        )
+    return templates.TemplateResponse(
+        "report_prediction_error.html",
+        {
+            "request": request,
+            "issue_url": _build_prediction_report_url(
+                route_name=route_name,
+                departing_terminal=departing_terminal,
+                arriving_terminal=arriving_terminal,
+                scheduled_departure=scheduled_departure,
+                displayed_time=displayed_time,
+                time_until=time_until,
+                last_updated=last_updated,
+                vessel_name=vessel_name,
+                delay_text=delay_text,
+                referrer=request.headers.get("referer"),
+            ),
+        },
     )
 
 

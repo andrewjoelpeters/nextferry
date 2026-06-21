@@ -23,8 +23,12 @@ logger = logging.getLogger(__name__)
 
 CACHED_DELAYS = {}
 
-# Stores the most recent prediction for every sailing across all vessels.
-# Keyed by vessel_id → list of sailing predictions (first = current/next).
+# Stores the most recent prediction context for each vessel.
+# Keyed by vessel_id → {
+#   "vessel_id": int,
+#   "vessel_name": str | None,
+#   "sailings": list[dict[str, Any]],
+# }
 # Overwritten each cache cycle (~30s).
 _last_predictions: dict[int, dict[str, Any]] = {}
 

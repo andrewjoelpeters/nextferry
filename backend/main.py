@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import hashlib
+import html
 import json
 import logging
 import os
@@ -12,7 +13,7 @@ from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -206,6 +207,12 @@ def _find_prediction_report_context(
     departing_terminal: str,
     arriving_terminal: str,
 ) -> dict[str, Any] | None:
+    """Return matching prediction-debug context for a reported sailing.
+
+    Searches the latest cached prediction records for an exact sailing match and,
+    if that fails, falls back to returning the broader vessel-level context.
+    Returns None when no relevant prediction context is available.
+    """
     last_predictions = get_last_predictions()
 
     for vessel_prediction in last_predictions.values():
@@ -250,6 +257,11 @@ def _build_prediction_report_url(
     delay_text: str | None = None,
     referrer: str | None = None,
 ) -> str:
+    """Build the GitHub issue URL for a prediction-error report.
+
+    The issue includes what the user saw in the UI along with the app's latest
+    cached prediction-debug context so the report is actionable to developers.
+    """
     replay_time = get_replay_time()
     report_context = {
         "reported_at": current_time().isoformat(),
@@ -304,6 +316,22 @@ def _build_prediction_report_url(
         ]
     )
     return f"{GITHUB_NEW_ISSUE_URL}?{urlencode({'title': issue_title, 'body': issue_body})}"
+
+
+def _build_report_launch_page(issue_url: str) -> HTMLResponse:
+    """Return a small page that opens the prefilled GitHub issue."""
+    safe_issue_url = html.escape(issue_url, quote=True)
+    issue_url_json = json.dumps(issue_url)
+    return HTMLResponse(
+
+            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+            "<title>Opening report…</title></head><body>"
+            "<p>Opening GitHub issue… "
+            f'If nothing happens, <a href="{safe_issue_url}">continue</a>.</p>'
+            f"<script>window.location.replace({issue_url_json});</script>"
+            "</body></html>"
+
+    )
 
 
 @app.get("/sw.js")
@@ -419,7 +447,7 @@ async def report_prediction_error(
     delay_text: str | None = None,
 ):
     """Prefill a GitHub issue with the current prediction context."""
-    return RedirectResponse(
+    return _build_report_launch_page(
         _build_prediction_report_url(
             route_name=route_name,
             departing_terminal=departing_terminal,
@@ -428,7 +456,7 @@ async def report_prediction_error(
             displayed_time=displayed_time,
             time_until=time_until,
             last_updated=last_updated,
-            vessel_name=vessel_name or None,
+            vessel_name=vessel_name if vessel_name else None,
             delay_text=delay_text,
             referrer=request.headers.get("referer"),
         )

@@ -15,7 +15,8 @@
                 {% if schedule.sailings %}
                     {% for sailing in schedule.sailings %}
                     {% set has_detail_content = sailing.vessel_info or sailing.vessel_name or sailing.fill_risk or sailing.inbound_info %}
-                    {% set show_detail_panel = not sailing.departed or has_detail_content %}
+                    {% set show_actions = not sailing.departed %}
+                    {% set show_detail_panel = show_actions or has_detail_content %}
                     <details class="sailing-item {{ sailing.status_class }}{% if sailing.departed %} sailing-departed{% endif %}{% if show_detail_panel %} has-details{% endif %}"
                          data-vessel="{{ sailing.vessel_name or '' }}"
                          data-terminal="{{ sailing.departing_terminal_name or '' }}"
@@ -95,7 +96,7 @@
                             {% if sailing.fill_risk %}
                             <span class="detail-item fill-risk fill-risk-{{ sailing.fill_risk.risk_level }}">{{ sailing.fill_risk.label }}</span>
                             {% endif %}
-                            {% if not sailing.departed %}
+                            {% if show_actions %}
                             <div class="sailing-actions">
                                 <form method="post" action="{{ request.url_for('report_prediction_error') }}">
                                     <input type="hidden" name="route_name" value="{{ route.route_name }}">

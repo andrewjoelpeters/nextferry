@@ -268,6 +268,8 @@ def _build_prediction_report_url(
             scheduled_departure
         ).strftime("%Y-%m-%d %H:%M")
     except ValueError:
+        # Keep the raw value in the issue title if the browser sends an
+        # unexpected format so the report still goes through.
         scheduled_departure_label = scheduled_departure
 
     report_context = {

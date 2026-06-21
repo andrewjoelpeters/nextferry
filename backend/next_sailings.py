@@ -27,7 +27,14 @@ CACHED_DELAYS = {}
 # Keyed by vessel_id → {
 #   "vessel_id": int,
 #   "vessel_name": str | None,
-#   "sailings": list[dict[str, Any]],
+#   "sailings": list[{
+#       "scheduled_departure": str,
+#       "departing": str,
+#       "arriving": str,
+#       "source": str,
+#       "inputs": dict[str, Any],
+#       "delay": int | None,
+#   }],
 # }
 # Overwritten each cache cycle (~30s).
 _last_predictions: dict[int, dict[str, Any]] = {}

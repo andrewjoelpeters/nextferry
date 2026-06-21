@@ -97,7 +97,7 @@
                             {% endif %}
                             {% if not sailing.departed %}
                             <div class="sailing-actions">
-                                <form method="get" action="{{ request.url_for('report_prediction_error') }}">
+                                <form method="post" action="{{ request.url_for('report_prediction_error') }}">
                                     <input type="hidden" name="route_name" value="{{ route.route_name }}">
                                     <input type="hidden" name="departing_terminal" value="{{ schedule.departing_terminal_name }}">
                                     <input type="hidden" name="arriving_terminal" value="{{ schedule.arriving_terminal_name }}">

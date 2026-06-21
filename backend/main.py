@@ -11,7 +11,7 @@ from typing import Any
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Form, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -262,10 +262,17 @@ def _build_prediction_report_url(
     cached prediction-debug context so the report is actionable to developers.
     """
     replay_time = get_replay_time()
+    try:
+        scheduled_departure_label = datetime.fromisoformat(
+            scheduled_departure
+        ).strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        scheduled_departure_label = scheduled_departure
+
     report_context = {
         "reported_at": current_time().isoformat(),
         "referrer": referrer,
-        "replay_time": replay_time.isoformat() if replay_time is not None else None,
+        "replay_time": _serialize_report_value(replay_time),
         "sailings_cache": (
             {
                 "last_updated": _sailings_cache.get("last_updated"),
@@ -295,7 +302,7 @@ def _build_prediction_report_url(
 
     issue_title = (
         f"Prediction error: {route_name} {departing_terminal} → "
-        f"{arriving_terminal} {scheduled_departure[:16]}"
+        f"{arriving_terminal} {scheduled_departure_label}"
     )
     issue_body = "\n".join(
         [
@@ -416,18 +423,18 @@ async def get_sailings_tab(request: Request):
     )
 
 
-@app.get("/report-prediction-error", name="report_prediction_error")
+@app.post("/report-prediction-error", name="report_prediction_error")
 async def report_prediction_error(
     request: Request,
-    route_name: str,
-    departing_terminal: str,
-    arriving_terminal: str,
-    scheduled_departure: str,
-    displayed_time: str,
-    time_until: str,
-    last_updated: str,
-    vessel_name: str | None = None,
-    delay_text: str | None = None,
+    route_name: str = Form(...),
+    departing_terminal: str = Form(...),
+    arriving_terminal: str = Form(...),
+    scheduled_departure: str = Form(...),
+    displayed_time: str = Form(...),
+    time_until: str = Form(...),
+    last_updated: str = Form(...),
+    vessel_name: str | None = Form(None),
+    delay_text: str | None = Form(None),
 ):
     """Prefill a GitHub issue with the current prediction context."""
     return templates.TemplateResponse(

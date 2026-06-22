@@ -314,6 +314,17 @@ header h1 {
     display: block;
 }
 
+.sailing-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sm);
+    margin-top: 2px;
+}
+
+.sailing-actions form {
+    margin: 0;
+}
+
 .confidence-range {
     font-size: 0.65rem;
     color: var(--deck-gray);
@@ -336,6 +347,10 @@ header h1 {
     position: relative;
     font-size: var(--text-xs);
     margin-top: 2px;
+}
+
+.sailing-actions .alert-btn {
+    margin-top: 0;
 }
 
 .alert-btn-label {

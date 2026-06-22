@@ -1,15 +1,17 @@
 import asyncio
 import contextlib
 import hashlib
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Form, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -36,6 +38,7 @@ from .sailing_space import get_sailing_space_lookup
 from .utils import datetime_to_minutes
 
 logger = logging.getLogger(__name__)
+GITHUB_NEW_ISSUE_URL = "https://github.com/andrewjoelpeters/nextferry/issues/new"
 
 # Global caches - shared by all users
 _sailings_cache: dict[str, Any] | None = None
@@ -187,6 +190,149 @@ ASSET_VERSION = _compute_asset_version()
 templates.env.globals["asset_version"] = ASSET_VERSION
 
 
+def _serialize_report_value(value: Any) -> Any:
+    """Recursively convert datetimes to ISO strings for JSON-safe report data."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: _serialize_report_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_serialize_report_value(v) for v in value]
+    return value
+
+
+def _find_prediction_report_context(
+    vessel_name: str | None,
+    scheduled_departure: str,
+    departing_terminal: str,
+    arriving_terminal: str,
+) -> dict[str, Any] | None:
+    """Return matching prediction-debug context for a reported sailing.
+
+    Searches the latest cached prediction records for an exact sailing match and,
+    if that fails, falls back to returning the broader vessel-level context.
+    Returns None when no relevant prediction context is available.
+    """
+    last_predictions = list(get_last_predictions().values())
+    candidate_predictions = (
+        [p for p in last_predictions if p.get("vessel_name") == vessel_name]
+        if vessel_name
+        else last_predictions
+    )
+
+    for vessel_prediction in candidate_predictions:
+        for sailing in vessel_prediction.get("sailings", []):
+            if (
+                sailing.get("scheduled_departure") == scheduled_departure
+                and sailing.get("departing") == departing_terminal
+                and sailing.get("arriving") == arriving_terminal
+            ):
+                return {
+                    "vessel_id": vessel_prediction.get("vessel_id"),
+                    "vessel_name": vessel_prediction.get("vessel_name"),
+                    "matched_sailing": sailing,
+                    "all_vessel_sailings": vessel_prediction.get("sailings", []),
+                }
+
+    if candidate_predictions:
+        vessel_prediction = candidate_predictions[0]
+        return {
+            "vessel_id": vessel_prediction.get("vessel_id"),
+            "vessel_name": vessel_prediction.get("vessel_name"),
+            "matched_sailing": None,
+            "all_vessel_sailings": vessel_prediction.get("sailings", []),
+        }
+
+    return None
+
+
+def _build_prediction_report_url(
+    route_name: str,
+    departing_terminal: str,
+    arriving_terminal: str,
+    scheduled_departure: str,
+    displayed_time: str,
+    time_until: str,
+    last_updated: str,
+    vessel_name: str | None = None,
+    delay_text: str | None = None,
+    referrer: str | None = None,
+) -> str:
+    """Build the GitHub issue URL for a prediction-error report.
+
+    The issue includes what the user saw in the UI along with the app's latest
+    cached prediction-debug context so the report is actionable to developers.
+    """
+    replay_time = get_replay_time()
+    try:
+        scheduled_departure_label = datetime.fromisoformat(
+            scheduled_departure
+        ).strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        logger.debug(
+            "Using raw scheduled departure in prediction report title: %s",
+            scheduled_departure,
+        )
+        # Keep the raw value in the issue title if the browser sends an
+        # unexpected format so the report still goes through.
+        scheduled_departure_label = scheduled_departure
+
+    report_context = {
+        "reported_at": current_time().isoformat(),
+        "referrer": referrer,
+        "replay_time": _serialize_report_value(replay_time),
+        "sailings_cache": (
+            {
+                "last_updated": _sailings_cache.get("last_updated"),
+                "cached_at": _sailings_cache.get("cached_at"),
+                "routes": _sailings_cache.get("routes"),
+            }
+            if _sailings_cache
+            else None
+        ),
+        "reported_sailing": {
+            "route_name": route_name,
+            "departing_terminal": departing_terminal,
+            "arriving_terminal": arriving_terminal,
+            "scheduled_departure": scheduled_departure,
+            "displayed_time": displayed_time,
+            "time_until": time_until,
+            "delay_text": delay_text,
+            "vessel_name": vessel_name,
+            "last_updated_on_page": last_updated,
+        },
+        "prediction_debug": _find_prediction_report_context(
+            vessel_name=vessel_name,
+            scheduled_departure=scheduled_departure,
+            departing_terminal=departing_terminal,
+            arriving_terminal=arriving_terminal,
+        ),
+    }
+
+    issue_title = (
+        f"Prediction error: {route_name} {departing_terminal} → "
+        f"{arriving_terminal} {scheduled_departure_label}"
+    )
+    issue_body = "\n".join(
+        [
+            "## What looked wrong?",
+            "",
+            "<!-- Please briefly describe what you expected to see instead. -->",
+            "",
+            "## Captured app context",
+            "```json",
+            json.dumps(
+                _serialize_report_value(report_context),
+                indent=2,
+                sort_keys=True,
+                ensure_ascii=False,
+            ),
+            "```",
+        ]
+    )
+    return f"{GITHUB_NEW_ISSUE_URL}?{urlencode({'title': issue_title, 'body': issue_body})}"
+
+
 @app.get("/sw.js")
 async def service_worker():
     """Serve service worker from root scope for full app control"""
@@ -283,6 +429,40 @@ async def get_sailings_tab(request: Request):
     """Return the sailings tab content."""
     return templates.TemplateResponse(
         "sailings_tab_fragment.html", {"request": request}
+    )
+
+
+@app.post("/report-prediction-error", name="report_prediction_error")
+async def report_prediction_error(
+    request: Request,
+    route_name: str = Form(...),
+    departing_terminal: str = Form(...),
+    arriving_terminal: str = Form(...),
+    scheduled_departure: str = Form(...),
+    displayed_time: str = Form(...),
+    time_until: str = Form(...),
+    last_updated: str = Form(...),
+    vessel_name: str | None = Form(None),
+    delay_text: str | None = Form(None),
+):
+    """Prefill a GitHub issue with the current prediction context."""
+    return templates.TemplateResponse(
+        "report_prediction_error.html",
+        {
+            "request": request,
+            "issue_url": _build_prediction_report_url(
+                route_name=route_name,
+                departing_terminal=departing_terminal,
+                arriving_terminal=arriving_terminal,
+                scheduled_departure=scheduled_departure,
+                displayed_time=displayed_time,
+                time_until=time_until,
+                last_updated=last_updated,
+                vessel_name=vessel_name,
+                delay_text=delay_text,
+                referrer=request.headers.get("referer"),
+            ),
+        },
     )
 
 

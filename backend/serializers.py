@@ -148,12 +148,46 @@ class TerminalSpace(BaseModel):
 # --- My Serializers -----
 
 
+class PredictionTrace(BaseModel):
+    """Structured metadata for a single delay prediction step.
+
+    Captures the full chain of reasoning so predictions are debuggable
+    and can be surfaced to users with plain-language explanations.
+    """
+
+    source: str
+    """How the delay was determined: 'flat_propagation', 'eta_bounded', or 're_propagated'."""
+
+    current_delay_minutes: float
+    """The observed or inherited delay at the time this prediction was made."""
+
+    predicted_arrival: datetime | None = None
+    """ETA at the destination terminal (only set for eta_bounded)."""
+
+    arrival_source: str | None = None
+    """Where the arrival estimate came from, e.g. 'wsdot_eta'."""
+
+    turnaround_minutes: float | None = None
+    """Turnaround constant used, in minutes (only set for eta_bounded)."""
+
+    turnaround_source: str | None = None
+    """Which turnaround bound was applied: 'p10_floor' or 'p75_ceiling'."""
+
+    predicted_departure: datetime | None = None
+    """Computed estimated departure time for this sailing."""
+
+    delay_minutes: int
+    """Final predicted delay in whole minutes."""
+
+
 class RouteSailing(BaseModel):
     scheduled_departure: datetime | None
     delay_in_minutes: int | None = None
     vessel_name: str
     vessel_position_num: int
     departed: bool = False
+    # Structured prediction metadata explaining how delay_in_minutes was derived
+    prediction_trace: PredictionTrace | None = None
     # Live vessel state for the current/next sailing
     vessel_at_dock: bool | None = None
     vessel_left_dock: datetime | None = None
@@ -187,6 +221,7 @@ class DirectionalSailing(RouteSailing):
                     "vessel_name",
                     "vessel_position_num",
                     "departed",
+                    "prediction_trace",
                     "vessel_at_dock",
                     "vessel_left_dock",
                     "vessel_eta",

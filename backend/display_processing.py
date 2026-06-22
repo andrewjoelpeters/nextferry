@@ -298,6 +298,11 @@ def process_routes_for_display(
                         else ""
                     ),
                     "fill_risk": fill_risk,
+                    "prediction_trace": (
+                        sailing.prediction_trace.model_dump()
+                        if sailing.prediction_trace
+                        else None
+                    ),
                 }
 
                 processed_sailings.append(sailing_data)

@@ -141,9 +141,7 @@ def _build_inbound_detail_lines(
         if sailing.inbound_prediction_trace and not departed:
             lines.append(
                 {
-                    "text": sailing.inbound_prediction_trace.explanation.replace(
-                        ";", ","
-                    ),
+                    "text": sailing.inbound_prediction_trace.explanation,
                     "css_class": "",
                 }
             )

@@ -251,8 +251,13 @@ class TestPredictEtaBoundedDelay:
         sched = datetime(2026, 4, 9, 15, 45, tzinfo=PT)
         # ETA + 9.3min floor = 15:52.3, sched = 15:45 → floor = 7.3 → round(7.3)=7
         # delay=2 < 4 → result = max(2, 7) = 7
-        result = predict_eta_bounded_delay(2, eta, sched, "sea-bi")
-        assert result == 7
+        trace = predict_eta_bounded_delay(2, eta, sched, "sea-bi")
+        assert trace is not None
+        assert trace.delay_minutes == 7
+        assert trace.source == "eta_bounded"
+        assert trace.turnaround_source == "p10_floor"
+        assert trace.predicted_arrival == eta
+        assert trace.arrival_source == "wsdot_eta"
 
     def test_high_delay_ceiling_fires(self):
         """Delay > threshold: ceiling caps the prediction."""
@@ -261,8 +266,10 @@ class TestPredictEtaBoundedDelay:
         # floor = (15:40 + 9.3 - 15:45) = 4.3 min
         # ceiling = (15:40 + 22 - 15:45) = 17 min
         # delay=18 > 4 → result = max(4.3, min(18, 17)) = max(4.3, 17) = 17
-        result = predict_eta_bounded_delay(18, eta, sched, "sea-bi")
-        assert result == 17
+        trace = predict_eta_bounded_delay(18, eta, sched, "sea-bi")
+        assert trace is not None
+        assert trace.delay_minutes == 17
+        assert trace.turnaround_source == "p75_ceiling"
 
     def test_on_time_returns_zero(self):
         """On-time vessel with early ETA → 0 delay."""
@@ -270,23 +277,26 @@ class TestPredictEtaBoundedDelay:
         sched = datetime(2026, 4, 9, 15, 45, tzinfo=PT)
         # floor = (15:30 + 9.3 - 15:45) = -5.7 → clamped to 0
         # delay=0 ≤ 4 → result = max(0, 0) = 0
-        result = predict_eta_bounded_delay(0, eta, sched, "sea-bi")
-        assert result == 0
+        trace = predict_eta_bounded_delay(0, eta, sched, "sea-bi")
+        assert trace is not None
+        assert trace.delay_minutes == 0
+        assert trace.turnaround_source == "p10_floor"
 
     def test_unknown_route_returns_none(self):
         """Unknown route falls back gracefully."""
         eta = datetime(2026, 4, 9, 15, 43, tzinfo=PT)
         sched = datetime(2026, 4, 9, 15, 45, tzinfo=PT)
-        result = predict_eta_bounded_delay(5, eta, sched, "unknown-route")
-        assert result is None
+        trace = predict_eta_bounded_delay(5, eta, sched, "unknown-route")
+        assert trace is None
 
     def test_floor_never_negative(self):
         """Very early ETA still produces non-negative floor."""
         eta = datetime(2026, 4, 9, 15, 0, tzinfo=PT)
         sched = datetime(2026, 4, 9, 15, 45, tzinfo=PT)
         # floor = (15:00 + 9.3 - 15:45) = -35.7 → clamped to 0
-        result = predict_eta_bounded_delay(0, eta, sched, "sea-bi")
-        assert result == 0
+        trace = predict_eta_bounded_delay(0, eta, sched, "sea-bi")
+        assert trace is not None
+        assert trace.delay_minutes == 0
 
     def test_edmonds_kingston_route(self):
         """Ed-King route uses different turnaround constants."""
@@ -294,8 +304,22 @@ class TestPredictEtaBoundedDelay:
         sched = datetime(2026, 4, 9, 15, 45, tzinfo=PT)
         # floor = (15:43 + 14.8 - 15:45) = 12.8 → round = 13
         # delay=3 ≤ 4 → result = max(3, 13) = 13
-        result = predict_eta_bounded_delay(3, eta, sched, "ed-king")
-        assert result == 13
+        trace = predict_eta_bounded_delay(3, eta, sched, "ed-king")
+        assert trace is not None
+        assert trace.delay_minutes == 13
+        assert trace.turnaround_source == "p10_floor"
+
+    def test_predicted_departure_set(self):
+        """predicted_departure is ETA + turnaround constant."""
+        from datetime import timedelta
+
+        eta = datetime(2026, 4, 9, 15, 43, tzinfo=PT)
+        sched = datetime(2026, 4, 9, 15, 45, tzinfo=PT)
+        trace = predict_eta_bounded_delay(2, eta, sched, "sea-bi")
+        assert trace is not None
+        # p10 for sea-bi = 9.3 minutes
+        expected = eta + timedelta(minutes=9.3)
+        assert trace.predicted_departure == expected
 
 
 class TestPropigateDelaysZeroDelay:
@@ -315,3 +339,213 @@ class TestPropigateDelaysZeroDelay:
         sailings = [_make_directional_sailing(10)]
         result = propigate_delays(None, sailings)
         assert result[0].delay_in_minutes is None
+
+    def test_flat_propagation_attaches_trace(self):
+        """Each sailing should have a flat_propagation trace."""
+        sailings = [
+            _make_directional_sailing(10),
+            _make_directional_sailing(40),
+        ]
+        result = propigate_delays(timedelta(minutes=8), sailings)
+        for s in result:
+            assert s.prediction_trace is not None
+            assert s.prediction_trace.source == "flat_propagation"
+            assert s.prediction_trace.delay_minutes == 8
+            assert s.prediction_trace.current_delay_minutes == 8
+            assert s.prediction_trace.reason == "en_route_delay"
+            assert "departed late" in s.prediction_trace.explanation
+
+    def test_flat_propagation_at_dock_reason(self):
+        """reason='at_dock_delay' is set when explicitly passed."""
+        sailings = [_make_directional_sailing(10)]
+        result = propigate_delays(
+            timedelta(minutes=5), sailings, reason="at_dock_delay"
+        )
+        assert result[0].prediction_trace is not None
+        assert result[0].prediction_trace.reason == "at_dock_delay"
+        assert "dock" in result[0].prediction_trace.explanation
+
+    def test_trace_predicted_departure_matches_delay(self):
+        """predicted_departure in trace should equal scheduled + delay."""
+        sailing = _make_directional_sailing(30)
+        [result] = propigate_delays(timedelta(minutes=5), [sailing])
+        assert result.prediction_trace is not None
+        expected = sailing.scheduled_departure + timedelta(minutes=5)
+        assert result.prediction_trace.predicted_departure == expected
+
+
+class TestEtaBoundedTraces:
+    """Verify that ETA-bounded predictions attach correct traces to all sailings."""
+
+    def _make_en_route_vessel(self, delay_minutes: int, eta_offset_minutes: int):
+        """Create an en-route vessel heading Seattle→Bainbridge."""
+        now = _now().replace(second=0, microsecond=0)
+        left_dock = now - timedelta(minutes=10)
+        eta = now + timedelta(minutes=eta_offset_minutes)
+        scheduled = left_dock - timedelta(minutes=delay_minutes)
+        return Vessel(
+            VesselID=42,
+            VesselName="Tacoma",
+            DepartingTerminalID=3,
+            DepartingTerminalName="Seattle",
+            DepartingTerminalAbbrev="SEA",
+            ArrivingTerminalID=7,
+            ArrivingTerminalName="Bainbridge Island",
+            ArrivingTerminalAbbrev="BI",
+            Latitude=47.6,
+            Longitude=-122.4,
+            Speed=12.0,
+            Heading=270,
+            InService=True,
+            AtDock=False,
+            LeftDock=_dt_to_wsdot(left_dock),
+            Eta=_dt_to_wsdot(eta),
+            ScheduledDeparture=_dt_to_wsdot(scheduled),
+            TimeStamp=_dt_to_wsdot(_now()),
+            OpRouteAbbrev=["sea-bi"],
+            VesselPositionNum=1,
+        )
+
+    def _make_at_dock_vessel(self, delay_minutes: int):
+        """Create an at-dock vessel at Seattle, waiting to depart."""
+        now = _now().replace(second=0, microsecond=0)
+        scheduled = now + timedelta(minutes=5)
+        return Vessel(
+            VesselID=99,
+            VesselName="Tacoma",
+            DepartingTerminalID=3,
+            DepartingTerminalName="Seattle",
+            DepartingTerminalAbbrev="SEA",
+            ArrivingTerminalID=7,
+            ArrivingTerminalName="Bainbridge Island",
+            ArrivingTerminalAbbrev="BI",
+            Latitude=47.6,
+            Longitude=-122.3,
+            Speed=0.0,
+            Heading=0,
+            InService=True,
+            AtDock=True,
+            LeftDock=None,
+            Eta=None,
+            ScheduledDeparture=_dt_to_wsdot(scheduled),
+            TimeStamp=_dt_to_wsdot(_now()),
+            OpRouteAbbrev=["sea-bi"],
+            VesselPositionNum=1,
+        )
+
+    def test_eta_bounded_sailing_has_eta_bounded_trace(self):
+        """The first opposite-direction sailing gets an eta_bounded trace."""
+        vessel = self._make_en_route_vessel(delay_minutes=12, eta_offset_minutes=25)
+        vessel.delay = timedelta(minutes=12)
+
+        # Sailing at opposite terminal (Bainbridge departing)
+        bi_sched = _now().replace(second=0, microsecond=0) + timedelta(minutes=40)
+        bi_sailing = DirectionalSailing(
+            departing_terminal_id=7,
+            arriving_terminal_id=3,
+            departing_terminal_name="Bainbridge Island",
+            arriving_terminal_name="Seattle",
+            scheduled_departure=bi_sched,
+            vessel_name="Tacoma",
+            vessel_position_num=1,
+        )
+        result = get_next_sailings_by_boat({1: [bi_sailing]}, [vessel])
+        sailings = result[1]
+        # Find non-departed bi sailing
+        bi = next(s for s in sailings if not s.departed)
+        assert bi.prediction_trace is not None
+        assert bi.prediction_trace.source == "eta_bounded"
+        assert bi.prediction_trace.predicted_arrival == vessel.eta
+        assert bi.prediction_trace.arrival_source == "wsdot_eta"
+        assert bi.prediction_trace.arriving_terminal_name == "Bainbridge Island"
+        assert bi.prediction_trace.turnaround_source in ("p10_floor", "p75_ceiling")
+        assert bi.prediction_trace.delay_minutes == bi.delay_in_minutes
+        assert "Bainbridge Island" in bi.prediction_trace.explanation
+
+    def test_re_propagated_sailings_have_re_propagated_trace(self):
+        """Sailings after the ETA-bounded one get re_propagated traces."""
+        vessel = self._make_en_route_vessel(delay_minutes=12, eta_offset_minutes=25)
+        vessel.delay = timedelta(minutes=12)
+
+        now = _now().replace(second=0, microsecond=0)
+        bi_first = DirectionalSailing(
+            departing_terminal_id=7,
+            arriving_terminal_id=3,
+            departing_terminal_name="Bainbridge Island",
+            arriving_terminal_name="Seattle",
+            scheduled_departure=now + timedelta(minutes=40),
+            vessel_name="Tacoma",
+            vessel_position_num=1,
+        )
+        bi_second = DirectionalSailing(
+            departing_terminal_id=7,
+            arriving_terminal_id=3,
+            departing_terminal_name="Bainbridge Island",
+            arriving_terminal_name="Seattle",
+            scheduled_departure=now + timedelta(minutes=100),
+            vessel_name="Tacoma",
+            vessel_position_num=1,
+        )
+        result = get_next_sailings_by_boat({1: [bi_first, bi_second]}, [vessel])
+        sailings = [s for s in result[1] if not s.departed]
+
+        # First opposite-direction: eta_bounded
+        assert sailings[0].prediction_trace is not None
+        assert sailings[0].prediction_trace.source == "eta_bounded"
+        # Second: re_propagated from the bounded delay
+        assert sailings[1].prediction_trace is not None
+        assert sailings[1].prediction_trace.source == "re_propagated"
+        assert (
+            sailings[1].prediction_trace.delay_minutes == sailings[0].delay_in_minutes
+        )
+        assert (
+            sailings[1].prediction_trace.current_delay_minutes
+            == sailings[0].delay_in_minutes
+        )
+
+    def test_inbound_prediction_trace_en_route(self):
+        """En-route inbound vessel: inbound_prediction_trace mirrors the ETA-bounded trace."""
+        vessel = self._make_en_route_vessel(delay_minutes=12, eta_offset_minutes=25)
+        vessel.delay = timedelta(minutes=12)
+
+        bi_sched = _now().replace(second=0, microsecond=0) + timedelta(minutes=40)
+        bi_sailing = DirectionalSailing(
+            departing_terminal_id=7,
+            arriving_terminal_id=3,
+            departing_terminal_name="Bainbridge Island",
+            arriving_terminal_name="Seattle",
+            scheduled_departure=bi_sched,
+            vessel_name="Tacoma",
+            vessel_position_num=1,
+        )
+        result = get_next_sailings_by_boat({1: [bi_sailing]}, [vessel])
+        bi = next(s for s in result[1] if not s.departed)
+
+        assert bi.inbound_prediction_trace is not None
+        assert bi.inbound_prediction_trace.source == "eta_bounded"
+        assert bi.inbound_prediction_trace.arrival_source == "wsdot_eta"
+        assert bi.inbound_prediction_trace is bi.prediction_trace
+
+    def test_inbound_prediction_trace_at_dock(self):
+        """At-dock inbound vessel: inbound_prediction_trace uses estimated crossing."""
+        vessel = self._make_at_dock_vessel(delay_minutes=0)
+        vessel.delay = timedelta(minutes=0)
+
+        bi_sched = _now().replace(second=0, microsecond=0) + timedelta(minutes=50)
+        bi_sailing = DirectionalSailing(
+            departing_terminal_id=7,
+            arriving_terminal_id=3,
+            departing_terminal_name="Bainbridge Island",
+            arriving_terminal_name="Seattle",
+            scheduled_departure=bi_sched,
+            vessel_name="Tacoma",
+            vessel_position_num=1,
+        )
+        result = get_next_sailings_by_boat({1: [bi_sailing]}, [vessel])
+        bi = next(s for s in result[1] if not s.departed)
+
+        assert bi.inbound_prediction_trace is not None
+        assert bi.inbound_prediction_trace.source == "eta_bounded"
+        assert bi.inbound_prediction_trace.arrival_source == "estimated_crossing"
+        assert bi.inbound_prediction_trace.arriving_terminal_name == "Bainbridge Island"
+        assert "(est.)" in bi.inbound_prediction_trace.explanation

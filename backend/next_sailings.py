@@ -10,7 +10,10 @@ from .replay import current_time
 from .serializers import (
     DirectionalSailing,
     DirectionalSchedule,
+    EtaBoundedTrace,
+    FlatPropagationTrace,
     RawDirectionalSchedule,
+    RePropagatedTrace,
     RouteSchedule,
     Vessel,
 )
@@ -23,42 +26,13 @@ logger = logging.getLogger(__name__)
 CACHED_DELAYS = {}
 
 # Stores the most recent prediction for every sailing across all vessels.
-# Keyed by vessel_id → list of sailing predictions (first = current/next).
+# Keyed by vessel_id → dict with vessel info and list of sailing entries.
 # Overwritten each cache cycle (~30s).
-_last_predictions: dict[int, list[dict]] = {}
+_last_predictions: dict[int, dict] = {}
 
 
-def get_last_predictions() -> dict[int, list[dict]]:
+def get_last_predictions() -> dict[int, dict]:
     return _last_predictions
-
-
-def _record_prediction(
-    vessel_id: int | None,
-    vessel_name: str | None,
-    sailing: DirectionalSailing,
-    source: str,
-    inputs: dict,
-    prediction: dict | None,
-) -> None:
-    """Record a prediction for the debug endpoint."""
-    if vessel_id is None:
-        return
-    entry = {
-        "scheduled_departure": sailing.scheduled_departure.isoformat(),
-        "departing": sailing.departing_terminal_name,
-        "arriving": sailing.arriving_terminal_name,
-        "source": source,
-        "inputs": inputs,
-        "delay": sailing.delay_in_minutes,
-    }
-
-    if vessel_id not in _last_predictions:
-        _last_predictions[vessel_id] = {
-            "vessel_id": vessel_id,
-            "vessel_name": vessel_name,
-            "sailings": [],
-        }
-    _last_predictions[vessel_id]["sailings"].append(entry)
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +153,8 @@ def predict_eta_bounded_delay(
     eta: datetime,
     scheduled_departure: datetime,
     route_abbrev: str,
-) -> int | None:
+    arriving_terminal_name: str = "",
+) -> EtaBoundedTrace | None:
     """Predict next-sailing delay using ETA + turnaround bounds.
 
     Floor: earliest departure = ETA + fastest turnaround (p10).
@@ -200,8 +175,24 @@ def predict_eta_bounded_delay(
             0.0,
             (eta + timedelta(minutes=p75) - scheduled_departure).total_seconds() / 60,
         )
-        return round(max(eta_floor, min(current_delay_minutes, eta_ceiling)))
-    return round(max(current_delay_minutes, eta_floor))
+        delay_minutes = round(max(eta_floor, min(current_delay_minutes, eta_ceiling)))
+        turnaround_used = p75
+        turnaround_source = "p75_ceiling"
+    else:
+        delay_minutes = round(max(current_delay_minutes, eta_floor))
+        turnaround_used = p10
+        turnaround_source = "p10_floor"
+
+    return EtaBoundedTrace(
+        current_delay_minutes=current_delay_minutes,
+        predicted_arrival=eta,
+        arrival_source="wsdot_eta",
+        arriving_terminal_name=arriving_terminal_name,
+        turnaround_minutes=turnaround_used,
+        turnaround_source=turnaround_source,
+        predicted_departure=eta + timedelta(minutes=turnaround_used),
+        delay_minutes=delay_minutes,
+    )
 
 
 def propigate_delays(
@@ -209,6 +200,7 @@ def propigate_delays(
     sailings: list[DirectionalSailing],
     vessel_id: int | None = None,
     vessel_name: str | None = None,
+    reason: str = "en_route_delay",
 ) -> list[DirectionalSailing]:
     """Apply flat delay propagation to all sailings."""
     if delay is None:
@@ -218,13 +210,15 @@ def propigate_delays(
 
     for sailing in sailings:
         sailing.delay_in_minutes = delay_minutes
-        _record_prediction(
-            vessel_id,
-            vessel_name,
-            sailing,
-            "flat_propagation",
-            {"current_vessel_delay_minutes": delay_minutes},
-            None,
+        sailing.prediction_trace = FlatPropagationTrace(
+            reason=reason,
+            current_delay_minutes=delay_minutes,
+            predicted_departure=(
+                sailing.scheduled_departure + timedelta(minutes=delay_minutes)
+                if sailing.scheduled_departure
+                else None
+            ),
+            delay_minutes=delay_minutes,
         )
 
     return sailings
@@ -319,6 +313,7 @@ def get_next_sailings_by_boat(
             next_sailings,
             vessel_id=vessel.vessel_id if vessel else None,
             vessel_name=vessel.vessel_name if vessel else None,
+            reason="at_dock_delay" if vessel and vessel.at_dock else "en_route_delay",
         )
 
         # Annotate first sailing with live vessel state
@@ -337,37 +332,28 @@ def get_next_sailings_by_boat(
                 ):
                     route_abbrev = _route_abbrev_for_terminal(s.departing_terminal_id)
                     if route_abbrev:
-                        bounded = predict_eta_bounded_delay(
+                        trace = predict_eta_bounded_delay(
                             delay_minutes,
                             vessel.eta,
                             s.scheduled_departure,
                             route_abbrev,
+                            arriving_terminal_name=s.departing_terminal_name,
                         )
-                        if bounded is not None:
-                            s.delay_in_minutes = bounded
-                            _record_prediction(
-                                vessel.vessel_id,
-                                vessel.vessel_name,
-                                s,
-                                "eta_bounded",
-                                {
-                                    "current_vessel_delay_minutes": delay_minutes,
-                                    "vessel_eta": vessel.eta.isoformat(),
-                                    "scheduled_departure": s.scheduled_departure.isoformat(),
-                                    "route_abbrev": route_abbrev,
-                                },
-                                None,
-                            )
+                        if trace is not None:
+                            s.delay_in_minutes = trace.delay_minutes
+                            s.prediction_trace = trace
                             # Re-propagate the improved prediction to later sailings
                             for later in next_sailings[i + 1 :]:
-                                later.delay_in_minutes = bounded
-                                _record_prediction(
-                                    vessel.vessel_id,
-                                    vessel.vessel_name,
-                                    later,
-                                    "flat_propagation",
-                                    {"current_vessel_delay_minutes": bounded},
-                                    None,
+                                later.delay_in_minutes = trace.delay_minutes
+                                later.prediction_trace = RePropagatedTrace(
+                                    current_delay_minutes=trace.delay_minutes,
+                                    predicted_departure=(
+                                        later.scheduled_departure
+                                        + timedelta(minutes=trace.delay_minutes)
+                                        if later.scheduled_departure
+                                        else None
+                                    ),
+                                    delay_minutes=trace.delay_minutes,
                                 )
                     break
 
@@ -395,37 +381,71 @@ def get_next_sailings_by_boat(
                             vessel.scheduled_departure
                         )
                         s.inbound_vessel_delay_minutes = vessel_first_delay
-                        # Estimate arrival at our terminal using route crossing time.
-                        # WSDOT only provides an ETA once the vessel is en route, so
-                        # while it's still docked we compute our own estimate so the
-                        # frontend can show a complete departure chain without needing
-                        # any conditional display logic.
-                        if vessel.scheduled_departure:
-                            inbound_predicted_dep = (
-                                vessel.scheduled_departure
-                                + timedelta(
-                                    minutes=vessel_first_delay
-                                    if vessel_first_delay is not None
-                                    else 0
-                                )
+                        # Build an EtaBoundedTrace for the inbound vessel's estimated
+                        # arrival (vessel still at dock — no WSDOT ETA yet).
+                        route_abbrev = _route_abbrev_for_terminal(
+                            vessel.departing_terminal_id
+                        )
+                        crossing = (
+                            CROSSING_TIME_MINUTES.get(route_abbrev)
+                            if route_abbrev
+                            else None
+                        )
+                        p10 = (
+                            _TURNAROUND_FLOOR.get(route_abbrev)
+                            if route_abbrev
+                            else None
+                        )
+                        if crossing and p10 and vessel.scheduled_departure:
+                            inbound_dep = vessel.scheduled_departure + timedelta(
+                                minutes=vessel_first_delay or 0
                             )
-                            route_abbrev = _route_abbrev_for_terminal(
-                                s.departing_terminal_id
+                            est_arrival = inbound_dep + timedelta(minutes=crossing)
+                            s.inbound_prediction_trace = EtaBoundedTrace(
+                                current_delay_minutes=vessel_first_delay or 0,
+                                predicted_arrival=est_arrival,
+                                arrival_source="estimated_crossing",
+                                arriving_terminal_name=s.departing_terminal_name,
+                                turnaround_minutes=p10,
+                                turnaround_source="p10_floor",
+                                predicted_departure=est_arrival
+                                + timedelta(minutes=p10),
+                                delay_minutes=s.delay_in_minutes or 0,
                             )
-                            crossing_mins = (
-                                CROSSING_TIME_MINUTES.get(route_abbrev)
-                                if route_abbrev
-                                else None
-                            )
-                            if crossing_mins is not None:
-                                s.inbound_vessel_estimated_arrival = (
-                                    inbound_predicted_dep
-                                    + timedelta(minutes=crossing_mins)
-                                )
                     else:
                         s.inbound_vessel_left_dock = vessel.left_dock
                         s.inbound_vessel_eta = vessel.eta
+                        # For an en-route inbound vessel the EtaBoundedTrace on this
+                        # sailing already encodes the arrival + turnaround reasoning.
+                        if s.prediction_trace is not None and isinstance(
+                            s.prediction_trace, EtaBoundedTrace
+                        ):
+                            s.inbound_prediction_trace = s.prediction_trace
                     break
+
+        # Populate debug predictions from sailing traces for this vessel
+        if vessel:
+            vessel_entry: dict = {
+                "vessel_id": vessel.vessel_id,
+                "vessel_name": vessel.vessel_name,
+                "sailings": [],
+            }
+            for s in next_sailings:
+                if s.prediction_trace is not None:
+                    vessel_entry["sailings"].append(
+                        {
+                            "scheduled_departure": (
+                                s.scheduled_departure.isoformat()
+                                if s.scheduled_departure
+                                else None
+                            ),
+                            "departing": s.departing_terminal_name,
+                            "arriving": s.arriving_terminal_name,
+                            "delay": s.delay_in_minutes,
+                            "trace": s.prediction_trace.model_dump(),
+                        }
+                    )
+            _last_predictions[vessel.vessel_id] = vessel_entry
 
         result[position_num] = next_sailings
 

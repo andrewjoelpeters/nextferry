@@ -10,8 +10,10 @@ from .replay import current_time
 from .serializers import (
     DirectionalSailing,
     DirectionalSchedule,
-    PredictionTrace,
+    EtaBoundedTrace,
+    FlatPropagationTrace,
     RawDirectionalSchedule,
+    RePropagatedTrace,
     RouteSchedule,
     Vessel,
 )
@@ -151,7 +153,7 @@ def predict_eta_bounded_delay(
     eta: datetime,
     scheduled_departure: datetime,
     route_abbrev: str,
-) -> PredictionTrace | None:
+) -> EtaBoundedTrace | None:
     """Predict next-sailing delay using ETA + turnaround bounds.
 
     Floor: earliest departure = ETA + fastest turnaround (p10).
@@ -180,8 +182,7 @@ def predict_eta_bounded_delay(
         turnaround_used = p10
         turnaround_source = "p10_floor"
 
-    return PredictionTrace(
-        source="eta_bounded",
+    return EtaBoundedTrace(
         current_delay_minutes=current_delay_minutes,
         predicted_arrival=eta,
         arrival_source="wsdot_eta",
@@ -206,8 +207,7 @@ def propigate_delays(
 
     for sailing in sailings:
         sailing.delay_in_minutes = delay_minutes
-        sailing.prediction_trace = PredictionTrace(
-            source="flat_propagation",
+        sailing.prediction_trace = FlatPropagationTrace(
             current_delay_minutes=delay_minutes,
             predicted_departure=(
                 sailing.scheduled_departure + timedelta(minutes=delay_minutes)
@@ -339,8 +339,7 @@ def get_next_sailings_by_boat(
                             # Re-propagate the improved prediction to later sailings
                             for later in next_sailings[i + 1 :]:
                                 later.delay_in_minutes = trace.delay_minutes
-                                later.prediction_trace = PredictionTrace(
-                                    source="re_propagated",
+                                later.prediction_trace = RePropagatedTrace(
                                     current_delay_minutes=trace.delay_minutes,
                                     predicted_departure=(
                                         later.scheduled_departure

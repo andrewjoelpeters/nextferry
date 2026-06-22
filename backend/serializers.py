@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -148,36 +149,55 @@ class TerminalSpace(BaseModel):
 # --- My Serializers -----
 
 
-class PredictionTrace(BaseModel):
-    """Structured metadata for a single delay prediction step.
+class EtaBoundedTrace(BaseModel):
+    """Trace for delays predicted via ETA + turnaround bounds."""
 
-    Captures the full chain of reasoning so predictions are debuggable
-    and can be surfaced to users with plain-language explanations.
-    """
-
-    source: str
-    """How the delay was determined: 'flat_propagation', 'eta_bounded', or 're_propagated'."""
-
+    source: Literal["eta_bounded"] = "eta_bounded"
     current_delay_minutes: float
-    """The observed or inherited delay at the time this prediction was made."""
-
-    predicted_arrival: datetime | None = None
-    """ETA at the destination terminal (only set for eta_bounded)."""
-
-    arrival_source: str | None = None
+    """The observed delay at the time this prediction was made."""
+    predicted_arrival: datetime
+    """ETA at the destination terminal."""
+    arrival_source: str
     """Where the arrival estimate came from, e.g. 'wsdot_eta'."""
-
-    turnaround_minutes: float | None = None
-    """Turnaround constant used, in minutes (only set for eta_bounded)."""
-
-    turnaround_source: str | None = None
+    turnaround_minutes: float
+    """Turnaround constant used, in minutes."""
+    turnaround_source: str
     """Which turnaround bound was applied: 'p10_floor' or 'p75_ceiling'."""
-
-    predicted_departure: datetime | None = None
-    """Computed estimated departure time for this sailing."""
-
+    predicted_departure: datetime
+    """Computed estimated departure time: predicted_arrival + turnaround."""
     delay_minutes: int
     """Final predicted delay in whole minutes."""
+
+
+class FlatPropagationTrace(BaseModel):
+    """Trace for delays propagated unchanged from the vessel's current delay."""
+
+    source: Literal["flat_propagation"] = "flat_propagation"
+    current_delay_minutes: float
+    """The delay carried forward from the vessel."""
+    predicted_departure: datetime | None = None
+    """Scheduled departure shifted by delay (None if no scheduled departure)."""
+    delay_minutes: int
+    """Final predicted delay in whole minutes."""
+
+
+class RePropagatedTrace(BaseModel):
+    """Trace for later sailings that inherit an ETA-bounded prediction."""
+
+    source: Literal["re_propagated"] = "re_propagated"
+    current_delay_minutes: float
+    """The ETA-bounded delay inherited from the preceding sailing."""
+    predicted_departure: datetime | None = None
+    """Scheduled departure shifted by delay (None if no scheduled departure)."""
+    delay_minutes: int
+    """Final predicted delay in whole minutes."""
+
+
+PredictionTrace = Annotated[
+    EtaBoundedTrace | FlatPropagationTrace | RePropagatedTrace,
+    Field(discriminator="source"),
+]
+"""Union of all prediction trace types, discriminated by 'source'."""
 
 
 class RouteSailing(BaseModel):

@@ -383,14 +383,11 @@ def get_next_sailings_by_boat(
 
         # Populate debug predictions from sailing traces for this vessel
         if vessel:
-            vessel_entry = _last_predictions.setdefault(
-                vessel.vessel_id,
-                {
-                    "vessel_id": vessel.vessel_id,
-                    "vessel_name": vessel.vessel_name,
-                    "sailings": [],
-                },
-            )
+            vessel_entry: dict = {
+                "vessel_id": vessel.vessel_id,
+                "vessel_name": vessel.vessel_name,
+                "sailings": [],
+            }
             for s in next_sailings:
                 if s.prediction_trace is not None:
                     vessel_entry["sailings"].append(
@@ -406,6 +403,7 @@ def get_next_sailings_by_boat(
                             "trace": s.prediction_trace.model_dump(),
                         }
                     )
+            _last_predictions[vessel.vessel_id] = vessel_entry
 
         result[position_num] = next_sailings
 

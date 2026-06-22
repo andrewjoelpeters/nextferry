@@ -272,11 +272,25 @@ def _annotate_with_vessel_state(
     At-dock vessels always match; en-route vessels must be heading toward this
     sailing's departing terminal (guards against the WSDOT null-field edge case
     where a vessel reports no direction data).
+
+    Additionally, an en-route vessel with no timing evidence (LeftDock and ETA
+    both null) is skipped unless the sailing is already flagged as departed.
+    Without timing data we cannot confirm the vessel is on *this specific*
+    sailing — it may be on an earlier untracked trip, which would cause a future
+    scheduled sailing to be incorrectly displayed as "en route".
     """
     direction_matches = (
         vessel.at_dock or sailing.departing_terminal_id == vessel.departing_terminal_id
     )
     if not direction_matches:
+        return
+
+    if (
+        not vessel.at_dock
+        and not sailing.departed
+        and vessel.left_dock is None
+        and vessel.eta is None
+    ):
         return
 
     sailing.vessel_at_dock = vessel.at_dock

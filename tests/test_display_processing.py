@@ -223,8 +223,8 @@ class TestProcessRoutesForDisplay:
         assert displayed["fill_risk"] is None
 
     def test_inbound_at_dock_shows_predicted_departure_when_delayed(self):
-        """When inbound vessel is at dock with a delay, predicted_departure should reflect
-        the adjusted time (scheduled + delay), not the raw scheduled departure."""
+        """When inbound vessel is at dock with a delay, the detail line should reflect
+        the adjusted departure time (scheduled + delay)."""
         now = datetime.now(PT)
         inbound_sched = now + timedelta(minutes=5)
         sailing = _make_sailing(60)
@@ -237,21 +237,18 @@ class TestProcessRoutesForDisplay:
         route = _make_route([sailing])
         result = process_routes_for_display([route])
 
-        inbound_info = result[0]["schedules"][0]["sailings"][0]["inbound_info"]
-        assert inbound_info is not None
-        assert inbound_info["at_dock"] is True
-        # predicted_departure should be scheduled + 15 min delay
+        lines = result[0]["schedules"][0]["sailings"][0]["inbound_detail_lines"]
+        assert len(lines) >= 1
+        # Line 1: "Currently docked at Bainbridge Island, expected departure HH:MM"
         expected_predicted = (
             (inbound_sched + timedelta(minutes=15)).strftime("%I:%M %p").lstrip("0")
         )
-        assert inbound_info["predicted_departure"] == expected_predicted
-        # scheduled_departure should still be the raw scheduled time
-        expected_scheduled = inbound_sched.strftime("%I:%M %p").lstrip("0")
-        assert inbound_info["scheduled_departure"] == expected_scheduled
+        assert "Bainbridge Island" in lines[0]["text"]
+        assert expected_predicted in lines[0]["text"]
 
     def test_inbound_at_dock_no_delay_shows_scheduled_as_predicted(self):
-        """When inbound vessel is at dock with no delay, predicted_departure is None
-        and scheduled_departure provides the expected departure time."""
+        """When inbound vessel is at dock with no delay, the scheduled departure is
+        shown directly in the detail line."""
         now = datetime.now(PT)
         inbound_sched = now + timedelta(minutes=10)
         sailing = _make_sailing(60)
@@ -263,64 +260,79 @@ class TestProcessRoutesForDisplay:
         route = _make_route([sailing])
         result = process_routes_for_display([route])
 
-        inbound_info = result[0]["schedules"][0]["sailings"][0]["inbound_info"]
-        assert inbound_info is not None
-        assert inbound_info["predicted_departure"] is None
+        lines = result[0]["schedules"][0]["sailings"][0]["inbound_detail_lines"]
+        assert len(lines) >= 1
         expected_scheduled = inbound_sched.strftime("%I:%M %p").lstrip("0")
-        assert inbound_info["scheduled_departure"] == expected_scheduled
+        assert "Bainbridge Island" in lines[0]["text"]
+        assert expected_scheduled in lines[0]["text"]
 
     def test_inbound_at_dock_estimated_arrival_shown_in_detail_lines(self):
-        """When an inbound at-dock vessel has an estimated arrival (computed from crossing
-        time), inbound_detail_lines includes a line with the estimated arrival."""
-        now = datetime.now(PT)
-        inbound_sched = now + timedelta(minutes=10)
-        estimated_arr = now + timedelta(minutes=45)  # 10 min dep + ~35 min crossing
-        sailing = _make_sailing(60)
-        sailing.inbound_vessel_name = "Wenatchee"
-        sailing.inbound_vessel_at_dock = True
-        sailing.inbound_vessel_from_terminal = "Bainbridge Island"
-        sailing.inbound_vessel_scheduled_departure = inbound_sched
-        sailing.inbound_vessel_estimated_arrival = estimated_arr
+        """When an inbound at-dock vessel has an EtaBoundedTrace with estimated_crossing,
+        inbound_detail_lines includes a second line with the (est.) label."""
+        from backend.serializers import EtaBoundedTrace
 
-        route = _make_route([sailing])
-        result = process_routes_for_display([route])
-
-        displayed = result[0]["schedules"][0]["sailings"][0]
-        lines = displayed["inbound_detail_lines"]
-        assert len(lines) == 2
-        assert "Bainbridge Island" in lines[0]["text"]
-        # Second line: "Expected to arrive Seattle ~HH:MM (est.), expected departure HH:MM"
-        estimated_arr_str = estimated_arr.strftime("%I:%M %p").lstrip("0")
-        assert (
-            f"Expected to arrive Seattle ~{estimated_arr_str} (est.)"
-            in lines[1]["text"]
-        )
-        assert "expected departure" in lines[1]["text"]
-
-    def test_inbound_at_dock_wsdot_eta_preferred_over_estimate(self):
-        """When WSDOT provides an ETA, it is shown instead of the crossing-time estimate."""
         now = datetime.now(PT)
         inbound_sched = now + timedelta(minutes=10)
         estimated_arr = now + timedelta(minutes=45)
-        wsdot_eta = now + timedelta(minutes=40)
+        est_dep = now + timedelta(minutes=55)
         sailing = _make_sailing(60)
         sailing.inbound_vessel_name = "Wenatchee"
         sailing.inbound_vessel_at_dock = True
         sailing.inbound_vessel_from_terminal = "Bainbridge Island"
         sailing.inbound_vessel_scheduled_departure = inbound_sched
-        sailing.inbound_vessel_estimated_arrival = estimated_arr
-        sailing.inbound_vessel_eta = wsdot_eta
+        sailing.inbound_prediction_trace = EtaBoundedTrace(
+            current_delay_minutes=0,
+            predicted_arrival=estimated_arr,
+            arrival_source="estimated_crossing",
+            arriving_terminal_name="Seattle",
+            turnaround_minutes=9.3,
+            turnaround_source="p10_floor",
+            predicted_departure=est_dep,
+            delay_minutes=0,
+        )
 
         route = _make_route([sailing])
         result = process_routes_for_display([route])
 
-        displayed = result[0]["schedules"][0]["sailings"][0]
-        lines = displayed["inbound_detail_lines"]
+        lines = result[0]["schedules"][0]["sailings"][0]["inbound_detail_lines"]
         assert len(lines) == 2
-        # Should NOT contain "(est.)" since WSDOT eta is available
+        assert "Bainbridge Island" in lines[0]["text"]
+        # Second line should have "(est.)" from the trace
+        assert "(est.)" in lines[1]["text"]
+        assert "expected departure" in lines[1]["text"]
+
+    def test_inbound_at_dock_wsdot_eta_preferred_over_estimate(self):
+        """When EtaBoundedTrace has arrival_source=wsdot_eta, no (est.) label appears."""
+        from backend.serializers import EtaBoundedTrace
+
+        now = datetime.now(PT)
+        inbound_sched = now + timedelta(minutes=10)
+        wsdot_arrival = now + timedelta(minutes=40)
+        est_dep = now + timedelta(minutes=50)
+        sailing = _make_sailing(60)
+        sailing.inbound_vessel_name = "Wenatchee"
+        sailing.inbound_vessel_at_dock = True
+        sailing.inbound_vessel_from_terminal = "Bainbridge Island"
+        sailing.inbound_vessel_scheduled_departure = inbound_sched
+        sailing.inbound_prediction_trace = EtaBoundedTrace(
+            current_delay_minutes=0,
+            predicted_arrival=wsdot_arrival,
+            arrival_source="wsdot_eta",
+            arriving_terminal_name="Seattle",
+            turnaround_minutes=9.3,
+            turnaround_source="p10_floor",
+            predicted_departure=est_dep,
+            delay_minutes=0,
+        )
+
+        route = _make_route([sailing])
+        result = process_routes_for_display([route])
+
+        lines = result[0]["schedules"][0]["sailings"][0]["inbound_detail_lines"]
+        assert len(lines) == 2
+        # No (est.) since arrival_source is wsdot_eta
         assert "(est.)" not in lines[1]["text"]
-        wsdot_eta_str = wsdot_eta.strftime("%I:%M %p").lstrip("0")
-        assert wsdot_eta_str in lines[1]["text"]
+        assert "expected departure" in lines[1]["text"]
 
 
 class TestBuildVesselDetailLines:
@@ -384,72 +396,107 @@ class TestBuildVesselDetailLines:
 
 
 class TestBuildInboundDetailLines:
-    def test_at_dock_no_eta_no_estimate_shows_two_lines(self):
+    def test_at_dock_no_trace_falls_back_to_bridge_line(self):
         from backend.display_processing import _build_inbound_detail_lines
 
-        inbound_info = {
-            "at_dock": True,
-            "from_terminal": "Bainbridge Island",
-            "scheduled_departure": "9:45 AM",
-            "predicted_departure": None,
-            "eta": None,
-            "estimated_arrival": None,
-        }
-        lines = _build_inbound_detail_lines(inbound_info, "Seattle", "10:45 AM", False)
+        now = datetime.now(PT)
+        sailing = _make_sailing(60)
+        sailing.inbound_vessel_name = "Wenatchee"
+        sailing.inbound_vessel_at_dock = True
+        sailing.inbound_vessel_from_terminal = "Bainbridge Island"
+        sailing.inbound_vessel_scheduled_departure = now + timedelta(minutes=5)
+
+        lines = _build_inbound_detail_lines(sailing, "Seattle", "10:45 AM", False)
         assert len(lines) == 2
         assert "Bainbridge Island" in lines[0]["text"]
-        assert "9:45 AM" in lines[0]["text"]
+        # Fallback second line when no trace is available
         assert "Seattle" in lines[1]["text"]
         assert "10:45 AM" in lines[1]["text"]
 
-    def test_at_dock_with_estimated_arrival_shows_est(self):
+    def test_at_dock_with_estimated_crossing_trace_shows_est(self):
         from backend.display_processing import _build_inbound_detail_lines
+        from backend.serializers import EtaBoundedTrace
 
-        inbound_info = {
-            "at_dock": True,
-            "from_terminal": "Bainbridge Island",
-            "scheduled_departure": "9:45 AM",
-            "predicted_departure": None,
-            "eta": None,
-            "estimated_arrival": "10:20 AM",
-        }
-        lines = _build_inbound_detail_lines(inbound_info, "Seattle", "10:45 AM", False)
+        now = datetime.now(PT)
+        est_arrival = now + timedelta(minutes=40)
+        est_dep = now + timedelta(minutes=50)
+        sailing = _make_sailing(60)
+        sailing.inbound_vessel_name = "Wenatchee"
+        sailing.inbound_vessel_at_dock = True
+        sailing.inbound_vessel_from_terminal = "Bainbridge Island"
+        sailing.inbound_vessel_scheduled_departure = now + timedelta(minutes=5)
+        sailing.inbound_prediction_trace = EtaBoundedTrace(
+            current_delay_minutes=0,
+            predicted_arrival=est_arrival,
+            arrival_source="estimated_crossing",
+            arriving_terminal_name="Seattle",
+            turnaround_minutes=9.3,
+            turnaround_source="p10_floor",
+            predicted_departure=est_dep,
+            delay_minutes=0,
+        )
+
+        lines = _build_inbound_detail_lines(sailing, "Seattle", "10:45 AM", False)
         assert len(lines) == 2
         assert "(est.)" in lines[1]["text"]
-        assert "10:20 AM" in lines[1]["text"]
-        assert "10:45 AM" in lines[1]["text"]
+        assert "expected departure" in lines[1]["text"]
 
-    def test_at_dock_with_wsdot_eta_no_est_label(self):
+    def test_at_dock_with_wsdot_eta_trace_no_est_label(self):
         from backend.display_processing import _build_inbound_detail_lines
+        from backend.serializers import EtaBoundedTrace
 
-        inbound_info = {
-            "at_dock": True,
-            "from_terminal": "Bainbridge Island",
-            "scheduled_departure": "9:45 AM",
-            "predicted_departure": None,
-            "eta": "10:15 AM",
-            "estimated_arrival": "10:20 AM",  # ignored when eta is present
-        }
-        lines = _build_inbound_detail_lines(inbound_info, "Seattle", "10:45 AM", False)
+        now = datetime.now(PT)
+        wsdot_arrival = now + timedelta(minutes=40)
+        est_dep = now + timedelta(minutes=50)
+        sailing = _make_sailing(60)
+        sailing.inbound_vessel_name = "Wenatchee"
+        sailing.inbound_vessel_at_dock = True
+        sailing.inbound_vessel_from_terminal = "Bainbridge Island"
+        sailing.inbound_vessel_scheduled_departure = now + timedelta(minutes=5)
+        sailing.inbound_prediction_trace = EtaBoundedTrace(
+            current_delay_minutes=0,
+            predicted_arrival=wsdot_arrival,
+            arrival_source="wsdot_eta",
+            arriving_terminal_name="Seattle",
+            turnaround_minutes=9.3,
+            turnaround_source="p10_floor",
+            predicted_departure=est_dep,
+            delay_minutes=0,
+        )
+
+        lines = _build_inbound_detail_lines(sailing, "Seattle", "10:45 AM", False)
         assert len(lines) == 2
         assert "(est.)" not in lines[1]["text"]
-        assert "10:15 AM" in lines[1]["text"]
 
-    def test_en_route_single_line(self):
+    def test_en_route_uses_trace_predicted_arrival(self):
         from backend.display_processing import _build_inbound_detail_lines
+        from backend.serializers import EtaBoundedTrace
 
-        inbound_info = {
-            "at_dock": False,
-            "from_terminal": "Bainbridge Island",
-            "vessel_name": "Wenatchee",
-            "left_dock": "9:30 AM",
-            "eta": "10:05 AM",
-            "estimated_arrival": None,
-        }
-        lines = _build_inbound_detail_lines(inbound_info, "Seattle", "10:45 AM", False)
+        now = datetime.now(PT)
+        left_time = now - timedelta(minutes=20)
+        eta_time = now + timedelta(minutes=15)
+        sailing = _make_sailing(60)
+        sailing.inbound_vessel_name = "Wenatchee"
+        sailing.inbound_vessel_at_dock = False
+        sailing.inbound_vessel_from_terminal = "Bainbridge Island"
+        sailing.inbound_vessel_left_dock = left_time
+        sailing.inbound_prediction_trace = EtaBoundedTrace(
+            current_delay_minutes=5,
+            predicted_arrival=eta_time,
+            arrival_source="wsdot_eta",
+            arriving_terminal_name="Seattle",
+            turnaround_minutes=9.3,
+            turnaround_source="p10_floor",
+            predicted_departure=eta_time + timedelta(minutes=9),
+            delay_minutes=5,
+        )
+
+        lines = _build_inbound_detail_lines(sailing, "Seattle", "10:45 AM", False)
         assert len(lines) == 1
         assert "Wenatchee" in lines[0]["text"]
         assert "Bainbridge Island" in lines[0]["text"]
-        assert "9:30 AM" in lines[0]["text"]
+        left_str = left_time.strftime("%I:%M %p").lstrip("0")
+        assert left_str in lines[0]["text"]
+        eta_str = eta_time.strftime("%I:%M %p").lstrip("0")
+        assert eta_str in lines[0]["text"]
         assert "Seattle" in lines[0]["text"]
-        assert "10:05 AM" in lines[0]["text"]

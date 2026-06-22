@@ -1,3 +1,11 @@
+# Approximate one-way crossing times in minutes.
+# Used to estimate inbound-vessel arrival when WSDOT has not yet issued an ETA
+# (e.g. vessel still at dock on the far side).
+CROSSING_TIME_MINUTES = {
+    "sea-bi": 35,
+    "ed-king": 25,
+}
+
 ROUTES = [
     {
         "name": "Seattle - Bainbridge",  # The display name for the route in the app

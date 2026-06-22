@@ -19,17 +19,28 @@ class TestPredictionReporting:
                             "scheduled_departure": "2026-06-21T13:00:00-07:00",
                             "departing": "Seattle",
                             "arriving": "Bainbridge Island",
-                            "source": "flat_propagation",
-                            "inputs": {"current_vessel_delay_minutes": 7},
                             "delay": 7,
+                            "trace": {
+                                "source": "flat_propagation",
+                                "reason": "at_dock_delay",
+                                "predicted_departure": "2026-06-21T13:07:00-07:00",
+                            },
                         },
                         {
                             "scheduled_departure": "2026-06-21T14:00:00-07:00",
                             "departing": "Bainbridge Island",
                             "arriving": "Seattle",
-                            "source": "eta_bounded",
-                            "inputs": {"current_vessel_delay_minutes": 7},
                             "delay": 5,
+                            "trace": {
+                                "source": "eta_bounded",
+                                "predicted_arrival": "2026-06-21T14:38:00-07:00",
+                                "arrival_source": "wsdot_eta",
+                                "turnaround_minutes": 17,
+                                "turnaround_source": "p75_ceiling",
+                                "predicted_departure": "2026-06-21T14:55:00-07:00",
+                                "delay_minutes": 5,
+                                "arriving_terminal_name": "Seattle",
+                            },
                         },
                     ],
                 }
@@ -44,7 +55,7 @@ class TestPredictionReporting:
 
         assert context is not None
         assert context["vessel_id"] == 101
-        assert context["matched_sailing"]["source"] == "eta_bounded"
+        assert context["matched_sailing"]["trace"]["source"] == "eta_bounded"
         assert len(context["all_vessel_sailings"]) == 2
 
     def test_builds_github_issue_url_with_captured_context(self):
@@ -60,7 +71,9 @@ class TestPredictionReporting:
                 return_value={
                     "vessel_id": 808,
                     "vessel_name": "Walla Walla",
-                    "matched_sailing": {"source": "eta_bounded", "delay": 8},
+                    "matched_sailing": {
+                        "trace": {"source": "eta_bounded", "delay_minutes": 8}
+                    },
                     "all_vessel_sailings": [],
                 },
             ),

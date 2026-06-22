@@ -129,3 +129,67 @@ class TestPredictionReporting:
         assert '"referrer": "https://nextferry.example/"' in body
         assert '"routes"' in body
         assert '"Seattle - Bainbridge Island"' in body
+
+    def test_url_length_limit_drops_routes_when_body_too_large(self):
+        """When the full context would exceed GitHub's URL limit the function
+        falls back to dropping sailings_cache.routes so the URL stays short
+        enough for GitHub to accept."""
+        report_time = datetime(
+            2026, 6, 21, 13, 5, tzinfo=ZoneInfo("America/Los_Angeles")
+        )
+
+        # Build a routes list large enough to push the URL over 8 000 chars.
+        many_sailings = [
+            {
+                "scheduled_time": f"{hour}:00 PM",
+                "vessel_name": "Tokitae",
+                "delay_minutes": delay_idx,
+            }
+            for delay_idx, hour in enumerate(range(1, 21))
+        ]
+        large_routes = [
+            {
+                "route_name": f"Route {n} - Very Long Route Name Here",
+                "schedules": [
+                    {
+                        "departing_terminal_name": f"Terminal {n}",
+                        "arriving_terminal_name": f"Destination {n}",
+                        "sailings": many_sailings,
+                    }
+                ],
+            }
+            for n in range(20)
+        ]
+
+        with (
+            patch("backend.main.current_time", return_value=report_time),
+            patch("backend.main.get_replay_time", return_value=None),
+            patch("backend.main._find_prediction_report_context", return_value=None),
+            patch.object(
+                main,
+                "_sailings_cache",
+                {
+                    "last_updated": "1:00:00 PM",
+                    "cached_at": report_time,
+                    "routes": large_routes,
+                },
+            ),
+        ):
+            issue_url = main._build_prediction_report_url(
+                route_name="sea-bi",
+                departing_terminal="Seattle",
+                arriving_terminal="Bainbridge Island",
+                scheduled_departure="2026-06-21T13:10:00-07:00",
+                displayed_time="1:10 PM → 1:18 PM",
+                time_until="13 min",
+                last_updated="1:00:00 PM",
+            )
+
+        assert len(issue_url) <= 8000
+        parsed = urlparse(issue_url)
+        assert parsed.scheme == "https"
+        body = unquote(parse_qs(parsed.query)["body"][0])
+        # Core context is still present even after trimming.
+        assert '"displayed_time"' in body
+        # Routes were omitted to stay within the limit.
+        assert "routes_omitted" in body

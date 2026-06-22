@@ -313,24 +313,53 @@ def _build_prediction_report_url(
         f"Prediction error: {route_name} {departing_terminal} → "
         f"{arriving_terminal} {scheduled_departure_label}"
     )
-    issue_body = "\n".join(
-        [
-            "## What looked wrong?",
-            "",
-            "<!-- Please briefly describe what you expected to see instead. -->",
-            "",
-            "## Captured app context",
-            "```json",
-            json.dumps(
-                _serialize_report_value(report_context),
-                indent=2,
-                sort_keys=True,
-                ensure_ascii=False,
-            ),
-            "```",
-        ]
-    )
-    return f"{GITHUB_NEW_ISSUE_URL}?{urlencode({'title': issue_title, 'body': issue_body})}"
+
+    # GitHub enforces a URL length limit; build the URL and fall back to
+    # progressively smaller representations when the full context is too long.
+    _GITHUB_URL_MAX_LENGTH = 8000
+
+    def _make_url(ctx: dict, indent: int | None) -> str:
+        body = "\n".join(
+            [
+                "## What looked wrong?",
+                "",
+                "<!-- Please briefly describe what you expected to see instead. -->",
+                "",
+                "## Captured app context",
+                "```json",
+                json.dumps(
+                    _serialize_report_value(ctx),
+                    indent=indent,
+                    sort_keys=True,
+                    ensure_ascii=False,
+                ),
+                "```",
+            ]
+        )
+        return (
+            f"{GITHUB_NEW_ISSUE_URL}?{urlencode({'title': issue_title, 'body': body})}"
+        )
+
+    # 1. Preferred: indented JSON for readability.
+    url = _make_url(report_context, indent=2)
+    if len(url) <= _GITHUB_URL_MAX_LENGTH:
+        return url
+
+    # 2. Compact JSON removes whitespace (~40 % smaller).
+    url = _make_url(report_context, indent=None)
+    if len(url) <= _GITHUB_URL_MAX_LENGTH:
+        return url
+
+    # 3. Drop the full routes listing (largest part) and note the omission.
+    if report_context.get("sailings_cache"):
+        trimmed_cache = {
+            k: v for k, v in report_context["sailings_cache"].items() if k != "routes"
+        }
+        trimmed_cache["routes_omitted"] = "omitted: URL length limit"
+        trimmed_context = {**report_context, "sailings_cache": trimmed_cache}
+    else:
+        trimmed_context = report_context
+    return _make_url(trimmed_context, indent=None)
 
 
 @app.get("/sw.js")

@@ -297,9 +297,10 @@ class TestProcessRoutesForDisplay:
         lines = result[0]["schedules"][0]["sailings"][0]["inbound_detail_lines"]
         assert len(lines) == 2
         assert "Bainbridge Island" in lines[0]["text"]
-        # Second line should have "(est.)" from the trace
+        # Second line should have "(est.)" from the trace and include the predicted departure time
         assert "(est.)" in lines[1]["text"]
-        assert "expected departure" in lines[1]["text"]
+        est_dep_str = est_dep.strftime("%I:%M %p").lstrip("0")
+        assert est_dep_str in lines[1]["text"]
 
     def test_inbound_at_dock_wsdot_eta_preferred_over_estimate(self):
         """When EtaBoundedTrace has arrival_source=wsdot_eta, no (est.) label appears."""
@@ -439,7 +440,8 @@ class TestBuildInboundDetailLines:
         lines = _build_inbound_detail_lines(sailing, "Seattle", "10:45 AM", False)
         assert len(lines) == 2
         assert "(est.)" in lines[1]["text"]
-        assert "expected departure" in lines[1]["text"]
+        est_dep_str = est_dep.strftime("%I:%M %p").lstrip("0")
+        assert est_dep_str in lines[1]["text"]
 
     def test_at_dock_with_wsdot_eta_trace_no_est_label(self):
         from backend.display_processing import _build_inbound_detail_lines

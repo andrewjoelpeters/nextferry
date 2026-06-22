@@ -70,6 +70,24 @@ class TestPredictionReporting:
                 {
                     "last_updated": "1:02:03 PM",
                     "cached_at": report_time,
+                    "routes": [
+                        {
+                            "route_name": "Seattle - Bainbridge Island",
+                            "schedules": [
+                                {
+                                    "departing_terminal_name": "Seattle",
+                                    "arriving_terminal_name": "Bainbridge Island",
+                                    "sailings": [
+                                        {
+                                            "scheduled_time": "1:10 PM",
+                                            "vessel_name": "Walla Walla",
+                                            "delay_minutes": 8,
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
                 },
             ),
         ):
@@ -96,3 +114,5 @@ class TestPredictionReporting:
         assert '"vessel_id": 808' in body
         assert '"displayed_time": "1:10 PM → 1:18 PM"' in body
         assert '"referrer": "https://nextferry.example/"' in body
+        assert '"routes"' in body
+        assert '"Seattle - Bainbridge Island"' in body

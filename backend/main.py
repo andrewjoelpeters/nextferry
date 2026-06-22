@@ -285,6 +285,7 @@ def _build_prediction_report_url(
             {
                 "last_updated": _sailings_cache.get("last_updated"),
                 "cached_at": _sailings_cache.get("cached_at"),
+                "routes": _sailings_cache.get("routes"),
             }
             if _sailings_cache
             else None

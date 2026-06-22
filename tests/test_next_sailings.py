@@ -352,6 +352,18 @@ class TestPropigateDelaysZeroDelay:
             assert s.prediction_trace.source == "flat_propagation"
             assert s.prediction_trace.delay_minutes == 8
             assert s.prediction_trace.current_delay_minutes == 8
+            assert s.prediction_trace.reason == "en_route_delay"
+            assert "departed late" in s.prediction_trace.explanation
+
+    def test_flat_propagation_at_dock_reason(self):
+        """reason='at_dock_delay' is set when explicitly passed."""
+        sailings = [_make_directional_sailing(10)]
+        result = propigate_delays(
+            timedelta(minutes=5), sailings, reason="at_dock_delay"
+        )
+        assert result[0].prediction_trace is not None
+        assert result[0].prediction_trace.reason == "at_dock_delay"
+        assert "dock" in result[0].prediction_trace.explanation
 
     def test_trace_predicted_departure_matches_delay(self):
         """predicted_departure in trace should equal scheduled + delay."""
@@ -394,6 +406,33 @@ class TestEtaBoundedTraces:
             VesselPositionNum=1,
         )
 
+    def _make_at_dock_vessel(self, delay_minutes: int):
+        """Create an at-dock vessel at Seattle, waiting to depart."""
+        now = _now().replace(second=0, microsecond=0)
+        scheduled = now + timedelta(minutes=5)
+        return Vessel(
+            VesselID=99,
+            VesselName="Tacoma",
+            DepartingTerminalID=3,
+            DepartingTerminalName="Seattle",
+            DepartingTerminalAbbrev="SEA",
+            ArrivingTerminalID=7,
+            ArrivingTerminalName="Bainbridge Island",
+            ArrivingTerminalAbbrev="BI",
+            Latitude=47.6,
+            Longitude=-122.3,
+            Speed=0.0,
+            Heading=0,
+            InService=True,
+            AtDock=True,
+            LeftDock=None,
+            Eta=None,
+            ScheduledDeparture=_dt_to_wsdot(scheduled),
+            TimeStamp=_dt_to_wsdot(_now()),
+            OpRouteAbbrev=["sea-bi"],
+            VesselPositionNum=1,
+        )
+
     def test_eta_bounded_sailing_has_eta_bounded_trace(self):
         """The first opposite-direction sailing gets an eta_bounded trace."""
         vessel = self._make_en_route_vessel(delay_minutes=12, eta_offset_minutes=25)
@@ -418,8 +457,10 @@ class TestEtaBoundedTraces:
         assert bi.prediction_trace.source == "eta_bounded"
         assert bi.prediction_trace.predicted_arrival == vessel.eta
         assert bi.prediction_trace.arrival_source == "wsdot_eta"
+        assert bi.prediction_trace.arriving_terminal_name == "Bainbridge Island"
         assert bi.prediction_trace.turnaround_source in ("p10_floor", "p75_ceiling")
         assert bi.prediction_trace.delay_minutes == bi.delay_in_minutes
+        assert "Bainbridge Island" in bi.prediction_trace.explanation
 
     def test_re_propagated_sailings_have_re_propagated_trace(self):
         """Sailings after the ETA-bounded one get re_propagated traces."""
@@ -461,3 +502,50 @@ class TestEtaBoundedTraces:
             sailings[1].prediction_trace.current_delay_minutes
             == sailings[0].delay_in_minutes
         )
+
+    def test_inbound_prediction_trace_en_route(self):
+        """En-route inbound vessel: inbound_prediction_trace mirrors the ETA-bounded trace."""
+        vessel = self._make_en_route_vessel(delay_minutes=12, eta_offset_minutes=25)
+        vessel.delay = timedelta(minutes=12)
+
+        bi_sched = _now().replace(second=0, microsecond=0) + timedelta(minutes=40)
+        bi_sailing = DirectionalSailing(
+            departing_terminal_id=7,
+            arriving_terminal_id=3,
+            departing_terminal_name="Bainbridge Island",
+            arriving_terminal_name="Seattle",
+            scheduled_departure=bi_sched,
+            vessel_name="Tacoma",
+            vessel_position_num=1,
+        )
+        result = get_next_sailings_by_boat({1: [bi_sailing]}, [vessel])
+        bi = next(s for s in result[1] if not s.departed)
+
+        assert bi.inbound_prediction_trace is not None
+        assert bi.inbound_prediction_trace.source == "eta_bounded"
+        assert bi.inbound_prediction_trace.arrival_source == "wsdot_eta"
+        assert bi.inbound_prediction_trace is bi.prediction_trace
+
+    def test_inbound_prediction_trace_at_dock(self):
+        """At-dock inbound vessel: inbound_prediction_trace uses estimated crossing."""
+        vessel = self._make_at_dock_vessel(delay_minutes=0)
+        vessel.delay = timedelta(minutes=0)
+
+        bi_sched = _now().replace(second=0, microsecond=0) + timedelta(minutes=50)
+        bi_sailing = DirectionalSailing(
+            departing_terminal_id=7,
+            arriving_terminal_id=3,
+            departing_terminal_name="Bainbridge Island",
+            arriving_terminal_name="Seattle",
+            scheduled_departure=bi_sched,
+            vessel_name="Tacoma",
+            vessel_position_num=1,
+        )
+        result = get_next_sailings_by_boat({1: [bi_sailing]}, [vessel])
+        bi = next(s for s in result[1] if not s.departed)
+
+        assert bi.inbound_prediction_trace is not None
+        assert bi.inbound_prediction_trace.source == "eta_bounded"
+        assert bi.inbound_prediction_trace.arrival_source == "estimated_crossing"
+        assert bi.inbound_prediction_trace.arriving_terminal_name == "Bainbridge Island"
+        assert "(est.)" in bi.inbound_prediction_trace.explanation

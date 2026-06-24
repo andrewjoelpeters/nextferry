@@ -209,6 +209,47 @@ class TestGetNextSailingsByBoat:
         assert result[1][0].departed is True
         assert result[1][1].departed is False
 
+    def test_en_route_null_fields_no_en_route_annotation(self):
+        """Vessel not at dock but with null LeftDock/ETA/ScheduledDeparture must not
+        annotate a future sailing as en route (issue #81: 'Later Ferry Can't be En Route').
+
+        A vessel with all timing fields null is on an untracked trip.  Matching its
+        direction against a scheduled future sailing and marking that sailing 'en route'
+        would be wrong: the vessel won't be at the departing terminal for that trip.
+        """
+        # Vessel is en route (not at dock, moving) but all timing fields are null,
+        # simulating the WSDOT null-field edge case.
+        vessel = Vessel(
+            VesselID=32,
+            VesselName="Tacoma",
+            DepartingTerminalID=3,
+            DepartingTerminalName="Seattle",
+            DepartingTerminalAbbrev="SEA",
+            ArrivingTerminalID=7,
+            ArrivingTerminalName="Bainbridge Island",
+            ArrivingTerminalAbbrev="BI",
+            Latitude=47.60,
+            Longitude=-122.46,
+            Speed=18.0,
+            Heading=270,
+            InService=True,
+            AtDock=False,
+            LeftDock=None,
+            Eta=None,
+            ScheduledDeparture=None,
+            TimeStamp=_dt_to_wsdot(_now()),
+            OpRouteAbbrev=["sea-bi"],
+            VesselPositionNum=1,
+        )
+        # Future sailing from the same terminal (Seattle) — this must NOT be marked
+        # en route since the vessel has no timing data to confirm it's on this trip.
+        sailings = {1: [_make_directional_sailing(10)]}
+        result = get_next_sailings_by_boat(sailings, [vessel])
+        first = result[1][0]
+        assert first.vessel_at_dock is None, (
+            "Future sailing must not be annotated en route when vessel has null timing data"
+        )
+
 
 class TestGetDirectionalSchedules:
     def test_groups_by_direction(self):

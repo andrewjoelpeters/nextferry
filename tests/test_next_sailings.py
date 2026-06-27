@@ -1,6 +1,9 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
+
+import backend.next_sailings as next_sailings
 from backend.next_sailings import (
     get_directional_schedules,
     get_next_sailings_by_boat,
@@ -17,6 +20,13 @@ from backend.serializers import (
 )
 
 PT = ZoneInfo("America/Los_Angeles")
+
+
+@pytest.fixture(autouse=True)
+def clear_recent_departed_sailings():
+    next_sailings._recent_departed_sailings.clear()
+    yield
+    next_sailings._recent_departed_sailings.clear()
 
 
 def _now():
@@ -249,6 +259,92 @@ class TestGetNextSailingsByBoat:
         assert first.vessel_at_dock is None, (
             "Future sailing must not be annotated en route when vessel has null timing data"
         )
+
+    def test_recent_departed_sailing_persists_across_refresh(self):
+        departure_time = _now().replace(second=0, microsecond=0) - timedelta(minutes=5)
+        vessel = _make_vessel(at_dock=False, scheduled_departure=departure_time)
+        departed_time = vessel.scheduled_departure
+        assert departed_time is not None
+
+        departed_sailing = DirectionalSailing(
+            departing_terminal_id=3,
+            arriving_terminal_id=7,
+            departing_terminal_name="Seattle",
+            arriving_terminal_name="Bainbridge Island",
+            scheduled_departure=departed_time,
+            vessel_name="Walla Walla",
+            vessel_position_num=1,
+        )
+        later_sailing = DirectionalSailing(
+            departing_terminal_id=7,
+            arriving_terminal_id=3,
+            departing_terminal_name="Bainbridge Island",
+            arriving_terminal_name="Seattle",
+            scheduled_departure=departed_time + timedelta(minutes=60),
+            vessel_name="Walla Walla",
+            vessel_position_num=1,
+        )
+
+        first_refresh = get_next_sailings_by_boat(
+            {1: [departed_sailing, later_sailing]}, [vessel]
+        )
+        assert first_refresh[1][0].departed is True
+
+        # Simulate the next refresh losing the current vessel match entirely.
+        second_refresh = get_next_sailings_by_boat({1: [later_sailing]}, [])
+
+        assert len(second_refresh[1]) == 2
+        assert second_refresh[1][0].departed is True
+        assert second_refresh[1][0].scheduled_departure == departed_time
+        assert (
+            second_refresh[1][1].scheduled_departure
+            == later_sailing.scheduled_departure
+        )
+
+    def test_cached_departure_does_not_mark_skipped_sailing_departed(self):
+        departure_time = _now().replace(second=0, microsecond=0) - timedelta(minutes=5)
+        vessel = _make_vessel(at_dock=False, scheduled_departure=departure_time)
+        departed_time = vessel.scheduled_departure
+        assert departed_time is not None
+
+        departed_sailing = DirectionalSailing(
+            departing_terminal_id=3,
+            arriving_terminal_id=7,
+            departing_terminal_name="Seattle",
+            arriving_terminal_name="Bainbridge Island",
+            scheduled_departure=departed_time,
+            vessel_name="Walla Walla",
+            vessel_position_num=1,
+        )
+        skipped_sailing = DirectionalSailing(
+            departing_terminal_id=7,
+            arriving_terminal_id=3,
+            departing_terminal_name="Bainbridge Island",
+            arriving_terminal_name="Seattle",
+            scheduled_departure=departed_time + timedelta(minutes=25),
+            vessel_name="Walla Walla",
+            vessel_position_num=1,
+        )
+        later_sailing = DirectionalSailing(
+            departing_terminal_id=7,
+            arriving_terminal_id=3,
+            departing_terminal_name="Bainbridge Island",
+            arriving_terminal_name="Seattle",
+            scheduled_departure=departed_time + timedelta(minutes=85),
+            vessel_name="Walla Walla",
+            vessel_position_num=1,
+        )
+
+        get_next_sailings_by_boat({1: [departed_sailing, later_sailing]}, [vessel])
+        refreshed = get_next_sailings_by_boat({1: [skipped_sailing, later_sailing]}, [])
+
+        assert refreshed[1][0].departed is True
+        assert refreshed[1][0].scheduled_departure == departed_time
+        assert (
+            refreshed[1][1].scheduled_departure == skipped_sailing.scheduled_departure
+        )
+        assert refreshed[1][1].departed is False
+        assert refreshed[1][2].departed is False
 
 
 class TestGetDirectionalSchedules:

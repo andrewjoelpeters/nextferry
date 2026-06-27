@@ -544,6 +544,56 @@ class TestEtaBoundedTraces:
             == sailings[0].delay_in_minutes
         )
 
+    def test_eta_bounded_skips_opposite_departures_before_eta(self):
+        """Ignore opposite-terminal departures that happen before vessel ETA."""
+        vessel = self._make_en_route_vessel(delay_minutes=10, eta_offset_minutes=30)
+        vessel.delay = timedelta(minutes=10)
+
+        now = _now().replace(second=0, microsecond=0)
+        opposite_before_eta = DirectionalSailing(
+            departing_terminal_id=7,
+            arriving_terminal_id=3,
+            departing_terminal_name="Bainbridge Island",
+            arriving_terminal_name="Seattle",
+            scheduled_departure=now + timedelta(minutes=5),
+            vessel_name="Tacoma",
+            vessel_position_num=1,
+        )
+        same_terminal = DirectionalSailing(
+            departing_terminal_id=3,
+            arriving_terminal_id=7,
+            departing_terminal_name="Seattle",
+            arriving_terminal_name="Bainbridge Island",
+            scheduled_departure=now + timedelta(minutes=60),
+            vessel_name="Tacoma",
+            vessel_position_num=1,
+        )
+        opposite_after_eta = DirectionalSailing(
+            departing_terminal_id=7,
+            arriving_terminal_id=3,
+            departing_terminal_name="Bainbridge Island",
+            arriving_terminal_name="Seattle",
+            scheduled_departure=now + timedelta(minutes=90),
+            vessel_name="Tacoma",
+            vessel_position_num=1,
+        )
+
+        result = get_next_sailings_by_boat(
+            {1: [opposite_before_eta, same_terminal, opposite_after_eta]}, [vessel]
+        )
+        sailings = [s for s in result[1] if not s.departed]
+
+        assert sailings[0].prediction_trace is not None
+        assert sailings[0].prediction_trace.source == "flat_propagation"
+        assert sailings[0].delay_in_minutes == 10
+
+        assert sailings[1].prediction_trace is not None
+        assert sailings[1].prediction_trace.source == "flat_propagation"
+        assert sailings[1].delay_in_minutes == 10
+
+        assert sailings[2].prediction_trace is not None
+        assert sailings[2].prediction_trace.source == "eta_bounded"
+
     def test_inbound_prediction_trace_en_route(self):
         """En-route inbound vessel: inbound_prediction_trace mirrors the ETA-bounded trace."""
         vessel = self._make_en_route_vessel(delay_minutes=12, eta_offset_minutes=25)

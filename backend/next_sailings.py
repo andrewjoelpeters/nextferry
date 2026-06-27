@@ -343,6 +343,7 @@ def get_next_sailings_by_boat(
                     not s.departed
                     and s.departing_terminal_id != vessel.departing_terminal_id
                     and s.scheduled_departure
+                    and s.scheduled_departure >= vessel.eta
                 ):
                     route_abbrev = _route_abbrev_for_terminal(s.departing_terminal_id)
                     if route_abbrev:

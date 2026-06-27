@@ -24,15 +24,70 @@ logger = logging.getLogger(__name__)
 
 
 CACHED_DELAYS = {}
+RECENT_DEPARTURE_WINDOW_MINUTES = 30
 
 # Stores the most recent prediction for every sailing across all vessels.
 # Keyed by vessel_id → dict with vessel info and list of sailing entries.
 # Overwritten each cache cycle (~30s).
 _last_predictions: dict[int, dict] = {}
 
+# Stores the most recent departed sailing per vessel position so a transient
+# WSDOT schedule/vessel mismatch does not immediately drop the just-departed
+# sailing from the display.
+_recent_departed_sailings: dict[int, DirectionalSailing] = {}
+
 
 def get_last_predictions() -> dict[int, dict]:
     return _last_predictions
+
+
+def _sailing_key(
+    sailing: DirectionalSailing,
+) -> tuple[int, int, int, datetime | None]:
+    """Return a stable key for a scheduled sailing."""
+    return (
+        sailing.vessel_position_num,
+        sailing.departing_terminal_id,
+        sailing.arriving_terminal_id,
+        sailing.scheduled_departure,
+    )
+
+
+def _is_recent_departed_sailing(sailing: DirectionalSailing) -> bool:
+    return (
+        sailing.departed
+        and sailing.scheduled_departure
+        and minutes_since(sailing.scheduled_departure)
+        <= RECENT_DEPARTURE_WINDOW_MINUTES
+    )
+
+
+def _prune_recent_departed_sailings() -> None:
+    stale_positions = [
+        position_num
+        for position_num, sailing in _recent_departed_sailings.items()
+        if not _is_recent_departed_sailing(sailing)
+    ]
+    for position_num in stale_positions:
+        del _recent_departed_sailings[position_num]
+
+
+def _remember_departed_sailing(sailing: DirectionalSailing) -> None:
+    if _is_recent_departed_sailing(sailing):
+        _recent_departed_sailings[sailing.vessel_position_num] = sailing.model_copy()
+
+
+def _prepend_recent_departed_sailing(
+    vessel_position_num: int, sailings: list[DirectionalSailing]
+) -> list[DirectionalSailing]:
+    cached_departed = _recent_departed_sailings.get(vessel_position_num)
+    if cached_departed is None:
+        return sailings
+
+    if any(_sailing_key(s) == _sailing_key(cached_departed) for s in sailings):
+        return sailings
+
+    return [cached_departed, *sailings]
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +369,7 @@ def _annotate_with_vessel_state(
 def get_next_sailings_by_boat(
     schedule_by_boat: dict[int, list[DirectionalSailing]], route_vessels: list[Vessel]
 ) -> dict[int, list[DirectionalSailing]]:
+    _prune_recent_departed_sailings()
     vessels_by_position = {v.vessel_position_num: v for v in route_vessels}
     result = {}
 
@@ -461,7 +517,12 @@ def get_next_sailings_by_boat(
                     )
             _last_predictions[vessel.vessel_id] = vessel_entry
 
-        result[position_num] = next_sailings
+        if next_sailings and next_sailings[0].departed:
+            _remember_departed_sailing(next_sailings[0])
+
+        result[position_num] = _prepend_recent_departed_sailing(
+            position_num, next_sailings
+        )
 
     return result
 

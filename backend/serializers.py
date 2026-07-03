@@ -3,6 +3,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, computed_field, field_validator
 
+from .sailing_id import make_sailing_id
 from .utils import parse_ms_date
 
 
@@ -283,6 +284,14 @@ class DirectionalSailing(RouteSailing):
     arriving_terminal_id: int
     departing_terminal_name: str
     arriving_terminal_name: str
+
+    @computed_field
+    @property
+    def sailing_id(self) -> str | None:
+        if self.scheduled_departure is None:
+            return None
+        hhmm = self.scheduled_departure.strftime("%H%M")
+        return make_sailing_id(hhmm, self.departing_terminal_id, self.arriving_terminal_id)
 
     def to_route_sailing(self) -> RouteSailing:
         return RouteSailing(

@@ -593,6 +593,7 @@ class TestEtaBoundedTraces:
 
         assert sailings[2].prediction_trace is not None
         assert sailings[2].prediction_trace.source == "eta_bounded"
+
     def test_inbound_prediction_trace_en_route(self):
         """En-route inbound vessel: inbound_prediction_trace mirrors the ETA-bounded trace."""
         vessel = self._make_en_route_vessel(delay_minutes=12, eta_offset_minutes=25)

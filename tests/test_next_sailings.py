@@ -474,8 +474,8 @@ class TestEtaBoundedTraces:
             VesselPositionNum=1,
         )
 
-    def test_eta_bounded_sailing_has_eta_bounded_trace(self):
-        """The first opposite-direction sailing gets an eta_bounded trace."""
+    def test_flat_propagation_is_default_with_wsdot_note(self):
+        """The first opposite-direction sailing stays flat_propagation but gets a wsdot_note."""
         vessel = self._make_en_route_vessel(delay_minutes=12, eta_offset_minutes=25)
         vessel.delay = timedelta(minutes=12)
 
@@ -492,19 +492,21 @@ class TestEtaBoundedTraces:
         )
         result = get_next_sailings_by_boat({1: [bi_sailing]}, [vessel])
         sailings = result[1]
-        # Find non-departed bi sailing
         bi = next(s for s in sailings if not s.departed)
+        # Prediction is still flat_propagation (not overridden by ETA)
         assert bi.prediction_trace is not None
-        assert bi.prediction_trace.source == "eta_bounded"
-        assert bi.prediction_trace.predicted_arrival == vessel.eta
-        assert bi.prediction_trace.arrival_source == "wsdot_eta"
-        assert bi.prediction_trace.arriving_terminal_name == "Bainbridge Island"
-        assert bi.prediction_trace.turnaround_source in ("p10_floor", "p75_ceiling")
-        assert bi.prediction_trace.delay_minutes == bi.delay_in_minutes
-        assert "Bainbridge Island" in bi.prediction_trace.explanation
+        assert bi.prediction_trace.source == "flat_propagation"
+        assert bi.delay_in_minutes == 12
+        # WSDOT note is set when ETA predicts earlier departure
+        assert bi.wsdot_note is not None
+        assert "WSDOT" in bi.wsdot_note
+        assert "min delay" in bi.wsdot_note
+        # Inbound prediction trace still shows ETA-based reasoning
+        assert bi.inbound_prediction_trace is not None
+        assert bi.inbound_prediction_trace.source == "eta_bounded"
 
-    def test_re_propagated_sailings_have_re_propagated_trace(self):
-        """Sailings after the ETA-bounded one get re_propagated traces."""
+    def test_all_sailings_stay_flat_propagation(self):
+        """All sailings remain flat_propagation; no re_propagated traces."""
         vessel = self._make_en_route_vessel(delay_minutes=12, eta_offset_minutes=25)
         vessel.delay = timedelta(minutes=12)
 
@@ -530,22 +532,16 @@ class TestEtaBoundedTraces:
         result = get_next_sailings_by_boat({1: [bi_first, bi_second]}, [vessel])
         sailings = [s for s in result[1] if not s.departed]
 
-        # First opposite-direction: eta_bounded
-        assert sailings[0].prediction_trace is not None
-        assert sailings[0].prediction_trace.source == "eta_bounded"
-        # Second: re_propagated from the bounded delay
-        assert sailings[1].prediction_trace is not None
-        assert sailings[1].prediction_trace.source == "re_propagated"
-        assert (
-            sailings[1].prediction_trace.delay_minutes == sailings[0].delay_in_minutes
-        )
-        assert (
-            sailings[1].prediction_trace.current_delay_minutes
-            == sailings[0].delay_in_minutes
-        )
+        for s in sailings:
+            assert s.prediction_trace is not None
+            assert s.prediction_trace.source == "flat_propagation"
+            assert s.delay_in_minutes == 12
+        # No re_propagated traces
+        for s in sailings:
+            assert s.prediction_trace.source != "re_propagated"
 
-    def test_eta_bounded_skips_opposite_departures_before_eta(self):
-        """Ignore opposite-terminal departures that happen before vessel ETA."""
+    def test_opposite_departures_before_eta_no_note(self):
+        """Opposite-terminal departures before vessel ETA skip the WSDOT note."""
         vessel = self._make_en_route_vessel(delay_minutes=10, eta_offset_minutes=30)
         vessel.delay = timedelta(minutes=10)
 
@@ -583,19 +579,17 @@ class TestEtaBoundedTraces:
         )
         sailings = [s for s in result[1] if not s.departed]
 
-        assert sailings[0].prediction_trace is not None
-        assert sailings[0].prediction_trace.source == "flat_propagation"
-        assert sailings[0].delay_in_minutes == 10
+        # All sailings are flat_propagation
+        for s in sailings:
+            assert s.prediction_trace is not None
+            assert s.prediction_trace.source == "flat_propagation"
+            assert s.delay_in_minutes == 10
 
-        assert sailings[1].prediction_trace is not None
-        assert sailings[1].prediction_trace.source == "flat_propagation"
-        assert sailings[1].delay_in_minutes == 10
-
-        assert sailings[2].prediction_trace is not None
-        assert sailings[2].prediction_trace.source == "eta_bounded"
+        # The one after ETA has a wsdot_note
+        assert sailings[2].wsdot_note is not None
 
     def test_inbound_prediction_trace_en_route(self):
-        """En-route inbound vessel: inbound_prediction_trace mirrors the ETA-bounded trace."""
+        """En-route inbound vessel: inbound_prediction_trace is set from ETA computation."""
         vessel = self._make_en_route_vessel(delay_minutes=12, eta_offset_minutes=25)
         vessel.delay = timedelta(minutes=12)
 
@@ -615,7 +609,8 @@ class TestEtaBoundedTraces:
         assert bi.inbound_prediction_trace is not None
         assert bi.inbound_prediction_trace.source == "eta_bounded"
         assert bi.inbound_prediction_trace.arrival_source == "wsdot_eta"
-        assert bi.inbound_prediction_trace is bi.prediction_trace
+        # inbound_prediction_trace is separate from prediction_trace now
+        assert bi.inbound_prediction_trace is not bi.prediction_trace
 
     def test_inbound_prediction_trace_at_dock(self):
         """At-dock inbound vessel: inbound_prediction_trace uses estimated crossing."""

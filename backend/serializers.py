@@ -291,7 +291,9 @@ class DirectionalSailing(RouteSailing):
         if self.scheduled_departure is None:
             return None
         hhmm = self.scheduled_departure.strftime("%H%M")
-        return make_sailing_id(hhmm, self.departing_terminal_id, self.arriving_terminal_id)
+        return make_sailing_id(
+            hhmm, self.departing_terminal_id, self.arriving_terminal_id
+        )
 
     def to_route_sailing(self) -> RouteSailing:
         return RouteSailing(

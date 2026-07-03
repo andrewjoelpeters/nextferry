@@ -50,20 +50,20 @@ def _build_vessel_detail_lines(
             if docked_at:
                 dock_str = f"Docked at {docked_at}"
                 if docked_duration:
-                    dock_str += f" ({docked_duration})"
+                    dock_str += f" ({docked_duration} ago)"
             else:
                 dock_str = "Docked"
             lines.append({"text": dock_str, "css_class": ""})
             if predicted_departure:
                 lines.append(
                     {
-                        "text": f"Predicted departure: {predicted_departure}",
+                        "text": f"Predicted departure from {departing_terminal_name} at {predicted_departure}",
                         "css_class": "detail-overdue",
                     }
                 )
             lines.append(
                 {
-                    "text": f"Expected to depart {minutes_overdue}m ago — status uncertain",
+                    "text": f"Expected to depart {departing_terminal_name} {minutes_overdue}m ago — status uncertain",
                     "css_class": "overdue-alert",
                 }
             )
@@ -71,7 +71,7 @@ def _build_vessel_detail_lines(
             if docked_at:
                 dock_str = f"Docked at {docked_at}"
                 if docked_duration:
-                    dock_str += f" ({docked_duration})"
+                    dock_str += f" ({docked_duration} ago)"
             else:
                 dock_str = "Docked"
             if predicted_departure:

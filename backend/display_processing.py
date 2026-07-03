@@ -385,6 +385,11 @@ def process_routes_for_display(
                     if estimated_departure
                     else "N/A"
                 )
+                departed_time_str = (
+                    sailing.vessel_left_dock.strftime("%I:%M %p").lstrip("0")
+                    if sailing.vessel_left_dock
+                    else estimated_time_str
+                )
                 has_delay = (
                     sailing.delay_in_minutes is not None
                     and sailing.delay_in_minutes != 0
@@ -420,6 +425,7 @@ def process_routes_for_display(
                     "time_until": time_until,
                     "scheduled_time": scheduled_time_str,
                     "estimated_departure": estimated_time_str,
+                    "departed_display_time": departed_time_str,
                     "display_time": display_time,
                     "display_time_html": display_time_html,
                     "delay_minutes": delay_minutes,

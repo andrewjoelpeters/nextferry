@@ -413,7 +413,9 @@ def get_next_sailings_by_boat(
                         )
                         if crossing and p10 and vessel.scheduled_departure:
                             inbound_dep = vessel.scheduled_departure + timedelta(
-                                minutes=vessel_first_delay or 0
+                                minutes=vessel_first_delay
+                                if vessel_first_delay is not None
+                                else 0
                             )
                             est_arrival = inbound_dep + timedelta(minutes=crossing)
                             s.inbound_prediction_trace = EtaBoundedTrace(

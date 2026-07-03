@@ -6,7 +6,7 @@ from .config import ROUTES
 from .database import get_departed_sailing_space
 from .fill_predictor import fill_predictor
 from .replay import current_time
-from .serializers import RouteSchedule
+from .serializers import EtaBoundedTrace, RouteSchedule
 from .utils import format_delay_text, format_time_until
 
 logger = logging.getLogger(__name__)
@@ -18,6 +18,162 @@ def _get_route_abbrev(departing_terminal_id: int) -> str:
         if departing_terminal_id in route["terminals"]:
             return route["route_name"]
     return "unknown"
+
+
+def _build_vessel_detail_lines(
+    vessel_info: dict,
+    departing_terminal_name: str,
+    arriving_terminal_name: str,
+    departed: bool,
+) -> list[dict]:
+    """Build pre-formatted detail lines for the outbound vessel's live status.
+
+    Returns a list of dicts with keys:
+      - ``text``: the display string
+      - ``css_class``: optional extra CSS class(es) for the span (empty string = none)
+    """
+    lines: list[dict] = []
+    if not vessel_info:
+        return lines
+
+    key = vessel_info.get("vessel_status_key")
+
+    if key == "at_dock":
+        docked_at = vessel_info.get("docked_at")
+        docked_duration = vessel_info.get("docked_duration")
+        predicted_departure = vessel_info.get("predicted_departure")
+        overdue = vessel_info.get("overdue")
+        minutes_overdue = vessel_info.get("minutes_overdue")
+
+        if overdue:
+            # Show dock time without expected departure, then two overdue lines
+            if docked_at:
+                dock_str = f"Docked at {docked_at}"
+                if docked_duration:
+                    dock_str += f" ({docked_duration} ago)"
+            else:
+                dock_str = "Docked"
+            lines.append({"text": dock_str, "css_class": ""})
+            if predicted_departure:
+                lines.append(
+                    {
+                        "text": f"Predicted departure from {departing_terminal_name} at {predicted_departure}",
+                        "css_class": "detail-overdue",
+                    }
+                )
+            lines.append(
+                {
+                    "text": f"Expected to depart {departing_terminal_name} {minutes_overdue}m ago — status uncertain",
+                    "css_class": "overdue-alert",
+                }
+            )
+        else:
+            if docked_at:
+                dock_str = f"Docked at {docked_at}"
+                if docked_duration:
+                    dock_str += f" ({docked_duration} ago)"
+            else:
+                dock_str = "Docked"
+            if predicted_departure:
+                dock_str += f", expected to depart {departing_terminal_name} at {predicted_departure}"
+            lines.append({"text": dock_str, "css_class": ""})
+
+    elif key == "en_route":
+        left_dock = vessel_info.get("left_dock")
+        departure_delay = vessel_info.get("departure_delay")
+
+        if left_dock:
+            # Departed sailings left from the departing terminal; upcoming sailings
+            # have the vessel crossing from the arriving terminal toward us.
+            other_terminal = (
+                departing_terminal_name if departed else arriving_terminal_name
+            )
+            line = f"Left {other_terminal}: {left_dock}"
+            if departure_delay:
+                line += f" ({departure_delay})"
+            lines.append({"text": line, "css_class": ""})
+
+    return lines
+
+
+def _build_inbound_detail_lines(
+    sailing,
+    departing_terminal_name: str,
+    estimated_departure: str,
+    departed: bool,
+) -> list[dict]:
+    """Build pre-formatted detail lines for the inbound vessel's live status.
+
+    Uses ``sailing.inbound_prediction_trace`` (built by ``next_sailings.py``) so
+    the (est.) / official-ETA distinction is handled by the trace, not here.
+
+    Returns a list of dicts with keys:
+      - ``text``: the display string
+      - ``css_class``: optional extra CSS class(es) for the span (empty string = none)
+    """
+    lines: list[dict] = []
+    if not sailing.inbound_vessel_name:
+        return lines
+
+    def fmt(dt):
+        return dt.strftime("%I:%M %p").lstrip("0") if dt else None
+
+    from_terminal = sailing.inbound_vessel_from_terminal or ""
+    vessel_name = sailing.inbound_vessel_name
+
+    if sailing.inbound_vessel_at_dock:
+        # Line 1: vessel is docked at the other terminal with its predicted departure
+        dep_str = None
+        if sailing.inbound_vessel_scheduled_departure:
+            delay_mins = sailing.inbound_vessel_delay_minutes or 0
+            dep_str = fmt(
+                sailing.inbound_vessel_scheduled_departure
+                + timedelta(minutes=delay_mins)
+            )
+        line1 = f"Currently docked at {from_terminal}"
+        if dep_str:
+            line1 += f", expected departure {dep_str}"
+        lines.append({"text": line1, "css_class": ""})
+
+        # Line 2: bridge through to the departure the user cares about.
+        # inbound_prediction_trace.explanation already encodes "(est.)" vs official
+        # ETA via arrival_source, so no branching is needed here.
+        if sailing.inbound_prediction_trace and not departed:
+            lines.append(
+                {
+                    "text": sailing.inbound_prediction_trace.explanation,
+                    "css_class": "",
+                }
+            )
+        elif not departed:
+            lines.append(
+                {
+                    "text": f"Expected departure from {departing_terminal_name} at {estimated_departure}",
+                    "css_class": "",
+                }
+            )
+    else:
+        # En-route: single line with vessel name, departure, and ETA
+        line = f"{vessel_name} left {from_terminal}"
+        left_dock_str = fmt(sailing.inbound_vessel_left_dock)
+        if left_dock_str:
+            line += f" at {left_dock_str}"
+
+        # Use predicted_arrival from the trace (EtaBoundedTrace) when available;
+        # the trace also carries the authoritative terminal name.
+        trace = sailing.inbound_prediction_trace
+        if trace and isinstance(trace, EtaBoundedTrace):
+            eta_str = fmt(trace.predicted_arrival)
+            arriving = trace.arriving_terminal_name
+        else:
+            eta_str = fmt(sailing.inbound_vessel_eta)
+            arriving = departing_terminal_name
+        if eta_str:
+            line += f", arriving {arriving} ~{eta_str}"
+
+        lines.append({"text": line, "css_class": ""})
+
+    return lines
 
 
 def _format_vessel_status(sailing) -> dict:
@@ -246,35 +402,19 @@ def process_routes_for_display(
                     display_time = scheduled_time_str
                     display_time_html = scheduled_time_str
 
-                # Inbound vessel info (preceding sailing heading toward this terminal)
-                inbound_info = None
-                if sailing.inbound_vessel_name:
-
-                    def _fmt_time(dt):
-                        return dt.strftime("%I:%M %p").lstrip("0") if dt else None
-
-                    # Compute predicted departure for inbound vessel
-                    inbound_predicted_departure = None
-                    if (
-                        sailing.inbound_vessel_scheduled_departure
-                        and sailing.inbound_vessel_delay_minutes is not None
-                    ):
-                        inbound_predicted_departure = (
-                            sailing.inbound_vessel_scheduled_departure
-                            + timedelta(minutes=sailing.inbound_vessel_delay_minutes)
-                        )
-
-                    inbound_info = {
-                        "vessel_name": sailing.inbound_vessel_name,
-                        "from_terminal": sailing.inbound_vessel_from_terminal,
-                        "at_dock": sailing.inbound_vessel_at_dock,
-                        "left_dock": _fmt_time(sailing.inbound_vessel_left_dock),
-                        "eta": _fmt_time(sailing.inbound_vessel_eta),
-                        "scheduled_departure": _fmt_time(
-                            sailing.inbound_vessel_scheduled_departure
-                        ),
-                        "predicted_departure": _fmt_time(inbound_predicted_departure),
-                    }
+                vessel_info = _format_vessel_status(sailing)
+                vessel_detail_lines = _build_vessel_detail_lines(
+                    vessel_info,
+                    schedule.departing_terminal_name,
+                    schedule.arriving_terminal_name,
+                    sailing.departed,
+                )
+                inbound_detail_lines = _build_inbound_detail_lines(
+                    sailing,
+                    schedule.departing_terminal_name,
+                    estimated_time_str,
+                    sailing.departed,
+                )
 
                 sailing_data = {
                     "time_until": time_until,
@@ -288,8 +428,9 @@ def process_routes_for_display(
                     "status_class": final_status,
                     "departed": sailing.departed,
                     "has_delay": has_delay,
-                    "vessel_info": _format_vessel_status(sailing),
-                    "inbound_info": inbound_info,
+                    "vessel_info": vessel_info,
+                    "vessel_detail_lines": vessel_detail_lines,
+                    "inbound_detail_lines": inbound_detail_lines,
                     "capacity": capacity,
                     "departing_terminal_name": schedule.departing_terminal_name,
                     "scheduled_departure_iso": (

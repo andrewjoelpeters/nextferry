@@ -1,5 +1,6 @@
 """Tests for user metrics tracking."""
 
+from datetime import UTC
 from unittest.mock import patch
 
 from backend.database import get_metrics_data, init_db, insert_page_view
@@ -53,11 +54,20 @@ class TestHashVisitor:
 
 
 class TestInsertAndQuery:
+    def _ts(self, days_ago: int, time_str: str = "10:00:00") -> str:
+        """Return an ISO timestamp N days ago in -07:00 offset."""
+        from datetime import datetime, timedelta
+
+        dt = datetime.now(UTC) - timedelta(days=days_ago)
+        return dt.replace(hour=10, minute=0, second=0, microsecond=0).strftime(
+            "%Y-%m-%dT%H:%M:%S-07:00"
+        )
+
     def test_insert_and_retrieve(self, tmp_path):
         db_path = _setup_test_db(tmp_path)
         with patch("backend.database._db_path", db_path):
             insert_page_view(
-                timestamp="2026-03-26T10:00:00-07:00",
+                timestamp=self._ts(1),
                 path="/",
                 visitor_hash="abc123",
                 device_type="Mobile",
@@ -66,7 +76,7 @@ class TestInsertAndQuery:
                 referrer=None,
             )
             insert_page_view(
-                timestamp="2026-03-26T10:05:00-07:00",
+                timestamp=self._ts(1, "10:05:00"),
                 path="/sailings-tab",
                 visitor_hash="abc123",
                 device_type="Mobile",
@@ -75,7 +85,7 @@ class TestInsertAndQuery:
                 referrer=None,
             )
             insert_page_view(
-                timestamp="2026-03-26T11:00:00-07:00",
+                timestamp=self._ts(2),
                 path="/",
                 visitor_hash="def456",
                 device_type="Desktop",

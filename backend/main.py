@@ -436,7 +436,7 @@ async def get_ferry_positions():
             else:
                 data["DockedSince"] = None
             # Add computed delay fields (not in WSDOT response)
-            if v.delay:
+            if v.delay is not None:
                 delay_minutes = datetime_to_minutes(v.delay)
                 data["DelayMinutes"] = delay_minutes
                 if v.scheduled_departure:

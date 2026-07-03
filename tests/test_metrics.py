@@ -1,5 +1,6 @@
 """Tests for user metrics tracking."""
 
+from datetime import UTC
 from unittest.mock import patch
 
 from backend.database import get_metrics_data, init_db, insert_page_view
@@ -55,9 +56,9 @@ class TestHashVisitor:
 class TestInsertAndQuery:
     def _ts(self, days_ago: int, time_str: str = "10:00:00") -> str:
         """Return an ISO timestamp N days ago in -07:00 offset."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
-        dt = datetime.now(timezone.utc) - timedelta(days=days_ago)
+        dt = datetime.now(UTC) - timedelta(days=days_ago)
         return dt.replace(hour=10, minute=0, second=0, microsecond=0).strftime(
             "%Y-%m-%dT%H:%M:%S-07:00"
         )

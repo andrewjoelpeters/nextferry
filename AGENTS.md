@@ -83,12 +83,13 @@ Or use the convenience script:
 ./scripts/agent-check.sh
 ```
 
-For frontend changes, start the app and test in a browser:
+Test all changes with replay mode (deterministic, no API key needed):
 ```bash
-# With replay mode (no live API needed):
 NEXTFERRY_SCENARIO=scenarios/test.json uvicorn backend.main:app --reload
+```
 
-# With live API:
+Start the app with the live API (requires `WSDOT_API_KEY`):
+```bash
 uvicorn backend.main:app --reload
 ```
 

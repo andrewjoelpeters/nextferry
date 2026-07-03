@@ -6,7 +6,7 @@ from .config import ROUTES
 from .database import get_departed_sailing_space
 from .fill_predictor import fill_predictor
 from .replay import current_time
-from .serializers import RouteSchedule
+from .serializers import EtaBoundedTrace, RouteSchedule
 from .utils import format_delay_text, format_time_until
 
 logger = logging.getLogger(__name__)
@@ -162,7 +162,7 @@ def _build_inbound_detail_lines(
         # Use predicted_arrival from the trace (EtaBoundedTrace) when available;
         # the trace also carries the authoritative terminal name.
         trace = sailing.inbound_prediction_trace
-        if trace and hasattr(trace, "predicted_arrival"):
+        if trace and isinstance(trace, EtaBoundedTrace):
             eta_str = fmt(trace.predicted_arrival)
             arriving = trace.arriving_terminal_name
         else:

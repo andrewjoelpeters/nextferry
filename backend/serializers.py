@@ -277,6 +277,8 @@ class RouteSailing(BaseModel):
     inbound_vessel_delay_minutes: int | None = None
     # Structured prediction for the inbound vessel's arrival at this terminal
     inbound_prediction_trace: PredictionTrace | None = None
+    # WSDOT ETA note: when ETA predicts earlier departure than flat propagation
+    wsdot_note: str | None = None
 
 
 class DirectionalSailing(RouteSailing):
@@ -318,6 +320,7 @@ class DirectionalSailing(RouteSailing):
                     "inbound_vessel_scheduled_departure",
                     "inbound_vessel_delay_minutes",
                     "inbound_prediction_trace",
+                    "wsdot_note",
                 }
             )
         )

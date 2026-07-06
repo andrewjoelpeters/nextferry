@@ -13,9 +13,9 @@ from .serializers import (
     EtaBoundedTrace,
     FlatPropagationTrace,
     RawDirectionalSchedule,
-    RePropagatedTrace,
     RouteSchedule,
     Vessel,
+    _fmt,
 )
 from .utils import datetime_to_minutes, minutes_since
 from .wsdot_client import get_schedule_today, get_vessel_positions
@@ -334,11 +334,13 @@ def get_next_sailings_by_boat(
         if next_sailings and vessel:
             _annotate_with_vessel_state(next_sailings[0], vessel)
 
-        # Step 2: ETA-bounded override for first opposite-terminal sailing
-        # Only fires when vessel is en-route with an ETA
+        # Step 2: WSDOT ETA note for first opposite-terminal sailing
+        # Flat propagation is always the default. When WSDOT ETA would predict
+        # an earlier departure than flat propagation, surface it as a note
+        # rather than overriding the prediction.
         if vessel and not vessel.at_dock and vessel.eta and vessel.delay is not None:
             delay_minutes = datetime_to_minutes(vessel.delay)
-            for i, s in enumerate(next_sailings):
+            for s in next_sailings:
                 if (
                     not s.departed
                     and s.departing_terminal_id != vessel.departing_terminal_id
@@ -347,29 +349,23 @@ def get_next_sailings_by_boat(
                 ):
                     route_abbrev = _route_abbrev_for_terminal(s.departing_terminal_id)
                     if route_abbrev:
-                        trace = predict_eta_bounded_delay(
+                        eta_trace = predict_eta_bounded_delay(
                             delay_minutes,
                             vessel.eta,
                             s.scheduled_departure,
                             route_abbrev,
                             arriving_terminal_name=s.departing_terminal_name,
                         )
-                        if trace is not None:
-                            s.delay_in_minutes = trace.delay_minutes
-                            s.prediction_trace = trace
-                            # Re-propagate the improved prediction to later sailings
-                            for later in next_sailings[i + 1 :]:
-                                later.delay_in_minutes = trace.delay_minutes
-                                later.prediction_trace = RePropagatedTrace(
-                                    current_delay_minutes=trace.delay_minutes,
-                                    predicted_departure=(
-                                        later.scheduled_departure
-                                        + timedelta(minutes=trace.delay_minutes)
-                                        if later.scheduled_departure
-                                        else None
-                                    ),
-                                    delay_minutes=trace.delay_minutes,
+                        if eta_trace is not None:
+                            if eta_trace.delay_minutes < s.delay_in_minutes:
+                                s.wsdot_note = (
+                                    f"WSDOT expects departure at "
+                                    f"{_fmt(eta_trace.predicted_departure)} "
+                                    f"(+{eta_trace.delay_minutes} min), "
+                                    f"but observed delay suggests "
+                                    f"{s.delay_in_minutes} min delay."
                                 )
+                            s.inbound_prediction_trace = eta_trace
                     break
 
         # Annotate the first opposite-direction sailing with info about the
@@ -432,12 +428,8 @@ def get_next_sailings_by_boat(
                     else:
                         s.inbound_vessel_left_dock = vessel.left_dock
                         s.inbound_vessel_eta = vessel.eta
-                        # For an en-route inbound vessel the EtaBoundedTrace on this
-                        # sailing already encodes the arrival + turnaround reasoning.
-                        if s.prediction_trace is not None and isinstance(
-                            s.prediction_trace, EtaBoundedTrace
-                        ):
-                            s.inbound_prediction_trace = s.prediction_trace
+                        # inbound_prediction_trace was set in Step 2 above
+                        # (the ETA-bounded trace computed for the WSDOT note)
                     break
 
         # Populate debug predictions from sailing traces for this vessel

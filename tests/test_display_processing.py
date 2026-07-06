@@ -198,6 +198,22 @@ class TestProcessRoutesForDisplay:
         assert displayed["departed"] is True
 
     @patch("backend.display_processing.get_departed_sailing_space")
+    def test_departed_sailing_prefers_actual_departure_time_for_main_text(
+        self, mock_get_space
+    ):
+        mock_get_space.return_value = None
+        sailing = _make_sailing(-10, delay=5)
+        sailing.departed = True
+        sailing.vessel_left_dock = sailing.scheduled_departure + timedelta(minutes=5)
+        route = _make_route([sailing])
+        result = process_routes_for_display([route])
+
+        displayed = result[0]["schedules"][0]["sailings"][0]
+        actual_str = sailing.vessel_left_dock.strftime("%I:%M %p").lstrip("0")
+        assert displayed["departed_display_time"] != displayed["scheduled_time"]
+        assert displayed["departed_display_time"] == actual_str
+
+    @patch("backend.display_processing.get_departed_sailing_space")
     def test_departed_sailing_no_snapshot_has_no_capacity(self, mock_get_space):
         mock_get_space.return_value = None
         sailing = _make_sailing(-10)

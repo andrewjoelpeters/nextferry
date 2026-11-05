@@ -61,3 +61,19 @@ jobs:
 
       - name: Run tests
         run: uv run pytest tests/ -v --tb=short
+
+      - name: Build static site
+        run: uv run python scripts/build_static_site.py
+
+  worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Test Worker
+        run: node --test worker/index.test.mjs

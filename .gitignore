@@ -6,3 +6,6 @@
 .DS_Store
 data/
 backend/model_training/__pycache__/
+live/
+site/
+.wrangler/

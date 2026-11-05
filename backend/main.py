@@ -18,7 +18,6 @@ from fastapi.templating import Jinja2Templates
 
 from .data_collector import collect_data
 from .database import (
-    get_docked_since,
     get_metrics_data,
     get_sailing_event_count,
     get_snapshot_count,
@@ -26,6 +25,7 @@ from .database import (
 )
 from .display_processing import process_routes_for_display
 from .fill_predictor import fill_predictor
+from .live_data import build_ferry_data
 from .metrics import track_request
 from .next_sailings import (
     CACHED_DELAYS,
@@ -35,7 +35,6 @@ from .next_sailings import (
 )
 from .replay import activate_replay, current_time, get_replay_time
 from .sailing_space import get_sailing_space_lookup
-from .utils import datetime_to_minutes
 
 logger = logging.getLogger(__name__)
 GITHUB_NEW_ISSUE_URL = "https://github.com/andrewjoelpeters/nextferry/issues/new"
@@ -423,32 +422,7 @@ async def get_map_tab(request: Request):
 async def get_ferry_positions():
     """Return enriched ferry position data as JSON for the map"""
     try:
-        ferry_data = get_vessels_with_delays()
-        result = []
-        for v in ferry_data:
-            data = v.model_dump(by_alias=True)
-            # Add docked_since from DB snapshots when WSDOT Eta is null
-            if v.at_dock and v.eta is None and v.scheduled_departure:
-                docked_since = get_docked_since(
-                    v.vessel_id, v.scheduled_departure.isoformat()
-                )
-                data["DockedSince"] = docked_since.isoformat() if docked_since else None
-            else:
-                data["DockedSince"] = None
-            # Add computed delay fields (not in WSDOT response)
-            if v.delay is not None:
-                delay_minutes = datetime_to_minutes(v.delay)
-                data["DelayMinutes"] = delay_minutes
-                if v.scheduled_departure:
-                    predicted = v.scheduled_departure + timedelta(minutes=delay_minutes)
-                    data["PredictedDeparture"] = predicted.isoformat()
-                else:
-                    data["PredictedDeparture"] = None
-            else:
-                data["DelayMinutes"] = None
-                data["PredictedDeparture"] = None
-            result.append(data)
-        return result
+        return build_ferry_data(get_vessels_with_delays())
     except Exception as e:
         return {"error": str(e)}
 

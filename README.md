@@ -52,6 +52,40 @@ This will start the FastAPI development server. You can then access the applicat
 
 The main page will display the current sailing information. You can switch between the "Sailings" and "Map" tabs to see the next sailings or the live vessel map.
 
+### Static live collector
+
+The collector builds the live JSON/HTML fragments that can be served from Cloudflare R2 instead of running the full web app continuously. It writes local copies by default:
+
+```bash
+uv run python -m backend.collector --once --output-dir live --no-upload
+```
+
+To publish to R2, set the `R2_*` variables from `.env.example` and run it without `--no-upload`:
+
+```bash
+uv run python -m backend.collector
+```
+
+It refreshes every 60 seconds by default and writes history to SQLite every 5th cycle.
+
+### Cloudflare deployment
+
+The Worker serves the static app shell and maps the existing frontend endpoints to the R2 live objects:
+
+- `/next-sailings` → `live/next-sailings.html`
+- `/ferry-data` → `live/ferry-data.json`
+- `/live/*` → the matching R2 object
+
+Build the static assets, create the R2 bucket, and deploy:
+
+```bash
+uv run python scripts/build_static_site.py
+npx wrangler r2 bucket create nextferry-live
+npx wrangler deploy
+```
+
+Set `R2_BUCKET=nextferry-live` for the collector. Update the bucket name in `wrangler.toml` if you use a different one.
+
 ## Deployment
 
 This application is configured for deployment on [Railway](https://railway.app/). The `railway.toml` file contains the build and deploy configuration.

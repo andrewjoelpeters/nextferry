@@ -512,9 +512,12 @@ def get_next_sailings_for_route(
     return directional_sailings
 
 
-def get_next_sailings() -> list[RouteSchedule]:
+def get_next_sailings(
+    vessel_positions: list[Vessel] | None = None,
+) -> list[RouteSchedule]:
     _last_predictions.clear()
-    vessel_positions = get_vessels_with_delays()
+    if vessel_positions is None:
+        vessel_positions = get_vessels_with_delays()
     all_next_sailings = []
     for route in ROUTES:
         next_sailings = get_next_sailings_for_route(vessel_positions, route)

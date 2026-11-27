@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import time
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ import boto3
 from botocore.config import Config
 from fastapi.templating import Jinja2Templates
 
+from .config import CROSSING_TIME_MINUTES, ROUTES
 from .data_collector import (
     flatten_sailing_space,
     next_two_departures_per_route,
@@ -33,9 +35,9 @@ from .display_processing import process_routes_for_display
 from .fill_predictor import fill_predictor
 from .live_data import build_ferry_data
 from .next_sailings import get_next_sailings, get_vessels_with_delays
-from .replay import activate_replay, current_time
+from .replay import PT, activate_replay, current_time
 from .sailing_space import build_sailing_space_lookup
-from .wsdot_client import get_sailing_space
+from .wsdot_client import get_sailing_space, get_schedule_today
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +51,59 @@ CONTENT_TYPES = {
     "meta.json": "application/json",
 }
 CACHE_CONTROL = "public, max-age=30, stale-while-revalidate=30"
-HISTORY_EVERY_CYCLES = 5
+ACTIVE_SECONDS = 60
+IDLE_SECONDS = 600
+PRE_DEPARTURE_SECONDS = 600
+HISTORY_SECONDS = 300
+
+
+def poll_interval(now, vessels, schedules_by_route):
+    # ScheduleToday rolls over at 3 AM Pacific. Its next service day may
+    # contain a departure right at the boundary.
+    local_now = now.astimezone(PT)
+    rollover = local_now.replace(hour=3, minute=0, second=0, microsecond=0)
+    if rollover <= local_now:
+        rollover += timedelta(days=1)
+    next_departure = rollover.timestamp()
+
+    for route in ROUTES:
+        route_name = route["route_name"]
+        for vessel in vessels:
+            if route_name not in vessel.route_name:
+                continue
+            if not vessel.at_dock:
+                return ACTIVE_SECONDS
+            if vessel.scheduled_departure and not vessel.left_dock:
+                # An overdue boat still waiting to leave is also active.
+                next_departure = min(
+                    next_departure, vessel.scheduled_departure.timestamp()
+                )
+
+        directions = schedules_by_route[route["route_id"]]
+        terminals = {d.departing_terminal_id for d in directions if d.times}
+        if not set(route["terminals"]).issubset(terminals):
+            return ACTIVE_SECONDS
+        for direction in directions:
+            for sailing in direction.times:
+                departure = sailing.scheduled_departure
+                if departure is None:
+                    return ACTIVE_SECONDS
+                seconds = departure.timestamp() - now.timestamp()
+                if seconds >= -60 * CROSSING_TIME_MINUTES[route_name]:
+                    next_departure = min(next_departure, departure.timestamp())
+
+    until_warmup = next_departure - now.timestamp() - PRE_DEPARTURE_SECONDS
+    if until_warmup <= 0:
+        return ACTIVE_SECONDS
+    return min(IDLE_SECONDS, until_warmup)
 
 
 def collect_once(*, persist_history: bool = True) -> dict[str, Any]:
+    artifacts, _, _ = _collect_cycle(persist_history)
+    return artifacts
+
+
+def _collect_cycle(persist_history):
     """Fetch WSDOT data and build the live artifacts.
 
     Raises if vessel or sailing data cannot be fetched so the caller can keep
@@ -67,7 +118,10 @@ def collect_once(*, persist_history: bool = True) -> dict[str, Any]:
         terminals = []
 
     space_lookup = build_sailing_space_lookup(terminals)
-    routes_data = get_next_sailings(vessel_positions=vessels)
+    schedules = {r["route_id"]: get_schedule_today(r["route_id"]) for r in ROUTES}
+    routes_data = get_next_sailings(
+        vessel_positions=vessels, schedules_by_route=schedules
+    )
     processed_routes = process_routes_for_display(routes_data, space_lookup)
 
     generated_at = current_time()
@@ -80,6 +134,7 @@ def collect_once(*, persist_history: bool = True) -> dict[str, Any]:
     )
     ferry_data = build_ferry_data(vessels)
 
+    history_written = False
     if persist_history:
         try:
             store_vessels_to_db(vessels)
@@ -89,12 +144,13 @@ def collect_once(*, persist_history: bool = True) -> dict[str, Any]:
                     flat for space in terminals for flat in flatten_sailing_space(space)
                 ]
                 store_sailing_space_to_db(next_two_departures_per_route(flattened))
+            history_written = True
         except Exception:
             logger.exception(
                 "Failed to persist history; live artifacts are still valid"
             )
 
-    return {
+    artifacts = {
         "ferry-data.json": ferry_data,
         "next-sailings.html": html,
         "meta.json": {
@@ -104,6 +160,7 @@ def collect_once(*, persist_history: bool = True) -> dict[str, Any]:
             "vessel_count": len(ferry_data),
         },
     }
+    return artifacts, poll_interval(generated_at, vessels, schedules), history_written
 
 
 def _artifact_body(content: Any) -> bytes:
@@ -198,8 +255,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--interval",
         type=int,
-        default=60,
-        help="Seconds between collection cycles (default: 60)",
+        help="Override adaptive polling with a fixed interval in seconds",
     )
     parser.add_argument(
         "--output-dir",
@@ -241,14 +297,20 @@ def main(argv: list[str] | None = None) -> None:
     else:
         logger.info(f"R2 upload disabled; writing to {args.output_dir}")
 
-    cycle = 0
+    next_history = 0.0
     while True:
+        started = time.monotonic()
+        interval = ACTIVE_SECONDS
         try:
-            persist_history = not args.no_history and cycle % HISTORY_EVERY_CYCLES == 0
-            artifacts = collect_once(persist_history=persist_history)
+            artifacts, suggested_interval, history_written = _collect_cycle(
+                not args.no_history and started >= next_history
+            )
+            if history_written:
+                next_history = started + HISTORY_SECONDS
             write_local(artifacts, args.output_dir)
             if publisher:
                 publisher.publish(artifacts)
+            interval = suggested_interval
             logger.info(
                 "Published %s vessels across %s routes",
                 artifacts["meta.json"]["vessel_count"],
@@ -259,8 +321,10 @@ def main(argv: list[str] | None = None) -> None:
 
         if args.once:
             break
-        cycle += 1
-        time.sleep(max(1, args.interval))
+        if args.interval is not None:
+            time.sleep(max(1, args.interval))
+        else:
+            time.sleep(max(1, started + interval - time.monotonic()))
 
 
 if __name__ == "__main__":

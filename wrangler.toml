@@ -1,0 +1,14 @@
+name = "nextferry"
+main = "worker/index.mjs"
+compatibility_date = "2026-01-01"
+
+[assets]
+directory = "./site"
+binding = "ASSETS"
+
+[vars]
+LIVE_PREFIX = "live"
+
+[[r2_buckets]]
+binding = "LIVE_BUCKET"
+bucket_name = "nextferry-live"

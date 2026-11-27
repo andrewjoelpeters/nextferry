@@ -498,9 +498,10 @@ def get_directional_schedules(
 
 
 def get_next_sailings_for_route(
-    vessel_positions, route_config
+    vessel_positions, route_config, route_schedule=None
 ) -> list[DirectionalSailing]:
-    route_schedule = get_schedule_today(route_config["route_id"])
+    if route_schedule is None:
+        route_schedule = get_schedule_today(route_config["route_id"])
     route_vessels = get_route_vessels(vessel_positions, route_config)
     schedule_by_boat = get_route_schedule_by_boat(route_schedule)
     next_sailings_by_boat = get_next_sailings_by_boat(schedule_by_boat, route_vessels)
@@ -512,12 +513,22 @@ def get_next_sailings_for_route(
     return directional_sailings
 
 
-def get_next_sailings() -> list[RouteSchedule]:
+def get_next_sailings(
+    vessel_positions: list[Vessel] | None = None,
+    schedules_by_route=None,
+) -> list[RouteSchedule]:
     _last_predictions.clear()
-    vessel_positions = get_vessels_with_delays()
+    if vessel_positions is None:
+        vessel_positions = get_vessels_with_delays()
     all_next_sailings = []
     for route in ROUTES:
-        next_sailings = get_next_sailings_for_route(vessel_positions, route)
+        next_sailings = get_next_sailings_for_route(
+            vessel_positions,
+            route,
+            schedules_by_route[route["route_id"]]
+            if schedules_by_route is not None
+            else None,
+        )
         all_next_sailings.append(
             RouteSchedule(
                 route_name=[route.get("name")],

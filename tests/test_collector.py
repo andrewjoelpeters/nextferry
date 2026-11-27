@@ -111,22 +111,38 @@ def test_poll_interval_follows_service_across_midnight():
         ]
         for route in ROUTES
     }
-    assert poll_interval(now, [], schedules) == 600
-    assert poll_interval(now + timedelta(minutes=33), [], schedules) == 120
-    assert poll_interval(now + timedelta(minutes=35), [], schedules) == 60
-    assert poll_interval(now + timedelta(minutes=50), [], schedules) == 60
+
+    def interval(at, vessels):
+        return poll_interval(at, vessels, schedules, at)
+
+    assert interval(now, []) == 600
+    assert interval(now + timedelta(minutes=33), []) == 120
+    assert interval(now + timedelta(minutes=35), []) == 60
+    assert interval(now + timedelta(minutes=50), []) == 60
 
     late = SimpleNamespace(route_name=["ed-king"], at_dock=False)
-    assert poll_interval(now + timedelta(hours=2), [late], schedules) == 60
+    assert interval(now + timedelta(hours=2), [late]) == 60
+    late.route_name = ["muk-cl"]
+    assert interval(now, [late]) == 60
+    late.route_name = []
+    assert interval(now, [late]) == 60
+    late.route_name = ["ed-king"]
     late.at_dock = True
     late.scheduled_departure = now
     late.left_dock = None
-    assert poll_interval(now + timedelta(hours=2), [late], schedules) == 60
+    assert interval(now + timedelta(hours=2), [late]) == 60
 
     # The current timetable ends before the next service day's first trip.
-    assert poll_interval(now.replace(hour=2, minute=48), [], schedules) == 120
+    assert interval(now.replace(hour=2, minute=48), []) == 120
+    before_rollover = now.replace(hour=2, minute=59, second=59)
+    assert (
+        poll_interval(
+            before_rollover + timedelta(seconds=2), [], schedules, before_rollover
+        )
+        == 60
+    )
     schedules[6] = []
-    assert poll_interval(now, [], schedules) == 60
+    assert interval(now, []) == 60
 
 
 def test_history_uses_elapsed_time_through_idle_and_active_polls(monkeypatch, tmp_path):

@@ -57,13 +57,19 @@ PRE_DEPARTURE_SECONDS = 600
 HISTORY_SECONDS = 300
 
 
-def poll_interval(now, vessels, schedules_by_route):
+def poll_interval(now, vessels, schedules_by_route, schedule_requested_at):
+    # The map shows the full in-service fleet, including unassigned vessels.
+    if any(not vessel.at_dock for vessel in vessels):
+        return ACTIVE_SECONDS
+
     # ScheduleToday rolls over at 3 AM Pacific. Its next service day may
     # contain a departure right at the boundary.
-    local_now = now.astimezone(PT)
+    local_now = schedule_requested_at.astimezone(PT)
     rollover = local_now.replace(hour=3, minute=0, second=0, microsecond=0)
     if rollover <= local_now:
         rollover += timedelta(days=1)
+    if now.timestamp() >= rollover.timestamp():
+        return ACTIVE_SECONDS
     next_departure = rollover.timestamp()
 
     for route in ROUTES:
@@ -71,8 +77,6 @@ def poll_interval(now, vessels, schedules_by_route):
         for vessel in vessels:
             if route_name not in vessel.route_name:
                 continue
-            if not vessel.at_dock:
-                return ACTIVE_SECONDS
             if vessel.scheduled_departure and not vessel.left_dock:
                 # An overdue boat still waiting to leave is also active.
                 next_departure = min(
@@ -118,6 +122,7 @@ def _collect_cycle(persist_history):
         terminals = []
 
     space_lookup = build_sailing_space_lookup(terminals)
+    schedule_requested_at = current_time()
     schedules = {r["route_id"]: get_schedule_today(r["route_id"]) for r in ROUTES}
     routes_data = get_next_sailings(
         vessel_positions=vessels, schedules_by_route=schedules
@@ -160,7 +165,11 @@ def _collect_cycle(persist_history):
             "vessel_count": len(ferry_data),
         },
     }
-    return artifacts, poll_interval(generated_at, vessels, schedules), history_written
+    return (
+        artifacts,
+        poll_interval(generated_at, vessels, schedules, schedule_requested_at),
+        history_written,
+    )
 
 
 def _artifact_body(content: Any) -> bytes:

@@ -66,7 +66,7 @@ To publish to R2, set the `R2_*` variables from `.env.example` and run it withou
 uv run python -m backend.collector
 ```
 
-It refreshes every 60 seconds by default and writes history to SQLite every 5th cycle.
+The collector polls every minute during crossings, near departures, or when a route schedule is unavailable. During gaps in service it polls every ten minutes, waking ten minutes before the next scheduled departure or the 3 AM Pacific service-day change. Use `--interval SECONDS` to force a fixed cadence. SQLite history is sampled on the first poll and then on the first poll after five minutes have elapsed.
 
 ### Cloudflare deployment
 

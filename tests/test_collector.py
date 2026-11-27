@@ -92,3 +92,87 @@ def test_collect_once_persists_history(replay_collector):
     collect_once(persist_history=True)
 
     assert get_snapshot_count() == 2
+
+
+def test_poll_interval_follows_service_across_midnight():
+    from datetime import datetime, timedelta
+    from types import SimpleNamespace
+
+    from backend.collector import poll_interval
+    from backend.config import ROUTES
+    from backend.replay import PT
+
+    now = datetime(2026, 11, 27, 23, 50, tzinfo=PT)
+    departure = SimpleNamespace(scheduled_departure=now + timedelta(minutes=45))
+    schedules = {
+        route["route_id"]: [
+            SimpleNamespace(departing_terminal_id=t, times=[departure])
+            for t in route["terminals"]
+        ]
+        for route in ROUTES
+    }
+
+    def interval(at, vessels):
+        return poll_interval(at, vessels, schedules, at)
+
+    assert interval(now, []) == 600
+    assert interval(now + timedelta(minutes=33), []) == 120
+    assert interval(now + timedelta(minutes=35), []) == 60
+    assert interval(now + timedelta(minutes=50), []) == 60
+
+    late = SimpleNamespace(route_name=["ed-king"], at_dock=False)
+    assert interval(now + timedelta(hours=2), [late]) == 60
+    late.route_name = ["muk-cl"]
+    assert interval(now, [late]) == 60
+    late.route_name = []
+    assert interval(now, [late]) == 60
+    late.route_name = ["ed-king"]
+    late.at_dock = True
+    late.scheduled_departure = now
+    late.left_dock = None
+    assert interval(now + timedelta(hours=2), [late]) == 60
+
+    # The current timetable ends before the next service day's first trip.
+    assert interval(now.replace(hour=2, minute=48), []) == 120
+    before_rollover = now.replace(hour=2, minute=59, second=59)
+    assert (
+        poll_interval(
+            before_rollover + timedelta(seconds=2), [], schedules, before_rollover
+        )
+        == 60
+    )
+    schedules[6] = []
+    assert interval(now, []) == 60
+
+
+def test_history_uses_elapsed_time_through_idle_and_active_polls(monkeypatch, tmp_path):
+    from backend import collector
+
+    elapsed = 0
+    attempts = []
+    intervals = iter([600, 60, 60, 60, 60, 60, 60])
+
+    def cycle(due):
+        attempts.append((elapsed, due))
+        return (
+            {"meta.json": {"route_count": 2, "vessel_count": 1}},
+            next(intervals),
+            due,
+        )
+
+    def sleep(seconds):
+        nonlocal elapsed
+        elapsed += seconds
+        if elapsed > 900:
+            raise StopIteration
+
+    monkeypatch.delenv("NEXTFERRY_SCENARIO", raising=False)
+    monkeypatch.setattr(collector, "_collect_cycle", cycle)
+    monkeypatch.setattr(collector, "write_local", lambda *_: None)
+    monkeypatch.setattr(collector, "init_db", lambda: None)
+    monkeypatch.setattr(collector.fill_predictor, "load", lambda: None)
+    monkeypatch.setattr(collector.time, "monotonic", lambda: elapsed)
+    monkeypatch.setattr(collector.time, "sleep", sleep)
+    with pytest.raises(StopIteration):
+        collector.main(["--no-upload"])
+    assert [seconds for seconds, due in attempts if due] == [0, 600, 900]
